@@ -1,9 +1,11 @@
 """US cash session phases from the actual NYSE calendar (DST, holidays, early closes)."""
 from datetime import datetime, timedelta, timezone
 from enum import Enum
+from zoneinfo import ZoneInfo
 
 import exchange_calendars as xcals
 
+NEW_YORK = ZoneInfo("America/New_York")
 NYSE = xcals.get_calendar("XNYS")
 FLATTEN_LEAD = timedelta(minutes=15)
 
@@ -23,7 +25,7 @@ def session_phase(instant: datetime) -> SessionPhase:
     if instant.tzinfo is None or instant.utcoffset() is None:
         raise ValueError("A timezone-aware datetime is required")
     utc = instant.astimezone(timezone.utc)
-    ny_date = utc.astimezone(__import__("zoneinfo").ZoneInfo("America/New_York")).date()
+    ny_date = utc.astimezone(NEW_YORK).date()
     if not NYSE.is_session(ny_date):
         return SessionPhase.CLOSED
     session_open = NYSE.session_open(ny_date).to_pydatetime()
@@ -34,6 +36,3 @@ def session_phase(instant: datetime) -> SessionPhase:
         return SessionPhase.FLATTEN
     return SessionPhase.CLOSED
 
-
-from zoneinfo import ZoneInfo
-NEW_YORK = ZoneInfo("America/New_York")
