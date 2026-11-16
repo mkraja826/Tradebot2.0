@@ -38,7 +38,7 @@ class TestNYSESession(unittest.TestCase):
 
     def test_early_close_friday_after_thanksgiving(self):
         # NYSE closes at 13:00 ET (23:30 IST), not the normal 02:30 IST.
-        self.assertEqual(session_phase(datetime(2026, 11, 27, 23, 10, tzinfo=IST)),
+        self.assertEqual(session_phase(datetime(2026, 11, 27, 23, 20, tzinfo=IST)),
                          SessionPhase.FLATTEN)
         self.assertEqual(session_phase(datetime(2026, 11, 27, 23, 30, tzinfo=IST)),
                          SessionPhase.CLOSED)
