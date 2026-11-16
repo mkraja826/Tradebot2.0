@@ -1,12 +1,11 @@
-"""US cash-session schedule with daylight saving handled by IANA timezones."""
-from datetime import datetime, time
+"""US cash session phases from the actual NYSE calendar (DST, holidays, early closes)."""
+from datetime import datetime, timedelta, timezone
 from enum import Enum
-from zoneinfo import ZoneInfo
 
-NEW_YORK = ZoneInfo("America/New_York")
-OPEN = time(9, 30)
-ENTRY_CUTOFF = time(15, 45)
-CLOSE = time(16, 0)
+import exchange_calendars as xcals
+
+NYSE = xcals.get_calendar("XNYS")
+FLATTEN_LEAD = timedelta(minutes=15)
 
 
 class SessionPhase(str, Enum):
@@ -16,15 +15,25 @@ class SessionPhase(str, Enum):
 
 
 def session_phase(instant: datetime) -> SessionPhase:
-    """Input must be timezone-aware. End-of-day flatten begins at 15:45 NY."""
+    """Trading only during NYSE cash hours, flatten in final 15 minutes.
+
+    IMPORTANT: CLOSED does not mean positions may be left overnight.
+    The executor must continue flatten retries and raise alerts after close.
+    """
     if instant.tzinfo is None or instant.utcoffset() is None:
         raise ValueError("A timezone-aware datetime is required")
-    ny = instant.astimezone(NEW_YORK)
-    if ny.weekday() >= 5:
+    utc = instant.astimezone(timezone.utc)
+    ny_date = utc.astimezone(__import__("zoneinfo").ZoneInfo("America/New_York")).date()
+    if not NYSE.is_session(ny_date):
         return SessionPhase.CLOSED
-    local = ny.time().replace(tzinfo=None)
-    if OPEN <= local < ENTRY_CUTOFF:
+    session_open = NYSE.session_open(ny_date).to_pydatetime()
+    session_close = NYSE.session_close(ny_date).to_pydatetime()
+    if session_open <= utc < session_close - FLATTEN_LEAD:
         return SessionPhase.TRADING
-    if ENTRY_CUTOFF <= local < CLOSE:
+    if session_close - FLATTEN_LEAD <= utc < session_close:
         return SessionPhase.FLATTEN
     return SessionPhase.CLOSED
+
+
+from zoneinfo import ZoneInfo
+NEW_YORK = ZoneInfo("America/New_York")
