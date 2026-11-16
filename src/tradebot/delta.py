@@ -25,7 +25,7 @@ def is_btc_contract(product: dict) -> bool:
     """Only BTC-labelled futures and option contracts are admitted."""
     symbol = str(product.get("symbol") or "").upper()
     kind = product.get("contract_type")
-    return ("BTC" in symbol and kind in {
+    return ((symbol.startswith("BTC") or symbol.startswith(("C-BTC-", "P-BTC-"))) and kind in {
         "perpetual_futures", "futures", "call_options", "put_options"
     } and product.get("state") == "live")
 
@@ -35,7 +35,7 @@ class DeltaDemo:
                  allow_orders: bool = False):
         self.api_key, self.api_secret = api_key, api_secret
         self.allow_orders = allow_orders
-        self.base_url = DEMO_API  # Never accept a caller-provided host.
+        # Endpoint intentionally not configurable: no live account support.
 
     def _request(self, method: str, path: str, *, params: dict | None = None,
                  payload: dict | None = None, auth: bool = False) -> Any:
@@ -53,7 +53,7 @@ class DeltaDemo:
                             "signature": signature(self.api_secret, method, stamp, path, query, body)})
         if method.upper() != "GET" and not self.allow_orders:
             raise DeltaError("Order mutations disabled. Set ENABLE_DEMO_ORDERS=true only for demo.")
-        req = Request(self.base_url + path + query, headers=headers,
+        req = Request(DEMO_API + path + query, headers=headers,
                       data=body.encode() if body else None, method=method.upper())
         try:
             with urlopen(req, timeout=8) as response:
@@ -107,3 +107,44 @@ class DeltaDemo:
                    "order_type": "market_order", "reduce_only": reduce_only,
                    "client_order_id": client_order_id}
         return self._request("POST", "/v2/orders", payload=payload, auth=True)["result"]
+
+    @property
+    def base_url(self) -> str:
+        """Read-only demo URL. Callers cannot change it to a production host."""
+        return DEMO_API
+
+    def open_orders(self) -> list[dict]:
+        """All currently open/pending orders; abort if response is not a list.
+
+        Note: the demo account must be dedicated to this bot. Pagination support
+        is required before production-scale order loads.
+        """
+        reply = self._request(
+            "GET", "/v2/orders", params={"states": "open,pending"}, auth=True)
+        result = reply["result"]
+        if not isinstance(result, list):
+            raise DeltaError("Unexpected open orders response")
+        if (reply.get("meta") or {}).get("after"):
+            raise DeltaError("Open-order pagination not supported; refusing closeout")
+        return result
+
+    def cancel_product_orders(self, product_id: int) -> None:
+        if type(product_id) is not int or product_id <= 0:
+            raise ValueError("Product ID must be a positive integer")
+        self._request("DELETE", "/v2/orders/all", payload={
+            "product_id": product_id,
+            "cancel_limit_orders": True,
+            "cancel_stop_orders": True,
+            "cancel_reduce_only_orders": True,
+        }, auth=True)
+
+    def order_by_client_id(self, client_order_id: str) -> dict:
+        from urllib.parse import quote
+        if not client_order_id or not all(c.isalnum() or c in "-_" for c in client_order_id):
+            raise ValueError("Invalid client order ID")
+        result = self._request(
+            "GET", "/v2/orders/client_order_id/" + quote(client_order_id),
+            auth=True)
+        if not isinstance(result.get("result"), dict):
+            raise DeltaError("Unexpected order result")
+        return result["result"]
