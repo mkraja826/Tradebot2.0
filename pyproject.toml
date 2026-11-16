@@ -4,10 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tradebot2"
-version = "0.1.0"
+version = "0.2.0"
 description = "Demo-only autonomous BTC derivatives trading bot foundation"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = ["exchange-calendars>=4.10,<5"]
 
 [project.scripts]
 tradebot = "tradebot.cli:main"
