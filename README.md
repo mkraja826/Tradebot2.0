@@ -14,7 +14,7 @@ A Bitcoin-only AI futures and options bot project for the **Delta Exchange India
 ### M1 — Foundation
 
 - Locked Delta India demo REST host: `https://cdn-ind.testnet.deltaex.org`.
-- Python package, BTC contract validation, signed REST requests, research-only OpenAI planner, JSONL decision journal, GitHub Actions unit tests.
+- Python package, BTC contract validation, signed REST requests, research-only AI planner (now routed through Top Billing), JSONL decision journal, GitHub Actions unit tests.
 - Non-GET requests blocked unless the exchange client is explicitly initialized with trading permission. The CLI *never* enables that permission.
 
 ### M2 — Execution prototype
@@ -45,6 +45,15 @@ A Bitcoin-only AI futures and options bot project for the **Delta Exchange India
 - `tradebot reconcile`: fetches all paginated BTC fills in the requested lookback window and inserts them into an idempotent SQLite ledger with unique exchange fill IDs. `tradebot ledger`: reports confirmed fill counts and fees grouped by settlement currency.
 - **The ledger does NOT yet calculate realized P&L, win rate, funding-adjusted returns or learning performance.** Net-equity observations are stored separately, never presented as realized strategy profits. The AI strategy-updating and independent trading outcome benchmarks remain upcoming milestones.
 
+### M5 — Cost-conscious Top Billing AI integration (code ready, not authenticated)
+
+- **One AI model only:** `tb-deepseek-v4-1-flash` via `https://api.topbilling.in/v1/chat/completions`. No higher-priced model, no fallback requests or automatic second opinions.
+- Credentials are read from `TB_API_KEY` **only at runtime**. A live API key must never be stored in source control, pasted into GitHub issues, written to test fixtures, or printed in logs.
+- `tradebot ai-check` only fetches `/v1/models`; it does not request a billable completion. The token-generating commands are `preview` and `run`.
+- The selected model does not support provider-enforced structured output according to Top Billing's conformance tests. The planner requests a plain JSON object as text and validates it locally; malformed responses stop the decision.
+- Model calls cap `max_completion_tokens` to 2,048; AI request IDs and billed token counts (if returned) are journaled for cost evaluation. Configure **per-key spend caps** in Top Billing as a second control, since prompt tokens and retries can vary.
+- **No real credential is configured in the repository or CI.** Configure a freshly rotated key on the host running the bot, not through chat. No actual Top Billing calls have been made during this implementation.
+
 ## Setup
 
 Python 3.11+, install with:
@@ -64,7 +73,7 @@ tradebot snapshot --output data/btc-market.json
 
 ### Demo balances and optional AI preview
 
-Generate **demo-only** API credentials from the Delta Exchange India testnet, put them in a local environment or secret manager (never in Git). The AI preview also needs an OpenAI API key and a chat model that supports JSON responses.
+Generate **demo-only** API credentials from the Delta Exchange India testnet, put them in a local environment or secret manager (never in Git). The AI preview requires a Top Billing key with chat permissions; we currently allow only one cost-effective DeepSeek model.
 
 ```bash
 export DELTA_DEMO_API_KEY="your-demo-only-key"
@@ -72,15 +81,18 @@ export DELTA_DEMO_API_SECRET="your-demo-only-secret"
 tradebot balances
 tradebot snapshot --include-balances --output data/btc-with-demo-funds.json
 
-export OPENAI_API_KEY="your-openai-key"
-export OPENAI_MODEL="your-json-capable-model"
-tradebot preview --max-options 128 --output data/ai-proposal.json
+# Set the NEW Top Billing key in your local secret environment.
+# Never copy the key into this README or the repository.
+export TB_API_KEY="your-rotated-topbilling-key"
+export TB_MODEL=tb-deepseek-v4-1-flash
+tradebot ai-check  # GET /v1/models, no paid inference
+tradebot preview --max-options 64 --output data/ai-proposal.json
 ```
 
 ### Runner and confirmed-fill reconciliation
 
 ```bash
-# Requires OPENAI_API_KEY, OPENAI_MODEL and Delta demo read credentials
+# Requires TB_API_KEY and Delta demo read credentials
 tradebot run --mode observe --poll-seconds 15 --ai-interval-seconds 300
 
 # Optional demo-only order mode, AFTER supervised exchange integration testing:
@@ -92,13 +104,13 @@ tradebot reconcile --lookback-hours 24
 tradebot ledger
 ```
 
-**Start with observe mode.** The dry-run planner may incur OpenAI API charges. All order execution depends on broker fills and may be subject to rejected margin requests, option-leg slippage, liquidation and outages. An alert printed to stderr is not a reliable off-machine emergency notification. Supervised smoke tests, an independent watchdog, verified exchange positions, real-time expiry/fee handling and remote alert delivery are required before leaving demo execution unattended.
+**Start with observe mode.** The dry-run planner incurs Top Billing prepaid API charges. All order execution depends on broker fills and may be subject to rejected margin requests, option-leg slippage, liquidation and outages. An alert printed to stderr is not a reliable off-machine emergency notification. Supervised smoke tests, an independent watchdog, verified exchange positions, real-time expiry/fee handling and remote alert delivery are required before leaving demo execution unattended.
 
 Do not commit `.env`, preview artifacts, balance exports, JSONL logs or SQLite ledgers. The `data/` directory is ignored by Git.
 
 ## Status and next work
 
-**M1–M4 code implemented and offline-tested on GitHub Actions. Not running, not deployed, not authenticated with Delta demo.** The user has not provided demo credentials in this project.
+**M1–M5 code implemented and offline-tested on GitHub Actions. Not running, not deployed, not authenticated with Delta demo or Top Billing.** The Top Billing live credential is intentionally not stored in GitHub. Delta demo credentials are still required for market balance reads and demo execution.
 
 Before unattended testnet trading, verify all endpoint payloads and exchange order/fill states with a supervised demo-only API smoke test; add independent heartbeat/paging/closeout monitoring, accurate realized P&L (including fees, funding and position changes), strategy evaluation on held-out periods, a supervised model-update process and resilient reconciliation after network timeouts. Do not describe the bot as profitable or self-learning until it has verified outcomes and a model-improvement pipeline.
 
