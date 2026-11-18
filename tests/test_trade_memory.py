@@ -1,12 +1,13 @@
 """Offline tests for durable factual evidence and candidate-only learning."""
 import json
 import os
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import sqlite3
 import tempfile
 import unittest
 
-from tradebot.trade_memory import MemoryError, TradeMemory
+from tradebot.trade_memory import MemoryError, TradeMemory, public_learning_summary
 
 
 class LearningMemoryTests(unittest.TestCase):
@@ -99,6 +100,31 @@ class LearningMemoryTests(unittest.TestCase):
                 "checkpoint-btc-example1-" + str(index), self.trade, "checkpoint"))
         self.assertFalse(self.store.reserve_review(
             "checkpoint-btc-example1-11", self.trade, "checkpoint"))
+
+    def test_dashboard_summary_distinguishes_running_watcher_from_stale(self):
+        self.record()
+        summary = public_learning_summary(self.path)
+        self.assertEqual(summary["status"], "available")
+        self.assertEqual(summary["watcher_status"], "not_running")
+        self.assertFalse(summary["kimi_paid_enabled"])
+        heartbeat = self.path.parent / "learning-runtime.json"
+        heartbeat.write_text(json.dumps({
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "watcher_status": "active",
+            "kimi_paid_enabled": True,
+            "orders_submitted": False,
+        }))
+        updated = public_learning_summary(self.path)
+        self.assertEqual(updated["watcher_status"], "active")
+        self.assertTrue(updated["kimi_paid_enabled"])
+        heartbeat.write_text(json.dumps({
+            "updated_at": (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat(),
+            "watcher_status": "active",
+            "kimi_paid_enabled": True,
+        }))
+        expired = public_learning_summary(self.path)
+        self.assertEqual(expired["watcher_status"], "stale")
+        self.assertFalse(expired["kimi_paid_enabled"])
 
     def test_watch_state_is_durable_on_restart(self):
         self.store.save_watch_state(
