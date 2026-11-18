@@ -460,10 +460,15 @@ async function refreshLearning() {
     text("learning-candidates",data.candidate_lessons);
     text("learning-validated",data.validated_lessons);
     const freshness=data.last_observation_at ? " · Last broker observation "+timeLabel(data.last_observation_at):"";
-    text("learning-status",data.status==="available"?
-      (data.active_position?"BTC Demo position observed; Kimi research is independent":
-      "No active BTC position observed")+freshness:
-      "Learning watcher not initialized yet. No active research claims.");
+    const watcherStatus=data.watcher_status||"not_running";
+    const monitoring=watcherStatus==="not_running"||watcherStatus==="stale"?
+      "Watcher "+watcherStatus.replace("_"," ")+"; no active Kimi monitoring confirmed.":
+      data.kimi_paid_enabled===true?
+      "Watcher active · paid Kimi reviews enabled when a position is observed.":
+      "Watcher active · recording only; paid Kimi reviews disabled.";
+    text("learning-status",(data.status==="available"?
+      (data.active_position?"BTC Demo position observed. ":"No active BTC position observed. "):
+      "Learning database not initialized. ")+monitoring+freshness);
     container.replaceChildren();
     if(!Array.isArray(data.recent_hypotheses)||!data.recent_hypotheses.length) {
       container.append(node("p","empty","No Kimi hypotheses yet. Research starts after a BTC Demo position is observed."));
