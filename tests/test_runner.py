@@ -203,6 +203,20 @@ class RunnerTests(unittest.TestCase):
             self.runner("observe").tick()
         self.assertEqual(self.exchange.positions[1], 3)
 
+    def test_demo_graceful_stop_closes_existing_positions(self):
+        self.exchange.allow_orders = True
+        self.exchange.positions[1] = 4
+        runner = self.runner("demo")
+        runner.run_forever(stop=lambda: True)
+        self.assertEqual(self.exchange.positions[1], 0)
+        self.planner.propose.assert_not_called()
+
+    def test_observe_stop_never_changes_positions(self):
+        self.exchange.positions[1] = 4
+        runner = self.runner("observe")
+        runner.run_forever(stop=lambda: True)
+        self.assertEqual(self.exchange.positions[1], 4)
+
     def test_single_instance_lock_blocks_second_runner(self):
         with SingleInstance(self.path + ".lock"):
             with self.assertRaises(RunnerError):
