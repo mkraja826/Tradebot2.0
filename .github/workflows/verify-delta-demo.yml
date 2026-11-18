@@ -29,8 +29,17 @@ jobs:
         run: PYTHONPATH=src python -m tradebot.delta_probe --full-snapshot
       - name: Require both Delta demo API secrets
         run: |
-          if [ -z "$DELTA_DEMO_API_KEY" ] || [ -z "$DELTA_DEMO_API_SECRET" ]; then
-            echo "FAILED: Both DELTA_DEMO_API_KEY and DELTA_DEMO_API_SECRET are required."
+          missing=0
+          if [ -z "$DELTA_DEMO_API_KEY" ]; then
+            echo "MISSING SECRET NAME: DELTA_DEMO_API_KEY"
+            missing=1
+          fi
+          if [ -z "$DELTA_DEMO_API_SECRET" ]; then
+            echo "MISSING SECRET NAME: DELTA_DEMO_API_SECRET"
+            missing=1
+          fi
+          if [ "$missing" -ne 0 ]; then
+            echo "FAILED: Add the missing names under Repository Settings > Secrets and variables > Actions > Repository secrets."
             exit 1
           fi
           echo "Both Delta India demo credentials are configured (values hidden)."
