@@ -76,6 +76,14 @@ A Bitcoin-only AI futures and options bot project for the **Delta Exchange India
 4. From the GitHub Actions tab, manually run **Delta India DEMO read-only integration**. It verifies read-only wallet, order and position shapes without placing orders.
 5. Only after verifying the authenticated response schema, order fills, and independent closeout alerting should trading permissions ever be considered. The demo order feature remains disabled unless separately authorized.
 
+### M7 — Encrypted GitHub → Google Cloud secret transfer (prepared, awaiting user setup)
+
+- The manual workflow `.github/workflows/sync-gcp-secrets.yml` uses Workload Identity Federation (GitHub OIDC) without exporting a Google service-account JSON key. It copies **only** the three existing Actions secrets for Delta India demo and Top Billing into corresponding GCP Secret Manager versions. No secrets go into Git or workflow logs.
+- The Cloud Shell script `ops/bootstrap_gcp_identity.sh` prepares narrowly scoped Google Cloud IAM roles, GitHub OIDC provider, and **three empty secret containers**. Running it requires the Google Cloud project administrator's authorization.
+- `python -m tradebot.gcp_runtime -- python -m tradebot.delta_probe --authenticated` runs on the GCE VM, reads the secrets from metadata-authenticated Secret Manager into the child process environment and forces `ENABLE_DEMO_ORDERS=false`. No plaintext credentials are saved on disk by the launcher.
+- **Nothing has been imported into Google Cloud yet.** The GitHub Actions repository variables, WIF setup, manual sync, VM service-account attachment and authenticated test must be completed by the user. The GitHub repository connection cannot administer the user's Google Cloud account.
+- Full mobile-friendly setup guide: [docs/GOOGLE_CLOUD_SECRETS.md](docs/GOOGLE_CLOUD_SECRETS.md).
+
 ## Setup
 
 Python 3.11+, install with:
@@ -132,7 +140,7 @@ Do not commit `.env`, preview artifacts, balance exports, JSONL logs or SQLite l
 
 ## Status and next work
 
-**M1–M6 market-data and AI integration implemented with passing GitHub tests; Delta public demo API and the options pipeline verified.** Top Billing passed its paid smoke test. Both demo secrets exist in GitHub Actions; however, Delta blocked the signed wallet GET with `ip_not_whitelisted_for_api_key`. **No hosting deployment, authenticated position reconciliation, exchange-verified demo orders or continuous trading is running.** The immediate blocker is a fixed-IP host whitelisted for the demo API key. The Top Billing key exists only in the GitHub Actions secret store, not in repository source; credentials must be injected separately into any VPS or JioPC runtime.
+**M1–M7 code completed with offline GitHub tests; Delta public demo market pipeline and Top Billing's one paid synthetic smoke test verified.** The Google Cloud identity bootstrap, one-way Actions secret sync, and VM credential loader are **prepared but have not been run or authenticated against this VM**. Both Delta demo secrets exist in GitHub Actions; signed GitHub-runner requests were blocked by IP whitelisting. The user's Iowa VM must have the correct static IP, allowlist, attached VM service account, and Secret Manager versions before running the read-only authenticated probe. **No authenticated position reconciliation, exchange-verified demo orders or continuous autonomous trading is running.**
 
 Before unattended testnet trading, verify all endpoint payloads and exchange order/fill states with a supervised demo-only API smoke test; add independent heartbeat/paging/closeout monitoring, accurate realized P&L (including fees, funding and position changes), strategy evaluation on held-out periods, a supervised model-update process and resilient reconciliation after network timeouts. Do not describe the bot as profitable or self-learning until it has verified outcomes and a model-improvement pipeline.
 
