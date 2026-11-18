@@ -1,6 +1,5 @@
-"""Read-only Fire Mode commissioning against an authenticated demo snapshot."""
+"""GPT-6-only read-only Fire Mode commissioning against a demo snapshot."""
 import argparse
-from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal, InvalidOperation
 import hashlib
 import json
@@ -10,7 +9,7 @@ from time import monotonic
 from tradebot.ai import PlanError, TOPBILLING_CHAT_URL, TOPBILLING_MODELS_URL, TopBillingClient
 from tradebot.delta import DeltaDemo
 
-ROLES = {"fire": "tb-kimi-k3-1-pro", "paper": "tb-gpt-6"}
+ROLES = {"fire": "tb-gpt-6"}
 INSTRUCTION = (
     "Choose a BTCUSD perpetual futures position for this Delta India demo snapshot. "
     "Return only a JSON object with direction (LONG or SHORT), contracts (positive "
@@ -40,6 +39,10 @@ def validate(decision, core):
 
 
 def run_probe(routes, snapshot_loader, client_factory=TopBillingClient):
+    # Only this exact route may spend AI credits for FIRE.
+    # Do not accept stale environment overrides or a second model route.
+    if routes != ROLES:
+        raise PlanError("FIRE is locked to GPT-6 only")
     catalogue = client_factory()._call(TOPBILLING_MODELS_URL, timeout=15)
     available = {row["id"] for row in catalogue.get("data", []) if isinstance(row, dict) and "id" in row}
     missing = set(routes.values()) - available
@@ -64,11 +67,11 @@ def run_probe(routes, snapshot_loader, client_factory=TopBillingClient):
             result = {"error": "Malformed completion"}
         return dict(result, model=model, latency_ms=round((monotonic() - start) * 1000))
 
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        futures = {role: pool.submit(query, model) for role, model in routes.items()}
-        return {"mode": "read-only probe", "collected_at": snapshot["collected_at"],
-                "snapshot_sha256": hashlib.sha256(content.encode()).hexdigest(),
-                "results": {role: future.result() for role, future in futures.items()}}
+    # Exactly one billable completion: GPT-6 FIRE. Kimi is never queried.
+    fire_result = query(ROLES["fire"])
+    return {"mode": "read-only probe", "collected_at": snapshot["collected_at"],
+            "snapshot_sha256": hashlib.sha256(content.encode()).hexdigest(),
+            "results": {"fire": fire_result}}
 
 
 def load_snapshot():
@@ -90,10 +93,7 @@ def main():
     if args.list_models:
         print("\n".join(sorted(r["id"] for r in TopBillingClient()._call(TOPBILLING_MODELS_URL)["data"])))
         return
-    routes = {role: os.getenv("TB_" + role.upper() + "_MODEL", model) for role, model in ROLES.items()}
-    if len(set(routes.values())) != len(routes):
-        raise SystemExit("Choose distinct Fire and paper models")
-    report = run_probe(routes, load_snapshot)
+    report = run_probe(dict(ROLES), load_snapshot)
     print(json.dumps(report, indent=2))
     if any("error" in row for row in report["results"].values()):
         raise SystemExit(1)
