@@ -17,11 +17,11 @@ from threading import Event
 
 from tradebot.decision import build_ai_context
 from tradebot.delta import DEMO_API
-from tradebot.execution import CloseoutError, DemoExecutor
+from tradebot.execution import CloseoutError, DemoExecutor, _position_size
 from tradebot.journal import record, recent
 from tradebot.market import collect_market_snapshot
 from tradebot.preflight import check_entry, PreflightError
-from tradebot.session import SessionPhase, session_phase
+from tradebot.session import SessionPhase, entry_phase
 
 
 class RunnerError(RuntimeError):
@@ -39,6 +39,10 @@ class RunnerConfig:
     poll_seconds: int = 15
     max_options: int = 128
     journal_path: str = "data/trades.jsonl"
+    schedule: str = "nyse"
+    max_hold_seconds: int = 900
+    max_order_legs: int = 4
+    max_contracts_per_leg: int = 1
 
     def __post_init__(self):
         if self.mode not in ("observe", "demo"):
@@ -49,6 +53,14 @@ class RunnerConfig:
             raise ValueError("poll_seconds must be 2..60")
         if not 8 <= self.max_options <= 512:
             raise ValueError("max_options must be 8..512")
+        if self.schedule not in ("nyse", "crypto-24x7"):
+            raise ValueError("Schedule must be nyse or crypto-24x7")
+        if not 60 <= self.max_hold_seconds <= 3600:
+            raise ValueError("max_hold_seconds must be 60..3600")
+        if not 1 <= self.max_order_legs <= 4:
+            raise ValueError("max_order_legs must be 1..4")
+        if not 1 <= self.max_contracts_per_leg <= 5:
+            raise ValueError("max_contracts_per_leg must be 1..5")
 
 
 class SingleInstance:
@@ -91,9 +103,12 @@ class BotRunner:
         self.pause = pause or sleep
         self.snapshot_fn = snapshot_fn or collect_market_snapshot
         self.executor = executor or DemoExecutor(
-            exchange, journal_path=self.config.journal_path, now=self.now)
+            exchange, journal_path=self.config.journal_path, now=self.now,
+            schedule=self.config.schedule)
         self.last_ai_utc = None
         self.halted_session = None
+        self.active_since = None
+        self.halt_file = Path(self.config.journal_path + ".crypto24x7-halt")
         if self.config.mode == "demo":
             if getattr(exchange, "base_url", None) != DEMO_API:
                 raise RunnerError("Demo mode forbids any non-testnet exchange host")
@@ -103,12 +118,23 @@ class BotRunner:
     def _record(self, kind, details):
         record(self.config.journal_path, kind, details)
 
+    def _trip_halt(self, cause: str) -> None:
+        """Persist entry suspension through VM restarts until human review."""
+        if self.config.schedule != "crypto-24x7" or self.config.mode != "demo":
+            return
+        self.halt_file.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(str(self.halt_file), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600) if not self.halt_file.exists() else None
+        if fd is not None:
+            with os.fdopen(fd, "w") as out:
+                out.write("24x7 demo execution halted: " + cause + "\n")
+        self._record("crypto24x7_halt", {"reason": cause})
+
     def tick(self):
         instant = self.now()
         if instant.tzinfo is None or instant.utcoffset() is None:
             raise RunnerError("Timezone-aware clock required")
         instant = instant.astimezone(timezone.utc)
-        phase = session_phase(instant)
+        phase = entry_phase(instant, schedule=self.config.schedule)
         if phase != SessionPhase.TRADING:
             if self.config.mode == "demo":
                 self.executor.closeout()
@@ -135,6 +161,35 @@ class BotRunner:
                 self.executor.closeout()
             return {"phase": phase.value, "action": "halted"}
 
+        if self.config.schedule == "crypto-24x7" and self.config.mode == "demo":
+            # Emergency kill switch survives reboot and systemd restart.
+            if self.halt_file.exists():
+                self.executor.closeout()
+                return {"phase": phase.value, "action": "halted_persistent"}
+            # Check exposure EVERY poll, even while AI is in cooldown.
+            # No stacking a new AI strategy on top of existing positions.
+            orders = self.exchange.open_orders()
+            if orders:
+                self.halted_session = instant.date()
+                self._trip_halt("unexpected_pending_order")
+                self.executor.closeout()
+                return {"phase": phase.value, "action": "halted_pending_orders"}
+            positions = self.exchange.btc_positions()
+            active = [p for p in positions if _position_size(p) != 0]
+            if active:
+                if self.active_since is None:
+                    # Unknown opening time after crash/reboot: flatten first.
+                    self.halted_session = instant.date()
+                    self._trip_halt("untracked_existing_position")
+                    self.executor.closeout()
+                    return {"phase": phase.value, "action": "halted_orphan_position"}
+                if (instant - self.active_since).total_seconds() >= self.config.max_hold_seconds:
+                    self.executor.closeout()
+                    self.active_since = None
+                    return {"phase": phase.value, "action": "time_stop_flat"}
+                return {"phase": phase.value, "action": "holding_existing_position"}
+            self.active_since = None
+
         if self.last_ai_utc is not None and (
             instant - self.last_ai_utc
         ).total_seconds() < self.config.ai_interval_seconds:
@@ -153,6 +208,8 @@ class BotRunner:
             snapshot, max_options=self.config.max_options)
         context["btc_positions"] = positions
         context["open_orders_count"] = 0
+        context["trading_schedule"] = self.config.schedule
+        context["max_hold_seconds"] = self.config.max_hold_seconds if self.config.schedule == "crypto-24x7" else None
         self.last_ai_utc = instant
         plan = self.planner.propose(
             context, products, recent(self.config.journal_path))
@@ -176,17 +233,32 @@ class BotRunner:
 
         if not plan.orders:
             return {"phase": phase.value, "action": "wait", "strategy": plan.strategy}
+        if self.config.schedule == "crypto-24x7":
+            if len(plan.orders) > self.config.max_order_legs or any(
+                leg.size > self.config.max_contracts_per_leg for leg in plan.orders
+            ):
+                self._record("crypto24x7_risk_rejection", {
+                    "reason": "pilot_order_quantity_cap",
+                    "requested_legs": len(plan.orders),
+                    "orders_submitted": False,
+                })
+                return {"phase": phase.value, "action": "risk_rejected",
+                        "orders_submitted": False}
         try:
             # Re-read quotes and demo funds AFTER AI reasoning. This is a
             # preflight sanity check, not a full option-spread margin model.
-            check_entry(self.exchange, plan, products, now=self.now())
+            check_entry(self.exchange, plan, products, now=self.now(),
+                        schedule=self.config.schedule)
             # Requery exchange immediately before posting to avoid known
             # outstanding orders when decisions were being generated.
             if self.exchange.open_orders():
                 raise PreflightError("Unexpected pending orders prior to entry")
             self.executor.execute(plan, products)
+            if self.config.schedule == "crypto-24x7":
+                self.active_since = instant
         except Exception as exc:
             self.halted_session = instant.date()
+            self._trip_halt("order_execution_failure")
             self._record("execution_halt", {"error": type(exc).__name__,
                                              "phase": phase.value})
             # An unknown exchange result may have filled partially. Attempt
