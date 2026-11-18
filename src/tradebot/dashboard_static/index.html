@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta name="theme-color" content="#080d15"/>
+  <meta name="description" content="Private read-only Delta India demo Tradebot 2.0 monitoring dashboard"/>
+  <title>Tradebot 2.0 · Command Center</title>
+  <link rel="stylesheet" href="/styles.css"/>
+  <script defer src="/app.js"></script>
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand"><div class="brand-logo">T<span>2</span></div><div><strong>TRADEBOT <em>2.0</em></strong><small>INTELLIGENCE TERMINAL</small></div></div>
+      <div class="section-label">COMMAND CENTER</div>
+      <a href="#overview" class="nav active"><span class="nav-icon">◫</span> Overview</a>
+      <a href="#market" class="nav"><span class="nav-icon">⌁</span> Market &amp; Account</a>
+      <a href="#intelligence" class="nav"><span class="nav-icon">✧</span> AI Decisions</a>
+      <a href="#activity" class="nav"><span class="nav-icon">≡</span> Activity Log</a>
+      <div class="sidebar-bottom">
+        <div class="secure-mark">◈ &nbsp;PRIVATE MONITOR</div>
+        <div class="sidebar-caption">Delta India testnet only<br/>Read-only interface. No trade controls.</div>
+      </div>
+    </aside>
+    <main>
+      <header class="topbar">
+        <div class="crumb">Workspace <span>/</span> Dashboard <span>/</span> <strong>Tradebot 2.0</strong></div>
+        <div class="top-right">
+          <span class="dot"></span><span>TESTNET ENVIRONMENT</span>
+          <span class="refresh-label" id="refresh-label">Connecting…</span>
+        </div>
+      </header>
+      <div class="content">
+        <section class="intro" id="overview">
+          <div><div class="eyebrow">ALGORITHMIC TRADING / DEMO</div>
+            <h1>Trading intelligence <span>overview<span class="title-dot">.</span></span></h1>
+            <p>Monitor your AI research, exchange health, execution events and recorded fills in one place.</p>
+          </div>
+          <div class="runtime-pill" id="runtime-pill"><span class="status-light"></span><span id="runtime-status">Awaiting heartbeat</span></div>
+        </section>
+        <div class="notice" id="halt-banner" hidden>◈ &nbsp;PERSISTENT EXECUTION HALT DETECTED — inspect exchange positions and orders before restarting.</div>
+        <div class="metrics">
+          <div class="metric card"><div class="metric-label">BTC USD / BEST BID <span>₿</span></div><div class="metric-value" id="btc-bid">—</div><div class="metric-foot" id="quote-status">Waiting for exchange data</div></div>
+          <div class="metric card"><div class="metric-label">BTC USD / BEST ASK <span>↗</span></div><div class="metric-value" id="btc-ask">—</div><div class="metric-foot" id="btc-spread">Spread unavailable</div></div>
+          <div class="metric card"><div class="metric-label">CONFIRMED BTC FILLS <span>✓</span></div><div class="metric-value" id="confirmed-fills">0</div><div class="metric-foot">Exchange-ledger fills only</div></div>
+          <div class="metric card"><div class="metric-label">ACCOUNT OPEN ORDERS <span>◷</span></div><div class="metric-value" id="open-orders">—</div><div class="metric-foot" id="account-status">Checking demo account</div></div>
+        </div>
+        <div class="main-grid" id="market">
+          <section class="panel equity-panel">
+            <div class="panel-header"><div><div class="eyebrow">ACCOUNT OBSERVATIONS</div><h2>Net equity history</h2></div><div class="panel-meta">NOT REALIZED P&amp;L</div></div>
+            <div class="equity-stat"><span id="net-equity">—</span><small id="equity-label">Latest testnet equity, if supplied</small></div>
+            <div class="plot" id="equity-plot"><div class="empty-chart">No recorded equity observations yet</div></div>
+            <div class="chart-footer"><span>Recorded broker equity snapshots only</span><span id="point-count">0 observations</span></div>
+          </section>
+          <section class="panel agent-panel">
+            <div class="panel-header"><div><div class="eyebrow">AGENT STATUS</div><h2>Execution monitor</h2></div><span class="tiny-label" id="mode-label">NO PROCESS VERIFIED</span></div>
+            <div class="agent-status"><span class="orb"></span><div><strong id="agent-action">Awaiting runtime data</strong><small id="last-heartbeat">No recent heartbeat</small></div></div>
+            <div class="separator"></div>
+            <div class="detail-row"><span>Schedule</span><b id="agent-schedule">—</b></div>
+            <div class="detail-row"><span>Broker access</span><b id="broker-access">Checking</b></div>
+            <div class="detail-row"><span>Active BTC positions</span><b id="positions-count">—</b></div>
+            <div class="detail-row"><span>API permissions</span><b>Dashboard: read only</b></div>
+            <div class="detail-row"><span>DeepSeek model</span><b>V4.1 Flash</b></div>
+            <div class="agent-foot">AI recommendations are not proof of an executed order. The broker and confirmed fill ledger are authoritative.</div>
+          </section>
+        </div>
+        <div class="secondary-grid" id="intelligence">
+          <section class="panel">
+            <div class="panel-header"><div><div class="eyebrow">DECISION ENGINE</div><h2>Latest AI analysis</h2></div><span class="tiny-label">TOP BILLING</span></div>
+            <div id="ai-decision" class="decision"><div class="empty">No AI decisions recorded yet. The bot may be offline or waiting for valid market data.</div></div>
+          </section>
+          <section class="panel">
+            <div class="panel-header"><div><div class="eyebrow">LIVE TESTNET ACCOUNT</div><h2>Open BTC positions</h2></div><span class="tiny-label">READ ONLY</span></div>
+            <div id="positions-list" class="positions-list"><div class="empty">Connecting to the demo exchange…</div></div>
+          </section>
+        </div>
+        <section class="panel activity-panel" id="activity">
+          <div class="panel-header"><div><div class="eyebrow">AUDIT TRAIL</div><h2>Recent events</h2></div><span class="tiny-label">JOURNAL / LOCAL VM</span></div>
+          <div class="event-head"><span>EVENT</span><span>DETAILS</span><span>TIME (UTC)</span></div>
+          <div id="events" class="event-list"><div class="empty">No journal events recorded yet</div></div>
+        </section>
+        <footer class="footer"><div>TRADEBOT 2.0 <span>●</span> DELTA INDIA DEMO</div><div>Private read-only interface · Values may be delayed · Never interpreted as guaranteed P&amp;L</div></footer>
+      </div>
+    </main>
+  </div>
+</body>
+</html>
