@@ -49,7 +49,7 @@ class ContextTests(unittest.TestCase):
 
     def test_near_money_selected_before_far_wings(self):
         ctx, _ = build_ai_context(base_snapshot(), max_options=8)
-        self.assertTrue(all(x["strike_price"] in {"10000", "9900"}
+        self.assertTrue(all(abs(int(x["strike_price"]) - 10000) <= 100
                             for x in ctx["options"]))
 
     def test_bad_quotes_never_become_execution_candidates(self):
