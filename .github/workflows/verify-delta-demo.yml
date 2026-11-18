@@ -5,6 +5,7 @@ on:
   push:
     paths:
       - ".github/workflows/verify-delta-demo.yml"
+      - "src/tradebot/delta_probe.py"
 
 permissions:
   contents: read
