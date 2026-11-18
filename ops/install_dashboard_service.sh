@@ -18,6 +18,11 @@ VM_USER="$(id -un)"
 VM_GROUP="$(id -gn)"
 VM_HOME="$HOME"
 UNIT="tradebot2-dashboard.service"
+PUBLIC_HOST="${TRADEBOT_DASHBOARD_ALLOWED_HOST:-}"
+if [[ -n "$PUBLIC_HOST" && ! "$PUBLIC_HOST" =~ ^[a-z0-9][a-z0-9.-]{0,252}$ ]]; then
+  echo "Dashboard hostname must be a DNS name (without scheme or port)." >&2
+  exit 1
+fi
 
 if [[ "$PROJECT" == *' '* || "$PROJECT" == *'%'* ||
       "$VM_HOME" == *' '* || "$VM_HOME" == *'%'* ]]; then
@@ -46,6 +51,7 @@ Type=simple
 User=$VM_USER
 Group=$VM_GROUP
 Environment=HOME=$VM_HOME
+Environment=TRADEBOT_DASHBOARD_ALLOWED_HOST=$PUBLIC_HOST
 WorkingDirectory=$PROJECT
 ExecStart=/usr/bin/bash $PROJECT/ops/run_dashboard.sh
 Restart=always
@@ -75,5 +81,6 @@ echo "Private read-only dashboard installed on VM loopback port 8765."
 echo "Status: sudo systemctl status tradebot2-dashboard --no-pager"
 echo "Local test: curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8765/"
 echo "For viewing on a different phone, add Cloudflare Tunnel + Access or another authenticated tunnel."
+echo "Authorized proxy hostname: ${PUBLIC_HOST:-none; localhost only}"
 echo "Do not open firewall port 8765 or use a public unauthenticated tunnel."
 sudo systemctl status "$UNIT" --no-pager
