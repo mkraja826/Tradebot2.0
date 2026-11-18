@@ -377,6 +377,7 @@ def public_learning_summary(path):
         "status": "not_initialized", "active_position": False,
         "evidence_events": 0, "candidate_lessons": 0,
         "validated_lessons": 0, "recent_hypotheses": [],
+        "unattributed_broker_fills": 0, "fill_trade_attribution_verified": False,
         "gpt6_memory_injection_enabled": False,
         "kimi_can_place_orders": False,
     }
@@ -420,6 +421,14 @@ def public_learning_summary(path):
                 "FROM lessons WHERE status='candidate' "
                 "ORDER BY created_at DESC LIMIT 3"
             ).fetchall()
+            # Older learning databases may not have the broker-fill table yet.
+            # Do not mark the entire learning dashboard unavailable for that.
+            try:
+                broker_fills = db.execute(
+                    "SELECT COUNT(*) FROM unattributed_fills"
+                ).fetchone()[0]
+            except sqlite3.OperationalError:
+                broker_fills = 0
         return {
             "status": "available",
             **runtime,
@@ -428,6 +437,8 @@ def public_learning_summary(path):
             "evidence_events": events,
             "candidate_lessons": candidates,
             "validated_lessons": validated,
+            "unattributed_broker_fills": broker_fills,
+            "fill_trade_attribution_verified": False,
             "recent_hypotheses": [
                 {"hypothesis": r[0], "counterevidence": r[1],
                  "applicable_when": r[2], "confidence": r[3],
