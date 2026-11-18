@@ -1,7 +1,7 @@
 """User-initiated, read-only FIRE commissioning for the private dashboard.
 
 No exchange-order execution: this module only invokes the existing Top Billing
-Kimi + GPT-6 comparison probe, using one common authenticated BTC snapshot.
+GPT-6 FIRE probe, using an authenticated BTC snapshot.
 Invocations cost model credits; there is no scheduled or automatic activation.
 """
 from datetime import datetime, timezone
@@ -87,7 +87,7 @@ class FirePreviewController:
             # No secrets, prompts, exceptions or raw response bodies in UI.
             update = {
                 "status": "failed",
-                "error": "Unable to complete BTC snapshot/model comparison; check VM logs",
+                "error": "Unable to complete the GPT-6 FIRE preview; check VM logs",
             }
         with self._lock:
             self._state = {
