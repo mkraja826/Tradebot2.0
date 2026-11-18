@@ -18,7 +18,7 @@ from datetime import timedelta
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Tradebot 2.0 (Delta India demo only)")
-    parser.add_argument("command", choices=("status", "catalog", "snapshot", "balances", "preview", "run", "reconcile", "ledger"))
+    parser.add_argument("command", choices=("status", "catalog", "snapshot", "balances", "preview", "run", "reconcile", "ledger", "ai-check"))
     parser.add_argument("--include-balances", action="store_true",
                         help="Include signed read-only demo wallet balances in snapshot")
     parser.add_argument("--output", help="Save a complete snapshot or preview JSON to this path")
@@ -48,6 +48,20 @@ def main() -> None:
         if not os.getenv("DELTA_DEMO_API_KEY") or not os.getenv("DELTA_DEMO_API_SECRET"):
             parser.error("Demo order mode requires demo-only key and secret")
 
+
+    if args.command == "ai-check":
+        # Free read-only model access check; does not request a completion,
+        # so it cannot spend model inference credits.
+        planner = AIPlanner()
+        can_use = planner.check_model_access()
+        print(json.dumps({
+            "provider": "topbilling",
+            "model": planner.model,
+            "accessible": can_use,
+            "completion_requested": False,
+            "orders_submitted": False,
+        }, indent=2))
+        return
 
     if args.command == "ledger":
         print(json.dumps(fill_summary(args.ledger_path), indent=2))
@@ -141,7 +155,8 @@ def main() -> None:
         context, products = build_ai_context(
             snapshot, max_options=args.max_options)
         path = os.getenv("TRADEBOT_JOURNAL", "data/trades.jsonl")
-        proposal = AIPlanner().propose(context, products, recent(path))
+        planner = AIPlanner()
+        proposal = planner.propose(context, products, recent(path))
         output = {
             "environment": "delta-india-demo",
             "snapshot_at": snapshot["collected_at"],
@@ -153,6 +168,11 @@ def main() -> None:
                 for o in proposal.orders
             ],
             "candidate_coverage": context["coverage"],
+            "model": planner.model,
+            "ai_tokens": {k: planner.last_usage[k] for k in
+                          ("prompt_tokens", "completion_tokens", "total_tokens")
+                          if isinstance(planner.last_usage, dict)
+                          and k in planner.last_usage},
             "orders_submitted": False,
             "margin_verified": False,
             "warning": "Research proposal only. No broker order or P&L was produced.",
@@ -162,6 +182,8 @@ def main() -> None:
             "rationale": proposal.rationale,
             "orders": output["orders"],
             "snapshot_at": snapshot["collected_at"],
+            "model": planner.model,
+            "ai_tokens": output["ai_tokens"],
         })
         if args.output:
             destination = Path(args.output)
