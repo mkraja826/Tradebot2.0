@@ -80,8 +80,8 @@ EOF
 echo "Installing a 24/7 READ-ONLY service; demo order execution stays OFF."
 sudo install -m 0644 "$tmp_unit" "/etc/systemd/system/$UNIT_NAME"
 sudo systemctl daemon-reload
-sudo systemctl enable --now "$UNIT_NAME"
-# Restart on reinstallation to pick up repo changes.
+sudo systemctl enable "$UNIT_NAME"
+# A single start/restart also picks up new code without making two AI requests.
 sudo systemctl restart "$UNIT_NAME"
 
 echo
