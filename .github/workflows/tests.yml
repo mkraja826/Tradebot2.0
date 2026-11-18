@@ -17,3 +17,7 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Validate Cloud Shell IAM bootstrap syntax
         run: bash -n ops/bootstrap_gcp_identity.sh
+      - name: Validate dashboard JavaScript syntax
+        run: node --check src/tradebot/dashboard_static/app.js
+      - name: Validate dashboard service shell syntax
+        run: bash -n ops/run_dashboard.sh ops/install_dashboard_service.sh
