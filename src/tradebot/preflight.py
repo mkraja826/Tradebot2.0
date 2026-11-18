@@ -10,7 +10,7 @@ from decimal import Decimal, InvalidOperation
 
 from tradebot.delta import is_btc_contract
 from tradebot.market import _age_seconds
-from tradebot.session import SessionPhase, session_phase
+from tradebot.session import SessionPhase, entry_phase
 
 
 class PreflightError(ValueError):
@@ -35,12 +35,12 @@ class PreflightReport:
     broker_margin_verified: bool = False
 
 
-def check_entry(exchange, plan, products, *, now=None) -> PreflightReport:
+def check_entry(exchange, plan, products, *, now=None, schedule: str = "nyse") -> PreflightReport:
     instant = now or datetime.now(timezone.utc)
     if instant.tzinfo is None or instant.utcoffset() is None:
         raise PreflightError("Timezone-aware clock required")
-    if session_phase(instant) != SessionPhase.TRADING:
-        raise PreflightError("Outside authorized US entry hours")
+    if entry_phase(instant, schedule=schedule) != SessionPhase.TRADING:
+        raise PreflightError("Outside authorized BTC entry window")
     if not plan.orders:
         return PreflightReport(instant.isoformat(), 0, ())
     allowed = {p["id"]: p for p in products if is_btc_contract(p)}
