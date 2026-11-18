@@ -19,6 +19,7 @@ from urllib.parse import parse_qs, quote, urlsplit
 
 from tradebot.delta import DeltaDemo
 from tradebot.fire_dashboard import FirePreviewController
+from tradebot.fire_execution import FireDemoController
 from tradebot.trade_memory import public_learning_summary
 from tradebot.market import _age_seconds, _candles, MarketDataError
 
@@ -191,6 +192,11 @@ class DashboardData:
     def __init__(self, data_dir=None, exchange=None, refresh_seconds=20):
         self.root = Path(data_dir or os.getenv("TRADEBOT_DASHBOARD_DATA", "data")).resolve()
         self.fire_preview = FirePreviewController()
+        self.fire_trade = FireDemoController(
+            self.root / "fire-ops.sqlite",
+            enabled=os.getenv("TRADEBOT_FIRE_DEMO_EXECUTION", "false") == "true",
+            max_contracts=int(os.getenv("TRADEBOT_FIRE_MAX_CONTRACTS", "1")),
+        )
         self.exchange = exchange or DeltaDemo(
             api_key=os.getenv("DELTA_DEMO_API_KEY", ""),
             api_secret=os.getenv("DELTA_DEMO_API_SECRET", ""),
@@ -388,6 +394,12 @@ def create_handler(state, *, allowed_hosts=None):
             elif path == "/api/fire-preview":
                 data = json.dumps(state.fire_preview.snapshot(), separators=(",", ":")).encode()
                 mime = "application/json; charset=utf-8"
+            elif path == "/api/fire":
+                if not hasattr(state, "fire_trade"):
+                    self._headers(0, "application/json", 503)
+                    return
+                data = json.dumps(state.fire_trade.snapshot(), separators=(",", ":")).encode()
+                mime = "application/json; charset=utf-8"
             elif path == "/api/candles":
                 try:
                     at = int(parse_qs(urlsplit(self.path).query).get("at", [""])[0])
@@ -420,39 +432,46 @@ def create_handler(state, *, allowed_hosts=None):
             self._handle(body=False)
 
         def do_POST(self):
-            # The ONLY POST is a paid AI comparison, never an order mutation.
-            # Require strict same-origin interaction through Cloudflare Access
-            # or local loopback. Cross-site forms lack the custom header.
+            # A paid preview route and an explicitly opt-in Demo FIRE route.
+            # Both require strict same-origin POST + custom action header.
+            # The host is private loopback behind Cloudflare Access.
+            # Never expose the port or accept unauthenticated public traffic.
             host_header = self.headers.get("Host") or ""
             authority = host_header.split(":")[0].lower()
             origin = urlsplit(self.headers.get("Origin") or "")
             expected_scheme = "http" if authority in ("127.0.0.1", "localhost") else "https"
             path = urlsplit(self.path).path
-            if path != "/api/fire-preview":
-                data = b"Read-only dashboard"
+            if path not in ("/api/fire-preview", "/api/fire"):
+                data = b"Unsupported route"
                 self._headers(len(data), "text/plain", 405)
                 self.wfile.write(data)
                 return
             if (authority not in hosts or origin.scheme != expected_scheme or
                     origin.netloc.lower() != host_header.lower() or
-                    self.headers.get("X-Tradebot-Action") != "fire-preview" or
+                    self.headers.get("X-Tradebot-Action") != (
+                        "fire-execute" if path == "/api/fire" else "fire-preview") or
                     self.headers.get("Sec-Fetch-Site", "same-origin") != "same-origin" or
                     self.headers.get("Content-Length", "0") != "0"):
                 data = b"Forbidden"
                 self._headers(len(data), "text/plain", 403)
                 self.wfile.write(data)
                 return
-            if not hasattr(state, "fire_preview"):
+            controller = (
+                getattr(state, "fire_trade", None) if path == "/api/fire"
+                else getattr(state, "fire_preview", None))
+            if controller is None:
                 self._headers(0, "application/json", 503)
                 return
-            allowed, reason = state.fire_preview.start()
-            result = state.fire_preview.snapshot()
+            allowed, reason = controller.start()
+            result = controller.snapshot()
             if not allowed:
                 result["reason"] = reason
             data = json.dumps(result, separators=(",", ":")).encode()
             self._headers(
                 len(data), "application/json; charset=utf-8",
-                202 if allowed else 409 if reason == "already_running" else 429)
+                202 if allowed else 403 if reason == "execution_disabled"
+                else 409 if reason in ("already_running", "existing_trade_or_cooldown")
+                else 429)
             self.wfile.write(data)
 
         def log_message(self, format, *args):
@@ -464,7 +483,7 @@ def create_handler(state, *, allowed_hosts=None):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Tradebot 2.0 private read-only monitoring dashboard")
+        description="Tradebot 2.0 private Delta Demo trading terminal")
     parser.add_argument("--host", default="127.0.0.1",
                         choices=["127.0.0.1"],
                         help="Must bind to loopback; never 0.0.0.0")
@@ -476,7 +495,7 @@ def main():
     allowed = {extra_host} if extra_host and ":" not in extra_host else None
     server = ThreadingHTTPServer(
         (args.host, args.port), create_handler(DashboardData(), allowed_hosts=allowed))
-    print("Tradebot 2.0 read-only dashboard on http://127.0.0.1:" + str(args.port),
+    print("Tradebot 2.0 private dashboard on http://127.0.0.1:" + str(args.port),
           flush=True)
     print("Private loopback only: configure authenticated tunneling before viewing remotely.",
           flush=True)
