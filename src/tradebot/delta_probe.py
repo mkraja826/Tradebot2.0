@@ -84,8 +84,7 @@ def _safe_get(getter, stage: str):
             try:
                 data = json.loads(cause.read(8192))
                 err = data.get("error", "")
-                raw = (err.get("code") or err.get("message") or "")
-                      if isinstance(err, dict) else err
+                raw = (err.get("code") or err.get("message") or "") if isinstance(err, dict) else err
                 if isinstance(raw, str):
                     reason = known.get(raw.strip().lower(), "UNKNOWN")
             except (ValueError, TypeError, AttributeError, OSError):
