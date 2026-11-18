@@ -1,0 +1,54 @@
+name: Verify Top Billing key (read-only)
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/verify-topbilling.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Check secret and selected DeepSeek model
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    env:
+      TB_API_KEY: ${{ secrets.TB_API_KEY }}
+      TB_MODEL: tb-deepseek-v4-1-flash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Verify Top Billing model access without spending credits
+        run: |
+          PYTHONPATH=src python - <<'PY'
+          import os
+          import sys
+          from tradebot.ai import AIPlanner, PlanError
+
+          if not os.getenv("TB_API_KEY"):
+              print("FAILED: GitHub Actions secret TB_API_KEY is missing or empty.")
+              sys.exit(1)
+
+          try:
+              planner = AIPlanner()
+              accessible = planner.check_model_access()
+          except PlanError:
+              # Never print HTTP response bodies, request headers, exceptions,
+              # or anything that could contain the credential.
+              print("FAILED: Top Billing did not confirm model access. "
+                    "Check the key scope and model permissions.")
+              sys.exit(1)
+
+          if not accessible:
+              print("FAILED: The configured key does not expose "
+                    "the approved DeepSeek Flash model.")
+              sys.exit(1)
+
+          print("SUCCESS: TB_API_KEY is present and the selected model "
+                "is available via the read-only model catalog.")
+          print("No paid completion and no exchange order was requested.")
+          PY
