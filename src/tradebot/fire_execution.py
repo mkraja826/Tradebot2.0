@@ -209,6 +209,12 @@ def _live_preflight(exchange, snapshot, plan):
     if bid <= 0 or ask <= bid:
         raise FireTradeError("Invalid broker spread")
     validate(plan, {"best_bid": str(bid), "best_ask": str(ask)})
+    mark = _dec(ticker.get("mark_price"))
+    stop, target = _dec(plan["stop_loss"]), _dec(plan["take_profit"])
+    if (mark <= 0 or not (
+            stop < mark < target if plan["direction"] == "LONG"
+            else target < mark < stop)):
+        raise FireTradeError("Protective orders already crossed the broker mark price")
     earlier = (_dec(snapshot["core"]["best_bid"]) +
                _dec(snapshot["core"]["best_ask"])) / 2
     current = (bid + ask) / 2
@@ -323,6 +329,16 @@ class FireDemoController:
                 receipt = entries.reconcile(press)
             if receipt["status"] != "filled":
                 raise FireTradeError("No fully reconciled entry fill")
+            # The signed broker lookup is authoritative, not the HTTP
+            # acceptance payload or a locally inferred market fill.
+            broker_order = exchange.order_by_client_id(press)
+            if (not isinstance(broker_order, dict) or
+                    broker_order.get("client_order_id") != press or
+                    str(broker_order.get("product_id")) != str(receipt["product_id"]) or
+                    broker_order.get("id") != receipt.get("order_id") or
+                    broker_order.get("state") != "closed" or
+                    str(broker_order.get("unfilled_size")) != "0"):
+                raise FireTradeError("Entry fill not confirmed by signed order lookup")
             self.store.update(
                 press, "verifying_protection", broker_order_id=str(
                     receipt.get("order_id") or "")[:64], order_state="filled",
