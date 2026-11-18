@@ -25,7 +25,7 @@ EVENT_FIELDS = {
         "model", "direction", "contracts", "stop_loss", "take_profit",
         "bid", "ask", "snapshot_at", "snapshot_sha256",
     }),
-    "position_opened": frozenset({
+    "position_first_observed": frozenset({
         "symbol", "product_id", "size", "entry_price", "mark_price",
         "bid", "ask", "observed_at",
     }),
@@ -156,8 +156,8 @@ class TradeMemory:
                     "SELECT trade_id, kind, observed_at, payload_sha256 "
                     "FROM events WHERE event_id=?", (event_id,),
                 ).fetchone()
-                if not old or (old["trade_id"], old["kind"], old["observed_at"],
-                               old["payload_sha256"]) != (trade_id, kind, observed_at, digest):
+                if not old or (old["trade_id"], old["kind"],
+                               old["payload_sha256"]) != (trade_id, kind, digest):
                     raise MemoryError("Conflicting duplicate evidence ID") from None
                 return event_id
 
