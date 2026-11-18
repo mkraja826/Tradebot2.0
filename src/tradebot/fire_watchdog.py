@@ -78,7 +78,23 @@ def watchdog_tick(exchange, store, *, pause=None):
         return {"status": "flat_verified"}
 
     plan = receipt["plan"]
-    confirmed = (position is not None and
+    # Signed parent order lookup establishes what actually filled. The
+    # presence of two similar-looking stops alone is not proof of this FIRE.
+    parent = exchange.order_by_client_id(press)
+    parent_filled = (
+        isinstance(parent, dict) and
+        parent.get("client_order_id") == press and
+        str(parent.get("product_id")) == str(product_id) and
+        parent.get("id") == receipt.get("order_id") and
+        parent.get("state") == "closed" and
+        str(parent.get("unfilled_size")) == "0"
+    )
+    intended_size = (plan["contracts"] if plan["direction"] == "LONG"
+                     else -plan["contracts"])
+    position_matches = (
+        position is not None and str(position.get("size")) == str(intended_size)
+    )
+    confirmed = (parent_filled and position_matches and
                  protective_orders_verified(orders, product_id=product_id,
                                             plan=plan))
     if confirmed:
