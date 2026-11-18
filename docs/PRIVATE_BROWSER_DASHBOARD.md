@@ -1,6 +1,6 @@
 # Tradebot 2.0 — private browser dashboard
 
-**Code complete; VM activation is a separate user action.** The dashboard is read-only, backed by genuine Delta India demo GET endpoints and local bot/ledger files. It does not place, cancel, close or modify orders.
+**Private and read-only by default.** The dashboard monitors genuine Delta India Demo GET endpoints and local journals. An independent, deliberately **disabled-by-default** GPT-6 FIRE path may be activated for Delta India **DEMO-only** BTCUSD orders with bracket SL/TP after its separate watchdog is installed. See [FIRE Demo execution](FIRE_EXECUTION_DEMO.md). Production accounts are unsupported.
 
 ## What's displayed
 
@@ -11,7 +11,7 @@
 - Recent curated audit events including execution errors, persistent halts, entry/exit attempts.
 - Confirmed fill count and commission totals if a local `confirmed-fills.sqlite` ledger already exists. Equity chart shows **recorded account equity**, never realized trading profit or a fabricated chart.
 
-The web API reads the local `data/trades.jsonl`, `data/runtime.json`, `data/confirmed-fills.sqlite`, and Delta testnet **GET** endpoints. It never reads or transmits your API credentials to the browser. The service runs as your existing VM SSH user with protected credentials in its process memory; avoid granting users shell/VM access.
+The ordinary monitoring web API reads local `data/trades.jsonl`, `data/runtime.json`, `data/confirmed-fills.sqlite`, and Delta testnet **GET** endpoints. The optional authenticated FIRE route uses a separate Demo-only order client when explicitly enabled, but neither route transmits your API credentials to the browser. The service runs as your existing VM SSH user with protected credentials in its process memory; avoid granting users shell/VM access.
 
 ## Install on the Iowa VM
 
@@ -64,14 +64,14 @@ Cloudflare access to the hostname is an authentication layer **outside the app**
 
 ## Performance and costs
 
-The dashboard refreshes its display every 10 seconds; broker GET results are cached and refreshed at most once every 20 seconds while a browser is open. Normal page views **never invoke a paid model completion**. The explicit **FIRE · Analyze only** button now requests **GPT-6 only** (up to one paid Top Billing completion) from a fresh Delta Demo BTCUSD snapshot. Kimi is disabled for FIRE: the server rejects unexpected model routes even if stale environment settings exist. Results are research proposals only and **never place or modify exchange orders**. A five-minute server-side cooldown prevents rapid repeat requests; Top Billing spend limits are still recommended. Normal Delta rate limits apply. Cloudflare Tunnel, cloud VM and any external hosting can incur plan-specific costs. The dashboard doesn't start the trading bot; separately use the observer service or supervised demo trading workflow.
+The dashboard refreshes its display every 10 seconds; broker GET results are cached and refreshed at most once every 20 seconds while a browser is open. Normal page views **never invoke a paid model completion**. The explicit **FIRE · Analyze only** button now requests **GPT-6 only** (up to one paid Top Billing completion) from a fresh Delta Demo BTCUSD snapshot. Kimi is disabled for FIRE: the server rejects unexpected model routes even if stale environment settings exist. When Demo execution is **not** activated, results are research proposals only and **never place or modify exchange orders**. Once explicitly activated, the single FIRE button submits Delta India Demo BTCUSD entry orders with SL/TP, after a new signed quote check, and requires broker confirmation of both bracket children. A five-minute server-side cooldown prevents rapid repeat requests; Top Billing spend limits are still recommended. Normal Delta rate limits apply. Cloudflare Tunnel, cloud VM and any external hosting can incur plan-specific costs. The continuous DeepSeek observer remains separate; Demo FIRE is user-initiated only.
 
 Do not present account net equity changes as realized P&L. If the confirmed-fill database has no entries, the dashboard honestly shows zero confirmed fills; this does not mean no exchange fills exist until reconciliation has run.
 
-## FIRE AI comparison (read-only commissioning)
+## FIRE modes — default research vs explicitly activated Demo execution
 
-After completing Cloudflare Access login, the dashboard includes a **FIRE · Analyze only** section. Pressing the button requires an explicit confirmation that one paid GPT-6 Top Billing completion may occur. The dashboard displays GPT-6's BTCUSD directional plan, contract count, stop-loss and target (if valid). Kimi is **not requested**. GPT-6's research plan is **not** submitted to Delta. The button cannot start autonomous trading. Invalid model responses display a validation failure, not a fabricated recommendation.
+After completing Cloudflare Access login, FIRE defaults to **FIRE · Analyze only**. Pressing the button requires an explicit confirmation that one paid GPT-6 Top Billing completion may occur. The dashboard displays GPT-6's BTCUSD directional plan, contract count, stop-loss and target (if valid). Kimi is **not requested**. GPT-6's research plan is **not** submitted to Delta. Once you explicitly activate Demo execution using the separate watchdog and opt-in switch described in [FIRE Demo execution](FIRE_EXECUTION_DEMO.md), the button changes to **FIRE · EXECUTE DEMO**. One press then requests a GPT-6 trade and submits it with attached SL/TP to Delta India Demo; no real-money host is supported. FIRE never starts unattended trading. Invalid model responses display a validation failure, not a fabricated recommendation.
 
 The background model requests are only launched by a same-origin POST with a specific custom action header and no request body; cross-origin forms and unsupported HTTP routes cannot start them. Cloudflare Access must remain configured to allow only the account owner's email. Do not expose the VM's loopback dashboard as a public unauthenticated service. Model requests and costs are not capped by the VM UI beyond its short cooldown: configure a provider-side budget.
 
-Run the updated code on VM with `git pull --ff-only`, `python -m pip install -e .`, then `sudo systemctl restart tradebot2-dashboard`. **This restarts only the web dashboard; it does not restart the observer or enable demo order execution.**
+Run the updated code on VM with `git pull --ff-only`, `python -m pip install -e .`, then `sudo systemctl restart tradebot2-dashboard`. **This restarts only the web dashboard and does not restart the observer.** FIRE execution stays disabled unless the separate Demo opt-in switch was already enabled.
