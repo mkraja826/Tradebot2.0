@@ -92,6 +92,15 @@ A Bitcoin-only AI futures and options bot project for the **Delta Exchange India
 - No user API credentials need to be retyped. No Cloud Shell, GCP IAM, Delta orders, or paid AI model requests are involved in transferring secrets.
 - **Prepared but NOT activated:** the assistant still needs the user's VM public key in `ops/recipient-public-key.txt`; the manual workflow and subsequent VM import have not run.
 
+### M9 — Fail-closed live AI preview after first Iowa VM test
+
+- **The 2026-11-18 Iowa VM validated signed Delta demo reads and Top Billing model access.** A real BTC snapshot returned valid market data (1 future, 291 options); no exchange orders were submitted.
+- The first real-market `tradebot preview` hit `PlanError: AI did not return one complete JSON trading plan`. This means **no valid AI decision was accepted**; it does not prove whether the upstream failure was a finish-token limit or malformed content. The request may have incurred Top Billing charges.
+- Updated AI payload removes duplicate option metadata while preserving bid/ask spreads, Greeks, IV, commissions, open interest, volumes, BTC technicals, account data and all eligible product IDs. The model must return a short rationale and strategy; the 2,048 output-token cap remains.
+- `tradebot preview` now returns a **locally enforced WAIT** without a paid AI request outside the NYSE trading entry phase. It labels this `decision_source=deterministic_session_gate_not_ai`, so it can never be mistaken for an AI trading recommendation.
+- During active NYSE trading, a malformed/truncated model response yields `invalid_ai_response_no_plan` with zero orders, a sanitized error and (if supplied) finish reason/token usage, instead of a traceback. It exits nonzero and never retries billable inference automatically.
+- Changes are covered by offline regression tests. **No new live paid AI preview has been requested after the fix.**
+
 ## Setup
 
 Python 3.11+, install with:
