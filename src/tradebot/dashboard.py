@@ -25,6 +25,7 @@ SAFE_EVENT_FIELDS = frozenset({
     "side", "size", "contracts", "attempt", "attempts", "count", "at",
     "reason", "error", "error_type", "orders_submitted", "legs",
     "ai_tokens", "message", "decision_id", "order_id", "spread",
+    "finish_reason", "content_chars",
 })
 ASSET_TYPES = {
     "/": ("index.html", "text/html; charset=utf-8"),
