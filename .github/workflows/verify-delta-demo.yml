@@ -27,16 +27,15 @@ jobs:
         run: PYTHONPATH=src python -m tradebot.delta_probe
       - name: Full public BTC options and futures market snapshot
         run: PYTHONPATH=src python -m tradebot.delta_probe --full-snapshot
-      - name: Authenticated demo read-only account inspection
+      - name: Require both Delta demo API secrets
         run: |
-          if [ -n "$DELTA_DEMO_API_KEY" ] && [ -n "$DELTA_DEMO_API_SECRET" ]; then
-            echo "Demo secrets present; verifying signed GET endpoints."
-            PYTHONPATH=src python -m tradebot.delta_probe --authenticated
-          elif [ -z "$DELTA_DEMO_API_KEY" ] && [ -z "$DELTA_DEMO_API_SECRET" ]; then
-            echo "NOT VERIFIED: Delta demo API key and secret are not configured."
-            echo "Add DELTA_DEMO_API_KEY and DELTA_DEMO_API_SECRET to Actions secrets."
-          else
-            echo "FAIL: Only one Delta credential is configured."
+          if [ -z "$DELTA_DEMO_API_KEY" ] || [ -z "$DELTA_DEMO_API_SECRET" ]; then
+            echo "FAILED: Both DELTA_DEMO_API_KEY and DELTA_DEMO_API_SECRET are required."
             exit 1
           fi
-          echo "No exchange orders were submitted."
+          echo "Both Delta India demo credentials are configured (values hidden)."
+      - name: Authenticated demo read-only account inspection
+        run: |
+          PYTHONPATH=src python -m tradebot.delta_probe --authenticated
+          echo "Read-only Delta India DEMO account verification complete."
+          echo "No exchange orders, cancellations, or positions modifications."
