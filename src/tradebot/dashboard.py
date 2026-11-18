@@ -18,6 +18,7 @@ import time
 from urllib.parse import parse_qs, quote, urlsplit
 
 from tradebot.delta import DeltaDemo
+from tradebot.fire_dashboard import FirePreviewController
 from tradebot.market import _age_seconds, _candles, MarketDataError
 
 SAFE_EVENT_FIELDS = frozenset({
@@ -188,6 +189,7 @@ def _cashflows(rows):
 class DashboardData:
     def __init__(self, data_dir=None, exchange=None, refresh_seconds=20):
         self.root = Path(data_dir or os.getenv("TRADEBOT_DASHBOARD_DATA", "data")).resolve()
+        self.fire_preview = FirePreviewController()
         self.exchange = exchange or DeltaDemo(
             api_key=os.getenv("DELTA_DEMO_API_KEY", ""),
             api_secret=os.getenv("DELTA_DEMO_API_SECRET", ""),
@@ -376,6 +378,9 @@ def create_handler(state, *, allowed_hosts=None):
             if path == "/api/overview":
                 data = json.dumps(state.snapshot(), separators=(",", ":")).encode()
                 mime = "application/json; charset=utf-8"
+            elif path == "/api/fire-preview":
+                data = json.dumps(state.fire_preview.snapshot(), separators=(",", ":")).encode()
+                mime = "application/json; charset=utf-8"
             elif path == "/api/candles":
                 try:
                     at = int(parse_qs(urlsplit(self.path).query).get("at", [""])[0])
@@ -408,8 +413,39 @@ def create_handler(state, *, allowed_hosts=None):
             self._handle(body=False)
 
         def do_POST(self):
-            data = b"Read-only dashboard"
-            self._headers(len(data), "text/plain", 405)
+            # The ONLY POST is a paid AI comparison, never an order mutation.
+            # Require strict same-origin interaction through Cloudflare Access
+            # or local loopback. Cross-site forms lack the custom header.
+            host_header = self.headers.get("Host") or ""
+            authority = host_header.split(":")[0].lower()
+            origin = urlsplit(self.headers.get("Origin") or "")
+            expected_scheme = "http" if authority in ("127.0.0.1", "localhost") else "https"
+            path = urlsplit(self.path).path
+            if path != "/api/fire-preview":
+                data = b"Read-only dashboard"
+                self._headers(len(data), "text/plain", 405)
+                self.wfile.write(data)
+                return
+            if (authority not in hosts or origin.scheme != expected_scheme or
+                    origin.netloc.lower() != host_header.lower() or
+                    self.headers.get("X-Tradebot-Action") != "fire-preview" or
+                    self.headers.get("Sec-Fetch-Site", "same-origin") != "same-origin" or
+                    self.headers.get("Content-Length", "0") != "0"):
+                data = b"Forbidden"
+                self._headers(len(data), "text/plain", 403)
+                self.wfile.write(data)
+                return
+            if not hasattr(state, "fire_preview"):
+                self._headers(0, "application/json", 503)
+                return
+            allowed, reason = state.fire_preview.start()
+            result = state.fire_preview.snapshot()
+            if not allowed:
+                result["reason"] = reason
+            data = json.dumps(result, separators=(",", ":")).encode()
+            self._headers(
+                len(data), "application/json; charset=utf-8",
+                202 if allowed else 409 if reason == "already_running" else 429)
             self.wfile.write(data)
 
         def log_message(self, format, *args):
