@@ -137,6 +137,11 @@ document.querySelectorAll(".nav").forEach(link=>link.addEventListener("click",()
 let latest = null;
 function answer(question) {
   if (selectedRecord && /here|selected|compare|this|fill|why/i.test(question)) return describe(selectedRecord);
+  if (/previous|last trade|completed trade|recent fill/i.test(question)) {
+    const fills = chartRecords.filter(r=>r.type==="fill");
+    if(!fills.length)return "No confirmed fills in the displayed records.";
+    return fills.slice(0,3).map(describe).join("\n");
+  }
   if (/fee|funding|performance|net result/i.test(question)) {
     const v=latest?.live?.performance;
     if(!v)return "No current signed wallet postings available.";
@@ -188,7 +193,9 @@ function makeRecords(data) {
   const events = (data.events || []).map(e => ({type:"event", key:e.kind + e.time + JSON.stringify(e.details), at:Date.parse(decisionKinds.has(e.kind) ? e.details.at || e.time : e.time), ...e}));
   const orders = new Map(events.filter(e => e.details.order_id && /^(entry|exit)_submitted$/.test(e.kind)).map(e=>[String(e.details.order_id),e]));
   const decisions = new Map(events.filter(e=>decisionKinds.has(e.kind) && e.details.decision_id).map(e=>[e.details.decision_id,e]));
-  const fills = (data.ledger?.fills || []).map(fill => {
+  const unique = new Map();
+  for (const fill of [...(data.live?.recent_fills || []), ...(data.ledger?.fills || [])]) unique.set(String(fill.id),fill);
+  const fills = [...unique.values()].map(fill => {
     const order = orders.get(fill.order_id);
     const decision = order && decisions.get(order.details.decision_id);
     const leg = decision?.details.legs?.find(l=>l.product_id===order.details.product_id && l.side===fill.side);
@@ -206,7 +213,7 @@ function describe(r) {
   if (r.type==="fill") {
     const f=r.fill;
     const comparison = r.reference!=null ? "Decision quote "+nfmt(r.reference)+" · fill minus quote "+nfmt(Number(f.price)-Number(r.reference)) : "No linked proposal price recorded.";
-    return when+" · Exchange fill ledger · "+f.side+" "+f.size+" "+f.symbol+" at "+nfmt(f.price)+" · fee "+f.fee+" "+f.asset+". "+comparison;
+    return when+" · Confirmed Delta fill · "+f.side+" "+f.size+" "+f.symbol+" at "+nfmt(f.price)+" · fee "+f.fee+" "+f.asset+". "+comparison;
   }
   const d=r.details;
   return when+" · Bot journal · "+(d.strategy||r.kind.replace(/_/g," "))+" · "+(d.rationale||d.reason||eventDescription(r))+(d.spread!=null?" · Recorded BTC spread $"+nfmt(d.spread):"");
@@ -334,7 +341,7 @@ function renderDesk(data){
     text("top-quote","Bid $"+nfmt(market.bid)+"  /  Ask $"+nfmt(market.ask));
   if (!fresh) text("top-quote","No fresh bid or ask");
   chartRecords=makeRecords(data);drawChart();
-  if (!frozenBars) text("sample-info",frozenBars?"Inspection paused · tap Live to resume":historyBars.length?"Last candle "+formatTime(historyBars.at(-1).time*1000)+" UTC":"Exchange history unavailable");
+  if (!frozenBars) text("sample-info",historyBars.length?"Last candle "+formatTime(historyBars.at(-1).time*1000)+" UTC":"Exchange history unavailable");
   const alert=chartRecords.find(r=>["closeout_alert","shutdown_exposure_alert","btc_flat_verified"].includes(r.kind));
   showPriority(data.halted?"Execution halted · review exchange exposure.":alert && alert.kind!=="btc_flat_verified"?"Closeout requires verification.":runner.status==="stale"?"Observer heartbeat stale.":!fresh?"Market data delayed · last check "+timeLabel(live.checked_at):account.status!=="connected"?"Exchange account unavailable.":null,true);
   const pos=byId("position-card");pos.classList.toggle("exposed",account.btc_open_positions>0);

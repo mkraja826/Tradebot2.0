@@ -28,9 +28,12 @@ with sync_playwright() as p:
         errors = []
         page.on("pageerror", lambda e: errors.append(str(e)))
         page.clock.install()
-        page.route("**/api/overview", lambda r: r.fulfill(json=snapshot))
+        def slow_snapshot(route):
+            time.sleep(0.35)
+            route.fulfill(json=snapshot)
+        page.route("**/api/overview", slow_snapshot)
         page.goto(f"http://127.0.0.1:{server.server_port}/")
-        page.locator("#mid").get_by_text("$",exact=True).wait_for()
+        page.get_by_text("RUNNING · OBSERVING",exact=True).wait_for()
         assert page.locator("#mid").inner_text().replace("\n","")=="$101.00"
         assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
         page.locator("#trace").focus()
@@ -52,6 +55,7 @@ with sync_playwright() as p:
         assert "Wide spread" in page.locator(".reply").last.inner_text()
         if width<=850:
             page.locator("#chat-close").click()
+        page.locator("#dismiss-record").click()
         page.locator("#go-live").click()
         assert page.locator("#inspection").is_hidden()
         assert not errors,errors

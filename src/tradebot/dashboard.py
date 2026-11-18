@@ -198,6 +198,8 @@ class DashboardData:
         self._history = {}
         self._performance_checked = float("-inf")
         self._performance = None
+        self._recent_fills = []
+        self._fills_checked = float("-inf")
         self._started_at = 0.0
         self._updating = False
         self._live = {
@@ -267,6 +269,22 @@ class DashboardData:
             payload["candles"] = _candles(rows, now)["last_24"]
         except Exception:
             payload["candles"] = []
+        if time.monotonic() - self._fills_checked >= 60:
+            try:
+                end_us = int(now.timestamp() * 1_000_000)
+                rows = self.exchange.btc_fills(start_time_us=end_us - 86_400_000_000,
+                                               end_time_us=end_us)
+                self._recent_fills = [{
+                    "time_ms": int(f["created_at"]) // 1000, "symbol": f["product_symbol"],
+                    "side": f["side"], "size": _safe_decimal(f["size"]),
+                    "price": _safe_decimal(f["price"]), "fee": _safe_decimal(f["commission"]),
+                    "asset": f["settling_asset_symbol"], "order_id": str(f.get("order_id") or ""),
+                    "id": str(f["id"]),
+                } for f in sorted(rows, key=lambda f: int(f["created_at"]), reverse=True)[:160]]
+            except Exception:
+                self._recent_fills = None
+            self._fills_checked = time.monotonic()
+        payload["recent_fills"] = self._recent_fills
         if time.monotonic() - self._performance_checked >= 300:
             try:
                 end_us = int(now.timestamp() * 1_000_000)
