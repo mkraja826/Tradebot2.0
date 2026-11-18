@@ -376,18 +376,18 @@ function renderFire(data) {
   if(!button || !container || !status)return;
   const remaining=Number(data.cooldown_seconds||0);
   button.disabled=data.status==="running"||remaining>0;
-  button.textContent=data.status==="running"?"Analyzing two models…":
+  button.textContent=data.status==="running"?"Analyzing GPT-6…":
     remaining>0?"FIRE · Retry in "+Math.ceil(remaining/60)+"m":"FIRE · Analyze only";
   const messages={
-    idle:"Ready. Pressing FIRE analyzes BTC demo market; it never submits an order.",
-    running:"Contacting Kimi and GPT-6. Two paid requests may be in progress.",
-    completed:"Analysis completed. Compare two proposed plans below. No orders submitted.",
-    failed:"No valid comparison was completed. No orders submitted."
+    idle:"Ready. Pressing FIRE requests GPT-6 analysis; it never submits an order.",
+    running:"Contacting GPT-6. One paid request may be in progress.",
+    completed:"GPT-6 analysis completed. No orders submitted.",
+    failed:"No validated GPT-6 analysis was completed. No orders submitted."
   };
   status.textContent=messages[data.status]||"Comparison unavailable.";
   if(!data.result || !data.result.results)return;
   container.replaceChildren();
-  for(const [role,title] of [["fire","Kimi K3.1 Pro · FIRE"],["paper","GPT-6 · Paper comparison"]]) {
+  for(const [role,title] of [["fire","GPT-6 · FIRE"]]) {
     const value=data.result.results[role]||{}, tile=node("div","fire-result");
     tile.append(node("div","fire-result-title",title));
     if(value.decision) {
@@ -409,7 +409,7 @@ function renderFire(data) {
     container.append(tile);
   }
   const footer=node("p","fire-proof","Snapshot: "+String(data.result.snapshot_at||"unknown")+
-    " · Both models used the same market evidence. These are not executions.");
+    " · GPT-6 research only. This is not an execution.");
   container.append(footer);
 }
 async function refreshFire() {
@@ -420,16 +420,16 @@ async function refreshFire() {
     if(!response.ok)throw new Error("Fire status unavailable");
     renderFire(await response.json());
   } catch(err) {
-    text("fire-status","AI comparison unavailable. No trading order can be placed from this panel.");
+    text("fire-status","GPT-6 analysis unavailable. No trading order can be placed from this panel.");
     button.disabled=true;
   }
 }
 const fireButton=byId("fire-preview");
 if(fireButton)fireButton.addEventListener("click",async()=>{
   if(fireButton.disabled)return;
-  if(!window.confirm("Run Kimi FIRE research and GPT-6 paper comparison? This can use two paid Top Billing completions. It will NOT place any orders."))return;
+  if(!window.confirm("Run GPT-6 FIRE analysis? This may use one paid Top Billing completion. It will NOT place any orders."))return;
   fireButton.disabled=true;
-  text("fire-status","Submitting read-only comparison request…");
+  text("fire-status","Requesting a read-only GPT-6 analysis…");
   try {
     const response=await fetch("/api/fire-preview",{
       method:"POST", credentials:"same-origin",cache:"no-store",
