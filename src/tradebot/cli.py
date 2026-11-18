@@ -10,7 +10,7 @@ from tradebot.market import collect_market_snapshot, MarketDataError
 from tradebot.ai import AIPlanner, PlanError
 from tradebot.decision import build_ai_context
 from tradebot.journal import record, recent
-from tradebot.session import session_phase, SessionPhase, NEW_YORK
+from tradebot.session import session_phase, entry_phase, SessionPhase, NEW_YORK
 from tradebot.runner import BotRunner, RunnerConfig
 from tradebot.ledger import ingest_fills, fill_summary, record_equity
 from datetime import timedelta
@@ -24,6 +24,10 @@ def main() -> None:
     parser.add_argument("--output", help="Save a complete snapshot or preview JSON to this path")
     parser.add_argument("--max-options", type=int, default=128,
                         help="Option quote context budget for preview (8-512)")
+    parser.add_argument("--schedule", choices=("nyse", "crypto-24x7"), default="nyse",
+                        help="Opt-in continuous crypto opportunity scan; default preserves NYSE hours")
+    parser.add_argument("--max-hold-minutes", type=int, default=15,
+                        help="24x7 demo pilot enforced maximum holding time: 1-60 minutes")
     parser.add_argument("--mode", choices=("observe", "demo"), default="observe",
                         help="Runner mode. Observe is the safe default.")
     parser.add_argument("--demo-execute", action="store_true",
@@ -37,6 +41,8 @@ def main() -> None:
     args = parser.parse_args()
     if not 1 <= args.lookback_hours <= 168:
         parser.error("--lookback-hours must be 1..168")
+    if not 1 <= args.max_hold_minutes <= 60:
+        parser.error("--max-hold-minutes must be 1..60")
     if args.demo_execute and (args.command != "run" or args.mode != "demo"):
         parser.error("--demo-execute is only valid with: run --mode demo")
     if args.command == "run" and args.mode == "demo":
@@ -48,6 +54,10 @@ def main() -> None:
         if not os.getenv("DELTA_DEMO_API_KEY") or not os.getenv("DELTA_DEMO_API_SECRET"):
             parser.error("Demo order mode requires demo-only key and secret")
 
+
+    if args.command == "run" and args.mode == "demo" and args.schedule == "crypto-24x7":
+        if os.getenv("ALLOW_CRYPTO_24X7_DEMO") != "true":
+            parser.error("24x7 demo execution requires separate ALLOW_CRYPTO_24X7_DEMO=true opt-in")
 
     if args.command == "ai-check":
         # Free read-only model access check; does not request a completion,
@@ -82,7 +92,7 @@ def main() -> None:
         # Gate BEFORE even constructing a Delta client or fetching live quotes:
         # stale/offline demo tickers must never break our deterministic WAIT.
         instant = datetime.now(timezone.utc)
-        phase = session_phase(instant)
+        phase = entry_phase(instant, schedule=args.schedule)
         if phase != SessionPhase.TRADING:
             output = {
                 "environment": "delta-india-demo",
@@ -126,11 +136,14 @@ def main() -> None:
                                     "TRADEBOT_JOURNAL", "data/trades.jsonl"),
                                 ai_interval_seconds=args.ai_interval_seconds,
                                 poll_seconds=args.poll_seconds,
-                                max_options=args.max_options),
+                                max_options=args.max_options,
+                                schedule=args.schedule,
+                                max_hold_seconds=args.max_hold_minutes * 60),
         )
         print(json.dumps({
             "environment": exchange.base_url,
             "mode": args.mode,
+            "schedule": args.schedule,
             "orders": "DEMO ENABLED" if args.mode == "demo"
                       else "READ ONLY",
             "message": "Stop with Ctrl+C. Use process supervision for emergencies.",
@@ -219,6 +232,13 @@ def main() -> None:
         print(json.dumps(output, indent=2))
         raise SystemExit(2) from None
     if args.command == "preview":
+        if args.schedule == "crypto-24x7":
+            # Override the NYSE label only for explicit 24/7 research; retain
+            # actual market quote freshness checks and all order safety gates.
+            snapshot["nyse_phase"] = snapshot["session_phase"]
+            snapshot["session_phase"] = "trading"
+            snapshot["trading_schedule"] = args.schedule
+            snapshot["max_hold_seconds"] = args.max_hold_minutes * 60
         # A research proposal is never an order. When the NYSE entry window
         # is closed or flattening, do not spend an AI completion merely to
         # learn that opening new positions is forbidden by our local clock.
@@ -286,6 +306,7 @@ def main() -> None:
                     "environment": "delta-india-demo",
                     "snapshot_at": snapshot["collected_at"],
                     "session_phase": snapshot["session_phase"],
+                    "trading_schedule": args.schedule,
                     "strategy": proposal.strategy,
                     "rationale": proposal.rationale,
                     "decision_source": "validated_ai_plan",
