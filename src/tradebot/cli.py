@@ -97,7 +97,7 @@ def main() -> None:
         if args.output:
             destination = Path(args.output)
             destination.parent.mkdir(parents=True, exist_ok=True)
-            destination.write_text(json.dumps(output, indent=2) + "\\n",
+            destination.write_text(json.dumps(output, indent=2) + "\n",
                                    encoding="utf-8")
         print(json.dumps(output, indent=2))
         return
