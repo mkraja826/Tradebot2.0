@@ -33,13 +33,25 @@
       </header>
       <div class="content">
         <section class="intro" id="overview">
-          <div><div class="eyebrow">ALGORITHMIC TRADING / DEMO</div>
-            <h1>Trading intelligence <span>overview<span class="title-dot">.</span></span></h1>
-            <p>Monitor your AI research, exchange health, execution events and recorded fills in one place.</p>
+          <div><div class="eyebrow">DELTA INDIA / TESTNET</div>
+            <h1>Bitcoin <span>terminal.</span></h1>
           </div>
           <div class="runtime-pill" id="runtime-pill"><span class="status-light"></span><span id="runtime-status">Awaiting heartbeat</span></div>
         </section>
         <div class="notice" id="halt-banner" hidden>◈ &nbsp;PERSISTENT EXECUTION HALT DETECTED — inspect exchange positions and orders before restarting.</div>
+        <div class="desk">
+          <section class="panel tape">
+            <div class="eyebrow">BTC / USD</div><h2>Midpoint price</h2>
+            <strong id="mid">—</strong>
+            <div class="scope"><canvas id="trace" role="img" aria-label="BTC midpoint observations during this tab session"></canvas></div>
+            <div class="chart-footer"><span id="sample-info">Waiting for a fresh quote</span><span>Session · USD</span></div>
+          </section>
+          <section class="panel chat"><div class="eyebrow">DASHBOARD DATA</div><h2>BTC live chat</h2>
+            <div id="messages" role="log" aria-label="BTC chat messages"><p>Ask about the BTC quote, spread, open positions, or the latest bot decision.</p></div>
+            <div id="prompts"><button type="button">BTC price</button><button type="button">Latest decision</button><button type="button">Positions</button></div>
+            <form id="chat-form"><input id="question" aria-label="Your BTC question" placeholder="Ask about BTC…" maxlength="220" required/><button>Ask</button></form>
+          </section>
+        </div>
         <div class="metrics">
           <div class="metric card"><div class="metric-label">BTC USD / BEST BID <span>₿</span></div><div class="metric-value" id="btc-bid">—</div><div class="metric-foot" id="quote-status">Waiting for exchange data</div></div>
           <div class="metric card"><div class="metric-label">BTC USD / BEST ASK <span>↗</span></div><div class="metric-value" id="btc-ask">—</div><div class="metric-foot" id="btc-spread">Spread unavailable</div></div>
