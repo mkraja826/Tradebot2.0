@@ -19,6 +19,7 @@ from urllib.parse import parse_qs, quote, urlsplit
 
 from tradebot.delta import DeltaDemo
 from tradebot.fire_dashboard import FirePreviewController
+from tradebot.trade_memory import public_learning_summary
 from tradebot.market import _age_seconds, _candles, MarketDataError
 
 SAFE_EVENT_FIELDS = frozenset({
@@ -377,6 +378,12 @@ def create_handler(state, *, allowed_hosts=None):
             path = urlsplit(self.path).path
             if path == "/api/overview":
                 data = json.dumps(state.snapshot(), separators=(",", ":")).encode()
+                mime = "application/json; charset=utf-8"
+            elif path == "/api/learning":
+                data = json.dumps(
+                    public_learning_summary(state.root / "trade-learning.sqlite"),
+                    separators=(",", ":")
+                ).encode()
                 mime = "application/json; charset=utf-8"
             elif path == "/api/fire-preview":
                 data = json.dumps(state.fire_preview.snapshot(), separators=(",", ":")).encode()
