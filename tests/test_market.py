@@ -158,6 +158,11 @@ class MarketSnapshotTests(unittest.TestCase):
         with self.assertRaises(MarketDataError):
             self.collect()
 
+    def test_gapped_candles_do_not_fake_one_hour_return(self):
+        self.exchange.bars[-6]["time"] -= 15
+        with self.assertRaises(MarketDataError):
+            self.collect()
+
     def test_inconsistent_candle_halts_snapshot(self):
         self.exchange.bars[-1]["low"] = 100000
         with self.assertRaises(MarketDataError):
