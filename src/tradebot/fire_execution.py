@@ -355,6 +355,28 @@ class FireDemoController:
                                   protection_verified=False,
                                   orders_submitted=False)
                 return
+            # FireEntries always commits a durable intent before making
+            # a broker POST. If no such row exists, no order was submitted
+            # by FIRE: do NOT cancel an unrelated manual order that appeared
+            # between our preflight and submission.
+            try:
+                with closing(sqlite3.connect(self.path, timeout=10)) as db:
+                    has_table = db.execute(
+                        "SELECT 1 FROM sqlite_master "
+                        "WHERE type='table' AND name='fire_entries'"
+                    ).fetchone()
+                    intent = db.execute(
+                        "SELECT 1 FROM fire_entries WHERE press=?", (press,)
+                    ).fetchone() if has_table else None
+                if intent is None:
+                    self.store.update(press, "rejected_no_order",
+                                      reason_code="no_durable_broker_intent",
+                                      protection_verified=False,
+                                      orders_submitted=False)
+                    return
+            except sqlite3.Error:
+                # DB uncertainty means we cannot prove the absence of a POST.
+                pass
             # An ambiguous POST result might still have filled.
             # Close out BTC exposure; never repost the original FIRE request.
             self.store.update(press, "exposure_unknown",
