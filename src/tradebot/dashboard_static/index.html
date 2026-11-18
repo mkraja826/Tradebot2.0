@@ -23,12 +23,12 @@
         <div class="sidebar-caption">Delta India testnet only<br/>Read-only interface. No trade controls.</div>
       </div>
     </aside>
-    <main>
+    <main id="terminal">
       <header class="topbar">
         <div class="crumb">Workspace <span>/</span> Dashboard <span>/</span> <strong>Tradebot 2.0</strong></div>
         <div class="top-right">
-          <span class="dot"></span><span>TESTNET ENVIRONMENT</span>
-          <span class="refresh-label" id="refresh-label">Connecting…</span>
+          <span class="dot"></span><span>BTC/USD · DELTA DEMO</span>
+          <span id="heartbeat-head"></span><span class="refresh-label" id="refresh-label">Connecting…</span>
         </div>
       </header>
       <div class="content">
@@ -39,20 +39,31 @@
           <div class="runtime-pill" id="runtime-pill"><span class="status-light"></span><span id="runtime-status">Awaiting heartbeat</span></div>
         </section>
         <div class="notice" id="halt-banner" hidden>◈ &nbsp;PERSISTENT EXECUTION HALT DETECTED — inspect exchange positions and orders before restarting.</div>
+        <div id="priority" hidden role="status"></div>
         <div class="desk">
-          <section class="panel tape">
-            <div class="eyebrow">BTC / USD</div><h2>Midpoint price</h2>
-            <strong id="mid">—</strong>
-            <div class="scope"><canvas id="trace" role="img" aria-label="BTC midpoint observations during this tab session"></canvas></div>
-            <div class="chart-footer"><span id="sample-info">Waiting for a fresh quote</span><span>Session · USD</span></div>
+          <section class="panel tape" aria-label="BTC price chart">
+            <div class="chart-top"><div><div class="eyebrow">BTCUSD PERPETUAL</div><h2>Bitcoin <small>/ USD</small></h2></div>
+            <button id="go-live" type="button">Live</button></div>
+            <strong id="mid">—</strong><span class="instrument-label"> bid / ask midpoint</span>
+            <p id="top-quote"></p><div class="chart-top"><span class="panel-meta">5 MIN CANDLES</span><div id="ranges"><button aria-pressed="true" data-bars="12">1H</button><button aria-pressed="false" data-bars="24">2H</button></div></div>
+            <div class="scope"><canvas id="trace" tabindex="0" role="img" aria-label="BTC five-minute candles. Use left and right arrows to inspect."></canvas></div>
+            <div class="chart-footer"><span id="sample-info">Waiting for exchange candles</span><span>UTC</span></div>
+            <div class="legend">◇ Decision　▲ Entry　■ Exit　● Other fill</div>
+            <section id="inspection" hidden aria-label="Selected chart record"><strong id="inspect-title"></strong><p id="inspect-text"></p><ol id="sequence"></ol><button id="dismiss-record">Close</button> <button id="context-chat">Ask about selection</button></section>
           </section>
-          <section class="panel chat"><div class="eyebrow">DASHBOARD DATA</div><h2>BTC live chat</h2>
+          <section class="panel chat" id="chat"><div class="chart-top"><div><div class="eyebrow">MARKET DESK</div><h2>Ask BTC</h2></div><button id="chat-close">Close</button></div>
             <div id="messages" role="log" aria-label="BTC chat messages"><p>Ask about the BTC quote, spread, open positions, or the latest bot decision.</p></div>
             <div id="prompts"><button type="button">BTC price</button><button type="button">Latest decision</button><button type="button">Positions</button></div>
             <form id="chat-form"><input id="question" aria-label="Your BTC question" placeholder="Ask about BTC…" maxlength="220" required/><button>Ask</button></form>
           </section>
         </div>
-        <div class="metrics">
+        <div class="secondary-grid" id="state-cards"><section class="panel" id="intelligence">
+            <div class="panel-header"><div><div class="eyebrow">DECISION ENGINE</div><h2>Latest AI analysis</h2></div><span class="tiny-label">TOP BILLING</span></div>
+            <p id="next-scan"></p><div id="ai-decision" class="decision"><div class="empty">No AI decisions recorded yet. The bot may be offline or waiting for valid market data.</div></div>
+          </section><section class="panel" id="position-card">
+            <div class="panel-header"><div><div class="eyebrow">LIVE TESTNET ACCOUNT</div><h2>Open BTC positions</h2></div><span class="tiny-label">READ ONLY</span></div>
+            <p id="exit-due"></p><div id="positions-list" class="positions-list"><div class="empty">Connecting to the demo exchange…</div></div>
+          </section></div><div class="metrics">
           <div class="metric card"><div class="metric-label">BTC USD / BEST BID <span>₿</span></div><div class="metric-value" id="btc-bid">—</div><div class="metric-foot" id="quote-status">Waiting for exchange data</div></div>
           <div class="metric card"><div class="metric-label">BTC USD / BEST ASK <span>↗</span></div><div class="metric-value" id="btc-ask">—</div><div class="metric-foot" id="btc-spread">Spread unavailable</div></div>
           <div class="metric card"><div class="metric-label">CONFIRMED BTC FILLS <span>✓</span></div><div class="metric-value" id="confirmed-fills">0</div><div class="metric-foot">Exchange-ledger fills only</div></div>
@@ -77,22 +88,14 @@
             <div class="agent-foot">AI recommendations are not proof of an executed order. The broker and confirmed fill ledger are authoritative.</div>
           </section>
         </div>
-        <div class="secondary-grid" id="intelligence">
-          <section class="panel">
-            <div class="panel-header"><div><div class="eyebrow">DECISION ENGINE</div><h2>Latest AI analysis</h2></div><span class="tiny-label">TOP BILLING</span></div>
-            <div id="ai-decision" class="decision"><div class="empty">No AI decisions recorded yet. The bot may be offline or waiting for valid market data.</div></div>
-          </section>
-          <section class="panel">
-            <div class="panel-header"><div><div class="eyebrow">LIVE TESTNET ACCOUNT</div><h2>Open BTC positions</h2></div><span class="tiny-label">READ ONLY</span></div>
-            <div id="positions-list" class="positions-list"><div class="empty">Connecting to the demo exchange…</div></div>
-          </section>
-        </div>
+        <section class="panel" id="trades"><div class="eyebrow">EXECUTION JOURNAL</div><h2>Trade replay</h2><div id="replay"></div></section>
+        <section class="panel" id="performance"><div class="eyebrow">DEMO ACCOUNT · LAST 24 HOURS</div><h2>Settled trading cash flows</h2><div id="returns"></div></section>
         <section class="panel activity-panel" id="activity">
           <div class="panel-header"><div><div class="eyebrow">AUDIT TRAIL</div><h2>Recent events</h2></div><span class="tiny-label">JOURNAL / LOCAL VM</span></div>
           <div class="event-head"><span>EVENT</span><span>DETAILS</span><span>TIME (UTC)</span></div>
           <div id="events" class="event-list"><div class="empty">No journal events recorded yet</div></div>
         </section>
-        <footer class="footer"><div>TRADEBOT 2.0 <span>●</span> DELTA INDIA DEMO</div><div>Private read-only interface · Values may be delayed · Never interpreted as guaranteed P&amp;L</div></footer>
+        <nav class="dock" aria-label="Terminal navigation"><a href="#overview">Overview</a><a href="#trades">Trades</a><a href="#activity">Activity</a><button id="open-chat">Ask BTC</button></nav><footer class="footer"><div>TRADEBOT 2.0 <span>●</span> DELTA INDIA DEMO</div><div>Private read-only interface · Values may be delayed · Never interpreted as guaranteed P&amp;L</div></footer>
       </div>
     </main>
   </div>

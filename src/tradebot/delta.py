@@ -221,6 +221,28 @@ class DeltaDemo:
             raise DeltaError("Malformed wallet meta")
         return {"balances": reply["result"], "meta": meta}
 
+    def wallet_postings(self, start_us, end_us):
+        """Read a complete bounded window, deduplicating overlapping pages."""
+        params = {"start_time": start_us, "end_time": end_us, "page_size": 100}
+        rows, cursors = {}, set()
+        for _ in range(20):
+            reply = self._request("GET", "/v2/wallet/transactions", params=params, auth=True)
+            if not isinstance(reply.get("result"), list):
+                raise DeltaError("Invalid wallet transaction page")
+            for row in reply["result"]:
+                key = str(row["id"])
+                if key in rows and rows[key] != row:
+                    raise DeltaError("Inconsistent wallet posting")
+                rows[key] = row
+            cursor = (reply.get("meta") or {}).get("after")
+            if not cursor:
+                return list(rows.values())
+            if cursor in cursors:
+                raise DeltaError("Repeated wallet cursor")
+            params["after"] = cursor
+            cursors.add(cursor)
+        raise DeltaError("Incomplete wallet transaction window")
+
     def btc_fills(self, *, start_time_us: int, end_time_us: int,
                   max_pages: int = 40) -> list[dict]:
         """Read recent signed fills in <=50 record pages; no mutation.

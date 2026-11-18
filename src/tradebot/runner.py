@@ -6,7 +6,7 @@ A model is never trusted to decide when the end-of-session rule applies.
 """
 from dataclasses import dataclass
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from time import sleep
 from uuid import uuid4
@@ -224,8 +224,12 @@ class BotRunner:
         usage = getattr(self.planner, "last_usage", None)
         model = getattr(self.planner, "model", None)
         trace = getattr(self.planner, "last_request_id", None)
+        decision_id = uuid4().hex
+        quotes = {q.get("product_id"): q for group in ("futures", "options")
+                  for q in snapshot.get(group, [])}
         self._record("ai_decision", {
             "at": instant.isoformat(), "mode": self.config.mode,
+            "decision_id": decision_id, "spread": (snapshot.get("core") or {}).get("spread"),
             "model": model if isinstance(model, str) else None,
             "gateway_request_id": trace if isinstance(trace, str) else None,
             "ai_tokens": {name: usage[name]
@@ -233,7 +237,8 @@ class BotRunner:
                           if isinstance(usage, dict) and name in usage},
             "strategy": plan.strategy, "rationale": plan.rationale,
             "legs": [{"product_id": leg.product_id, "side": leg.side,
-                      "size": leg.size} for leg in plan.orders],
+                      "size": leg.size, "reference_price": quotes.get(leg.product_id, {}).get(
+                          "ask" if leg.side == "buy" else "bid")} for leg in plan.orders],
         })
         if self.config.mode == "observe":
             return {"phase": phase.value, "action": "preview",
@@ -261,6 +266,7 @@ class BotRunner:
             # outstanding orders when decisions were being generated.
             if self.exchange.open_orders():
                 raise PreflightError("Unexpected pending orders prior to entry")
+            self.executor.decision_id = decision_id
             self.executor.execute(plan, products)
             if self.config.schedule == "crypto-24x7":
                 self.active_since = instant
@@ -294,6 +300,8 @@ class BotRunner:
                 "mode": self.config.mode,
                 "schedule": self.config.schedule,
                 "action": str(action)[:80],
+                "next_scan": (self.last_ai_utc + timedelta(seconds=self.config.ai_interval_seconds)).isoformat() if self.last_ai_utc else None,
+                "exit_due": (self.active_since + timedelta(seconds=self.config.max_hold_seconds)).isoformat() if self.active_since and self.config.schedule == "crypto-24x7" else None,
                 "pid": os.getpid(),
                 "environment": "delta-india-demo",
             }

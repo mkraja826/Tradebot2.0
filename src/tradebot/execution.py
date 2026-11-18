@@ -77,7 +77,7 @@ class DemoExecutor:
         self.schedule = schedule
 
     def _log(self, kind: str, info: dict):
-        record(self.journal_path, kind, info)
+        record(self.journal_path, kind, {**info, "decision_id": getattr(self, "decision_id", None)})
 
     def execute(self, plan: TradePlan, products: list[dict]) -> ExecutionReport:
         if entry_phase(self.now(), schedule=self.schedule) != SessionPhase.TRADING:
@@ -97,12 +97,17 @@ class DemoExecutor:
                 if entry_phase(self.now(), schedule=self.schedule) != SessionPhase.TRADING:
                     raise ExecutionError("Session cutoff crossed during multi-leg entry")
                 cid = "tb2-" + uuid4().hex[:24]
-                self.exchange.place_order(product=ids_to_products[leg.product_id],
+                receipt = self.exchange.place_order(product=ids_to_products[leg.product_id],
                                           side=leg.side, size=leg.size,
                                           client_order_id=cid)
+                self._log("entry_submitted", {"order_id": str((receipt or {}).get("id") or ""),
+                                              "product_id": leg.product_id, "side": leg.side, "size": leg.size})
                 submitted.append(cid)
                 status = self.exchange.order_by_client_id(cid)
                 if status.get("state") != "closed" or int(status.get("unfilled_size", 0)):
+                    if 0 < int(status.get("unfilled_size") or 0) < leg.size:
+                        self._log("partial_fill", {"size": leg.size - int(status["unfilled_size"]),
+                                                  "product_id": leg.product_id})
                     raise ExecutionError(f"Order fill not verified for client ID {cid}")
                 self._log("entry_filled", {"client_order_id": cid,
                                           "product_id": leg.product_id,
@@ -151,10 +156,10 @@ class DemoExecutor:
                             continue
                         side = "sell" if size > 0 else "buy"
                         cid = "tb2-exit-" + uuid4().hex[:20]
-                        self.exchange.place_order(
+                        receipt = self.exchange.place_order(
                             product=product, side=side, size=abs(size),
                             client_order_id=cid, reduce_only=True)
-                        self._log("exit_submitted", {"product_id": pid,
+                        self._log("exit_submitted", {"order_id": str((receipt or {}).get("id") or ""), "product_id": pid,
                                                     "contracts": abs(size), "side": side,
                                                     "attempt": attempt + 1})
                 # Verify using fresh remote state; request acceptance != filled.

@@ -15,16 +15,16 @@ from pathlib import Path
 import sqlite3
 from threading import Lock, Thread
 import time
-from urllib.parse import quote, urlsplit
+from urllib.parse import parse_qs, quote, urlsplit
 
 from tradebot.delta import DeltaDemo
-from tradebot.market import _age_seconds, MarketDataError
+from tradebot.market import _age_seconds, _candles, MarketDataError
 
 SAFE_EVENT_FIELDS = frozenset({
     "mode", "strategy", "rationale", "model", "phase", "product_id",
     "side", "size", "contracts", "attempt", "attempts", "count", "at",
     "reason", "error", "error_type", "orders_submitted", "legs",
-    "ai_tokens", "message",
+    "ai_tokens", "message", "decision_id", "order_id", "spread",
 })
 ASSET_TYPES = {
     "/": ("index.html", "text/html; charset=utf-8"),
@@ -134,6 +134,11 @@ def _ledger(path: Path):
                 for at, raw in reversed(points)
                 if (value := _safe_decimal(raw)) is not None
             ]
+            result["fills"] = [
+                dict(zip(("time_ms", "symbol", "side", "size", "price", "fee", "asset", "order_id", "id"), row))
+                for row in db.execute("SELECT at_us / 1000, symbol, side, size, price, commission, "
+                                      "settling_asset, order_id, id FROM fills ORDER BY at_us DESC, id DESC LIMIT 160")
+            ]
     except (sqlite3.Error, OSError):
         result["ledger_error"] = "Ledger unavailable or not yet initialized"
     return result
@@ -155,8 +160,28 @@ def _runtime(path: Path):
     return {
         "status": status, "age_seconds": round(age, 1) if age is not None else None,
         "mode": mode, "schedule": schedule, "action": action[:80],
+        "next_scan": raw.get("next_scan"), "exit_due": raw.get("exit_due"),
         "updated_at": str(raw.get("updated_at") or "")[:35],
     }
+
+
+def _cashflows(rows):
+    """Signed posted wallet amounts per asset; exclude deposits and transfers."""
+    groups = {"cashflow": "cashflow", "settlement": "cashflow",
+              "funding": "funding", "commission": "fees",
+              "liquidation_fee": "fees", "commission_rebate": "fees"}
+    totals = {}
+    for row in rows:
+        group = groups.get(row["transaction_type"])
+        if group is None:
+            continue
+        asset, amount = row.get("asset_symbol"), _safe_decimal(row.get("amount"))
+        if not isinstance(asset, str) or not asset or amount is None:
+            raise ValueError("Incomplete settlement data")
+        parts = totals.setdefault(asset, dict.fromkeys(("cashflow", "funding", "fees"), Decimal(0)))
+        parts[group] += Decimal(amount)
+    return {asset: {k: str(v) for k, v in dict(parts, net=sum(parts.values())).items()}
+            for asset, parts in totals.items()}
 
 
 class DashboardData:
@@ -169,6 +194,10 @@ class DashboardData:
         )
         self.refresh_seconds = max(10, int(refresh_seconds))
         self._lock = Lock()
+        self._history_lock = Lock()
+        self._history = {}
+        self._performance_checked = float("-inf")
+        self._performance = None
         self._started_at = 0.0
         self._updating = False
         self._live = {
@@ -220,7 +249,7 @@ class DashboardData:
                 if Decimal(size) != 0:
                     active.append({
                         "symbol": str(row.get("product_symbol") or "BTC derivative")[:70],
-                        "size": size,
+                        "size": size, "entry": _safe_decimal(row.get("entry_price")),
                     })
             meta = wallet.get("meta") or {}
             payload["account"] = {
@@ -231,9 +260,39 @@ class DashboardData:
             }
         except (Exception):
             payload["account"] = {"status": "unavailable"}
+        now = _utc_now()
+        try:
+            end = int(now.timestamp())
+            rows = self.exchange.candles(start=end - 7200, end=end)
+            payload["candles"] = _candles(rows, now)["last_24"]
+        except Exception:
+            payload["candles"] = []
+        if time.monotonic() - self._performance_checked >= 300:
+            try:
+                end_us = int(now.timestamp() * 1_000_000)
+                rows = self.exchange.wallet_postings(end_us - 86_400_000_000, end_us)
+                self._performance = {"at": now.isoformat(), "assets": _cashflows(rows)}
+            except Exception:
+                self._performance = None
+            self._performance_checked = time.monotonic()
+        payload["performance"] = self._performance
         with self._lock:
             self._live = payload
             self._updating = False
+
+    def historical_bars(self, at):
+        """Two hours around a selected journal event, cached by five-minute bucket."""
+        end = min(int(_utc_now().timestamp()), (at // 300 + 4) * 300)
+        if at < 1 or at > int(_utc_now().timestamp()) + 60:
+            raise ValueError("Invalid inspection time")
+        with self._history_lock:
+            if end not in self._history:
+                rows = self.exchange.candles(start=end - 7200, end=end)
+                bars = _candles(rows, datetime.fromtimestamp(end, timezone.utc))["last_24"]
+                if len(self._history) >= 16:
+                    del self._history[next(iter(self._history))]
+                self._history[end] = bars
+            return self._history[end]
 
     def snapshot(self):
         now = time.monotonic()
@@ -298,6 +357,17 @@ def create_handler(state, *, allowed_hosts=None):
             if path == "/api/overview":
                 data = json.dumps(state.snapshot(), separators=(",", ":")).encode()
                 mime = "application/json; charset=utf-8"
+            elif path == "/api/candles":
+                try:
+                    at = int(parse_qs(urlsplit(self.path).query).get("at", [""])[0])
+                    data = json.dumps(state.historical_bars(at)).encode()
+                except (TypeError, ValueError):
+                    self._headers(0, "application/json", 400)
+                    return
+                except Exception:
+                    self._headers(0, "application/json", 503)
+                    return
+                mime = "application/json"
             elif path in ASSET_TYPES:
                 filename, mime = ASSET_TYPES[path]
                 data = files("tradebot").joinpath("dashboard_static", filename).read_bytes()
