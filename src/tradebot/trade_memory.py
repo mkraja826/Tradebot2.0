@@ -308,6 +308,27 @@ def public_learning_summary(path):
         "gpt6_memory_injection_enabled": False,
         "kimi_can_place_orders": False,
     }
+    # Runtime status is independent from the learning DB. A database can be
+    # present while its observer is offline; never imply otherwise.
+    runtime = {"watcher_status": "not_running", "kimi_paid_enabled": False,
+               "last_heartbeat": None}
+    runtime_path = path.parent / "learning-runtime.json"
+    if runtime_path.is_file() and not runtime_path.is_symlink() and runtime_path.stat().st_size <= 2048:
+        try:
+            raw = json.loads(runtime_path.read_text(encoding="utf-8"))
+            stamp = datetime.fromisoformat(raw.get("updated_at", ""))
+            if stamp.tzinfo is None:
+                raise ValueError("Naive watcher heartbeat")
+            seconds = (datetime.now(timezone.utc) - stamp).total_seconds()
+            runtime["last_heartbeat"] = stamp.isoformat()
+            if -10 <= seconds <= 120:
+                runtime["watcher_status"] = str(raw.get("watcher_status") or "unknown")[:60]
+                runtime["kimi_paid_enabled"] = raw.get("kimi_paid_enabled") is True
+            else:
+                runtime["watcher_status"] = "stale"
+        except (ValueError, TypeError, UnicodeError, OSError, AttributeError):
+            pass
+    initial.update(runtime)
     if not path.is_file() or path.is_symlink():
         return initial
     from urllib.parse import quote
@@ -329,6 +350,7 @@ def public_learning_summary(path):
             ).fetchall()
         return {
             "status": "available",
+            **runtime,
             "active_position": bool(active and active[0]),
             "last_observation_at": active[1] if active else None,
             "evidence_events": events,
