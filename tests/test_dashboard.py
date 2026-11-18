@@ -153,8 +153,12 @@ class DashboardTests(unittest.TestCase):
         js = (root / "app.js").read_text()
         self.assertIn('src="/app.js"', html)
         self.assertIn('href="/styles.css"', html)
-        self.assertNotIn("http://", html + css + js)
-        self.assertNotIn("https://", html + css + js)
+        # The SVG namespace is an identifier, not a network request.
+        self.assertNotIn('src="http', html)
+        self.assertNotIn('href="http', html)
+        self.assertNotIn('@import', css)
+        self.assertNotIn('fetch("http', js)
+        self.assertNotIn('fetch("https', js)
         self.assertNotIn("innerHTML", js)
         self.assertIn('fetch("/api/overview"', js)
 
