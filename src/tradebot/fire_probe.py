@@ -14,7 +14,10 @@ INSTRUCTION = (
     "Choose a BTCUSD perpetual futures position for this Delta India demo snapshot. "
     "Return only a JSON object with direction (LONG or SHORT), contracts (positive "
     "integer absolute target position size), stop_loss and take_profit (prices). "
-    "Use available margin, contract value, current position and spread."
+    "Use available margin, contract value, current position and spread. "
+    "If the supplied snapshot contains fire_execution_scope, strictly respect "
+    "its max_contracts_per_entry pilot limit and attached stop/target requirement. "
+    "Do not invent leverage, margin or available contract balance."
 )
 
 
