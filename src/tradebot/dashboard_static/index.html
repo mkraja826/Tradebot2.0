@@ -63,7 +63,21 @@
           </section><section class="panel" id="position-card">
             <div class="panel-header"><div><div class="eyebrow">LIVE TESTNET ACCOUNT</div><h2>Open BTC positions</h2></div><span class="tiny-label">READ ONLY</span></div>
             <p id="exit-due"></p><div id="positions-list" class="positions-list"><div class="empty">Connecting to the demo exchange…</div></div>
-          </section></div><div class="metrics">
+          </section></div>
+        <section class="panel fire-panel" id="fire">
+          <div class="panel-header">
+            <div><div class="eyebrow">MANUAL DECISION LAB · BTCUSD PERPETUAL</div><h2>FIRE <span class="fire-accent">AI comparison</span></h2></div>
+            <span class="tiny-label">READ-ONLY PROBE</span>
+          </div>
+          <p class="fire-description">One tap asks <strong>Kimi K3.1 Pro</strong> for a BTC direction, size, stop-loss and target. <strong>GPT-6</strong> independently produces a paper comparison from the same demo snapshot.</p>
+          <div class="fire-controls">
+            <button id="fire-preview" type="button">FIRE · Analyze only</button>
+            <div class="fire-disclosure">Two paid Top Billing model calls may be made per press. <strong>No demo or real-money orders are placed.</strong> Cooldown: 5 minutes.</div>
+          </div>
+          <p id="fire-status" role="status" aria-live="polite">Ready for a manually requested AI comparison.</p>
+          <div class="fire-results" id="fire-results"></div>
+        </section>
+        <div class="metrics">
           <div class="metric card"><div class="metric-label">BTC USD / BEST BID <span>₿</span></div><div class="metric-value" id="btc-bid">—</div><div class="metric-foot" id="quote-status">Waiting for exchange data</div></div>
           <div class="metric card"><div class="metric-label">BTC USD / BEST ASK <span>↗</span></div><div class="metric-value" id="btc-ask">—</div><div class="metric-foot" id="btc-spread">Spread unavailable</div></div>
           <div class="metric card"><div class="metric-label">CONFIRMED BTC FILLS <span>✓</span></div><div class="metric-value" id="confirmed-fills">0</div><div class="metric-foot">Exchange-ledger fills only</div></div>
