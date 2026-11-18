@@ -116,6 +116,14 @@ A Bitcoin-only AI futures and options bot project for the **Delta Exchange India
 - The **unattended demo order service is intentionally NOT enabled**. A new explicit `ALLOW_CRYPTO_24X7_DEMO=true` opt-in is required in addition to existing `--demo-execute` and `ENABLE_DEMO_ORDERS=true` switches. A first pilot is limited to 4 legs and 1 contract per leg, no position stacking, a 15-minute closeout timer, and a persistent halt marker after execution faults.
 - The position-close API lifecycle, reduce-only exits, broker fills, live demo margin and independent watchdog/pager are **not yet verified**. Demo execution must be tested with supervision before running unattended. See [24/7 crypto pilot guide](docs/CRYPTO_24X7_DEMO_PILOT.md).
 
+### M12 — Private responsive browser dashboard (prepared; not yet hosted)
+
+- **Read-only HTML/CSS/JavaScript command center** displaying fresh Delta India demo BTC bid/ask, signed open-position/order summaries, the runner heartbeat, recent DeepSeek proposals, audited order events, confirmed ledger fill counts, and **recorded equity observations (NOT realized P&L)**.
+- Launches through `python -m tradebot.dashboard --host 127.0.0.1 --port 8765` and uses a local non-secret API. It never requests a model completion, submits an order or returns API credentials. The broker GET cache refreshes at most once per 20 seconds while a browser is viewing.
+- The **VM installer** is `bash ops/install_dashboard_service.sh`. It runs beside a trading/observer service and automatically restarts on failure/VM boot. **Not installed on the user's VM yet.**
+- Security: forcibly binds to loopback, disallows mutation methods and unexpected Host headers, applies browser CSP and never opens a public VM firewall port. For viewing on Android outside the VM, set up an **authenticated** Cloudflare Access application plus private Tunnel (not configured yet), then allow its exact hostname with `TRADEBOT_DASHBOARD_ALLOWED_HOST`.
+- [Private browser setup and Cloudflare Access guide](docs/PRIVATE_BROWSER_DASHBOARD.md).
+
 ## Setup
 
 Python 3.11+, install with:
