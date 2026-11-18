@@ -21,7 +21,7 @@ class ObserveServiceTests(unittest.TestCase):
         self.assertIn('export ENABLE_DEMO_ORDERS=false', script)
         self.assertIn('run --mode observe', script)
         self.assertIn('--poll-seconds 60', script)
-        self.assertIn('--ai-interval-seconds 1800', script)
+        self.assertIn('--ai-interval-seconds 300', script)
         self.assertIn('--schedule crypto-24x7', script)
         self.assertIn('--max-options 32', script)
         self.assertNotIn('run --mode demo', script)
