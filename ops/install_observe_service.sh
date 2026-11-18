@@ -87,7 +87,7 @@ sudo systemctl restart "$UNIT_NAME"
 echo
 echo "Service configured to auto-start on VM boot and restart after a crash."
 echo "Observer mode: Delta India DEMO, NO order submission."
-echo "Polling: 60 seconds. Model proposals: around every 30 minutes, 24x7 (paid Top Billing calls)."
+echo "Polling: 60 seconds. Model proposals: around every 5 minutes, 24x7 (paid Top Billing calls)."
 echo "Check: sudo systemctl status tradebot2-observe --no-pager"
 echo "Logs: sudo journalctl -u tradebot2-observe -n 20 --no-pager"
 echo "Stop: sudo systemctl stop tradebot2-observe"
