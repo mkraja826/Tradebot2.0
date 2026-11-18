@@ -5,7 +5,6 @@ The option limit is a context-size budget, not a financial risk limit.
 """
 from collections import defaultdict
 from decimal import Decimal, InvalidOperation
-from math import ceil
 
 
 def _decimal(value, default=Decimal("Infinity")):
