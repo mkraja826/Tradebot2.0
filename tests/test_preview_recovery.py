@@ -125,7 +125,10 @@ class PreviewRecoveryTests(unittest.TestCase):
         self.assertEqual(status, 2)
         self.assertEqual(count, 0)
         self.assertEqual(result["status"], "market_data_unavailable")
-        self.assertNotIn("123", json.dumps(result))
+        # Check sanitized error fields, not the independent ISO timestamp;
+        # a legitimate time like 19:00:11.412387 may contain the digits 123.
+        self.assertNotIn("DEMO ACCOUNT IDENTIFIER 123", result["error"])
+        self.assertNotIn("123", result["error"])
         self.assertFalse(result["orders_submitted"])
 
     def test_compacted_context_removes_duplicate_metadata_not_trade_evidence(self):
