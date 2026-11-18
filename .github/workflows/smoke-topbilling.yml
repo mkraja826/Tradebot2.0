@@ -1,0 +1,86 @@
+name: Smoke test Top Billing AI plan (one call)
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/smoke-topbilling.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: topbilling-ai-smoke
+  cancel-in-progress: false
+
+jobs:
+  one-call-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    env:
+      TB_API_KEY: ${{ secrets.TB_API_KEY }}
+      TB_MODEL: tb-deepseek-v4-1-flash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: One paid synthetic BTC strategy request, no exchange connection
+        run: |
+          PYTHONPATH=src python - <<'PY'
+          import os
+          import sys
+
+          from tradebot.ai import AIPlanner, PlanError
+
+          if not os.getenv("TB_API_KEY"):
+              print("FAIL: Top Billing repository secret is missing.")
+              sys.exit(1)
+
+          # Synthetic inputs: no Delta connection, credentials or market orders.
+          # These do not represent current Bitcoin prices or open positions.
+          simulated_market = {
+              "environment": "SIMULATED DATA ONLY; no live market feed",
+              "session_phase": "closed",
+              "quotes": "unavailable",
+              "quality": "no verified price, margin, or execution edge",
+              "demo_funds": None,
+              "instructional_note": "Research example only: do not place orders.",
+          }
+          synthetic_contracts = [{
+              "id": 10001,
+              "symbol": "BTCUSD",
+              "contract_type": "perpetual_futures",
+              "state": "live",
+          }, {
+              "id": 10002,
+              "symbol": "C-BTC-95000-271126",
+              "contract_type": "call_options",
+              "state": "live",
+          }]
+
+          try:
+              planner = AIPlanner()
+              # Exactly one billable completion. Do not retry on failure.
+              plan = planner.propose(simulated_market, synthetic_contracts)
+          except PlanError:
+              # Do not print response bodies, tracebacks, prompts or secrets.
+              print("FAIL: The one-call model response failed validation. "
+                    "See AI planner and provider compatibility.")
+              sys.exit(1)
+
+          print("PASS: DeepSeek returned a locally validated BTC trading-plan JSON.")
+          print("Model:", planner.model)
+          print("Strategy classification:", "WAIT" if not plan.orders else "TRADE")
+          print("Proposed legs:", len(plan.orders))
+          if plan.orders:
+              print("WARNING: Model proposed entries with no live market data "
+                    "outside session. Deterministic session guard must reject them.")
+          usage = planner.last_usage
+          if isinstance(usage, dict):
+              for key in ("prompt_tokens", "completion_tokens", "total_tokens"):
+                  val = usage.get(key)
+                  if type(val) is int and val >= 0:
+                      print(key + ":", val)
+          print("No Delta API calls, no demo orders, no other AI models.")
+          PY
