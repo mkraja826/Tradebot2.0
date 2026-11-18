@@ -95,6 +95,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Delta INDIA DEMO read-only API probe")
     parser.add_argument("--authenticated", action="store_true",
                         help="Also test signed wallet, orders and BTC positions GETs")
+    parser.add_argument("--full-snapshot", action="store_true",
+                        help="Validate BTC options, futures, Greeks and 5m analysis pipeline")
     args = parser.parse_args()
 
     if args.authenticated and (not os.getenv("DELTA_DEMO_API_KEY")
@@ -108,6 +110,19 @@ def main() -> None:
     )
     try:
         public = check_public(exchange)
+        if args.full_snapshot:
+            from tradebot.market import collect_market_snapshot
+            snapshot = collect_market_snapshot(exchange, include_balances=False)
+            public["market_intelligence"] = {
+                "pipeline": "passed",
+                "btc_derivatives": snapshot["quote_counts"]["catalog_btc_contracts"],
+                "futures_quotes": len(snapshot["futures"]),
+                "options_quotes": len(snapshot["options"]),
+                "usable_quotes": snapshot["quote_counts"]["usable_quotes"],
+                "candles_analyzed": len(snapshot["technical"]["last_24"]),
+                "no_accounts_read": True,
+                "orders_submitted": False,
+            }
         if args.authenticated:
             public["account"] = check_authenticated(exchange)
         else:
