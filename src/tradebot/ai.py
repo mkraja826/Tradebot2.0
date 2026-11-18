@@ -167,6 +167,7 @@ class AIPlanner(TopBillingClient):
             raise PlanError("AI model not in the approved low-cost model list")
         self.last_usage = None
         self.last_finish_reason = None
+        self.last_response_diagnostics = {}
 
     def check_model_access(self) -> bool:
         """Read-only model catalogue check, no paid completion request."""
@@ -236,6 +237,8 @@ class AIPlanner(TopBillingClient):
         }
         self.last_finish_reason = None
         self.last_usage = None
+        # Diagnostic metadata only, never raw completions or credentials.
+        self.last_response_diagnostics = {"reason": "request_failed"}
         response = self._call(TOPBILLING_CHAT_URL, body=payload, timeout=45)
         self.last_usage = response.get("usage")
         try:
@@ -244,18 +247,41 @@ class AIPlanner(TopBillingClient):
                 raise ValueError("Malformed AI choice")
             finish = choice.get("finish_reason")
             self.last_finish_reason = finish if isinstance(finish, str) else None
+            self.last_response_diagnostics = {
+                "reason": "response_not_parsed",
+                "finish_reason": self.last_finish_reason,
+                "content_chars": 0,
+            }
             if finish not in (None, "stop"):
+                self.last_response_diagnostics["reason"] = (
+                    "completion_limit" if finish == "length" else "incomplete_completion"
+                )
                 # Do not parse truncated content even if it appears to contain
                 # plausible orders. No paid retry is made automatically.
                 if finish == "length":
                     raise PlanError("AI response hit its completion-token limit; no plan accepted")
                 raise PlanError("AI response stopped without completion; no plan accepted")
             content = choice["message"]["content"]
-            if not isinstance(content, str) or not content:
+            if not isinstance(content, str):
+                self.last_response_diagnostics["reason"] = "missing_string_content"
+                raise ValueError("Non-string model response")
+            self.last_response_diagnostics["content_chars"] = len(content)
+            if not content:
+                self.last_response_diagnostics["reason"] = "empty_content"
                 raise ValueError("Empty model response")
-            raw = json.loads(content)
+            try:
+                raw = json.loads(content)
+            except (ValueError, TypeError):
+                self.last_response_diagnostics["reason"] = "invalid_json"
+                raise
         except PlanError:
             raise
         except (KeyError, TypeError, ValueError, IndexError):
             raise PlanError("AI did not return one complete JSON trading plan") from None
-        return validate_plan(raw, allowed_products)
+        try:
+            plan = validate_plan(raw, allowed_products)
+        except PlanError:
+            self.last_response_diagnostics["reason"] = "invalid_plan_schema"
+            raise
+        self.last_response_diagnostics["reason"] = "validated"
+        return plan
