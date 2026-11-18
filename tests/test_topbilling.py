@@ -98,6 +98,37 @@ class TopBillingTests(unittest.TestCase):
         # API credentials must never be echoed into prompt messages.
         self.assertNotIn("tb_test_dummy", json.dumps(request["body"]))
 
+    def test_invalid_json_has_sanitized_diagnostics(self):
+        self.transport.message["choices"][0]["message"]["content"] = (
+            'secret? ```json {"strategy":"wait"} ```'
+        )
+        with self.assertRaises(PlanError):
+            self.planner.propose({}, PRODUCTS)
+        details = self.planner.last_response_diagnostics
+        self.assertEqual(details["reason"], "invalid_json")
+        self.assertGreater(details["content_chars"], 0)
+        self.assertEqual(details["finish_reason"], "stop")
+        self.assertNotIn("secret?", str(details))
+
+    def test_empty_completion_is_explicitly_classified(self):
+        self.transport.message["choices"][0]["message"]["content"] = ""
+        with self.assertRaises(PlanError):
+            self.planner.propose({}, PRODUCTS)
+        self.assertEqual(self.planner.last_response_diagnostics["reason"], "empty_content")
+
+    def test_schema_rejection_is_distinct_from_bad_json(self):
+        self.transport.message["choices"][0]["message"]["content"] = json.dumps({
+            "strategy": "WAIT", "rationale": "No trade", "orders": ["not a leg"]
+        })
+        with self.assertRaises(PlanError):
+            self.planner.propose({}, PRODUCTS)
+        self.assertEqual(self.planner.last_response_diagnostics["reason"], "invalid_plan_schema")
+
+    def test_usable_completion_diagnostics_do_not_contain_content(self):
+        self.planner.propose({}, PRODUCTS)
+        self.assertEqual(self.planner.last_response_diagnostics["reason"], "validated")
+        self.assertNotIn("Research hedge", str(self.planner.last_response_diagnostics))
+
     def test_model_check_is_read_only(self):
         self.assertTrue(self.planner.check_model_access())
         req = self.transport.requests[0]
