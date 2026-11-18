@@ -16,6 +16,7 @@ import sys
 import signal
 from threading import Event
 
+from tradebot.ai import PlanError
 from tradebot.decision import build_ai_context
 from tradebot.delta import DEMO_API
 from tradebot.execution import CloseoutError, DemoExecutor, _position_size
@@ -219,8 +220,26 @@ class BotRunner:
         context["trading_schedule"] = self.config.schedule
         context["max_hold_seconds"] = self.config.max_hold_seconds if self.config.schedule == "crypto-24x7" else None
         self.last_ai_utc = instant
-        plan = self.planner.propose(
-            context, products, recent(self.config.journal_path))
+        try:
+            plan = self.planner.propose(
+                context, products, recent(self.config.journal_path))
+        except PlanError:
+            # A paid completion may have been returned but was not usable.
+            # Keep metadata only; never log raw model output, prompts or keys.
+            diag = getattr(self.planner, "last_response_diagnostics", {})
+            if not isinstance(diag, dict):
+                diag = {}
+            usage = getattr(self.planner, "last_usage", None)
+            self._record("ai_response_rejected", {
+                "model": getattr(self.planner, "model", None),
+                "reason": str(diag.get("reason") or "unknown"),
+                "finish_reason": diag.get("finish_reason"),
+                "content_chars": diag.get("content_chars"),
+                "ai_tokens": {key: usage[key] for key in (
+                    "prompt_tokens", "completion_tokens", "total_tokens")
+                    if isinstance(usage, dict) and type(usage.get(key)) is int},
+            })
+            raise
         usage = getattr(self.planner, "last_usage", None)
         model = getattr(self.planner, "model", None)
         trace = getattr(self.planner, "last_request_id", None)
