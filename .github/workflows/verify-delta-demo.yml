@@ -25,6 +25,8 @@ jobs:
         run: python -m pip install -e .
       - name: Public India demo BTC ticker, book and candles
         run: PYTHONPATH=src python -m tradebot.delta_probe
+      - name: Full public BTC options and futures market snapshot
+        run: PYTHONPATH=src python -m tradebot.delta_probe --full-snapshot
       - name: Authenticated demo read-only account inspection
         run: |
           if [ -n "$DELTA_DEMO_API_KEY" ] && [ -n "$DELTA_DEMO_API_SECRET" ]; then
