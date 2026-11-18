@@ -81,6 +81,12 @@ def _candles(rows: list[dict], instant: datetime):
     candles = [by_time[k] for k in sorted(by_time)]
     if len(candles) < 13:
         raise MarketDataError("Not enough BTC candles for analysis")
+    # We call the endpoint with 5-minute resolution, so a 1-hour return
+    # must span twelve *consecutive* 5-minute intervals.
+    last_13 = candles[-13:]
+    if any(b["time"] - a["time"] != 300
+           for a, b in zip(last_13, last_13[1:])):
+        raise MarketDataError("Recent BTC candles have missing or irregular intervals")
     if _age_seconds(candles[-1]["time"], instant) > 11 * 60:
         raise MarketDataError("BTC candle feed is stale")
     closes = [float(c["close"]) for c in candles]
