@@ -23,34 +23,50 @@ def watchdog_tick(exchange, store, *, pause=None):
         raise ValueError("Only explicitly enabled Delta India DEMO order client allowed")
     latest = store.latest()
     status = latest["status"]
-    if status not in EXPOSED:
+    planning = {"requested", "reasoning", "preflight"}
+    if status not in EXPOSED | planning:
         return {"status": "idle_or_terminal", "last_fire_status": status}
     press = latest["press"]
 
-    # The dashboard may be in the middle of model analysis / broker POST.
-    # Do not interfere with an in-progress entry. After 90s the submission
-    # can be treated as uncertain and independently inspected.
+    # The dashboard may be deciding or waiting for a broker response.
+    # Never interfere with a fresh entry; after 90s reconcile the durable
+    # request and signed remote account status before a status change.
     updated = datetime.fromisoformat(latest["updated_at"])
     age = (datetime.now(timezone.utc) - updated).total_seconds()
-    if status in {"submitting", "reconciling", "verifying_protection"} and age < 90:
+    if status in planning | {"submitting", "reconciling", "verifying_protection"} and age < 90:
         return {"status": "waiting_for_fire", "last_fire_status": status}
 
     # Read-only broker reconciliation first. Never assume a request was
     # rejected merely because the app lost its original HTTP response.
     import sqlite3
     with sqlite3.connect(store.path, timeout=10) as db:
-        row = db.execute(
-            "SELECT receipt FROM fire_entries WHERE press=?", (press,)
+        exists = db.execute(
+            "SELECT 1 FROM sqlite_master "
+            "WHERE type='table' AND name='fire_entries'"
         ).fetchone()
+        row = (db.execute(
+            "SELECT receipt FROM fire_entries WHERE press=?", (press,)
+        ).fetchone() if exists else None)
     receipt = json.loads(row[0]) if row else None
 
     if receipt is None:
-        # Never close unknown human/other-bot positions with a guessed ID.
-        if status in {"submitting", "reconciling"}:
-            store.update(press, "exposure_unknown",
-                         reason_code="missing_durable_broker_receipt")
-        return {"status": "manual_reconciliation_required",
-                "last_fire_status": store.latest()["status"]}
+        # The durable entry layer always commits its order intent before
+        # sending a POST. Without such a receipt, signed flatness evidence is
+        # required to mark the stale request aborted. Never close a position
+        # of unknown ownership merely because a browser worker disappeared.
+        positions = exchange.btc_positions()
+        orders = exchange.open_orders()
+        if (isinstance(positions, list) and isinstance(orders, list) and
+                not orders and all(
+                    isinstance(item, dict) and
+                    str(item.get("size")) in ("0", "0.0", "0.00") for item in positions)):
+            store.update(press, "aborted_flat", orders_submitted=False,
+                         protection_verified=False,
+                         reason_code="stale_request_without_broker_post")
+            return {"status": "aborted_flat"}
+        store.update(press, "exposure_unknown",
+                     reason_code="missing_durable_broker_receipt")
+        return {"status": "manual_reconciliation_required"}
 
     product_id = receipt["product_id"]
     position = active_position(exchange, product_id)
