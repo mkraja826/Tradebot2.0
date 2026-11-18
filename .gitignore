@@ -8,3 +8,6 @@ __pycache__/
 data/
 *.sqlite*
 *.log
+
+# Temporary Google GitHub Actions short-lived federated credential files
+gha-creds-*.json
