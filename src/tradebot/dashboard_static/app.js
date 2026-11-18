@@ -371,6 +371,57 @@ function renderDesk(data){
 byId("dismiss-record").onclick=resumeLive;
 update();
 
+let fireTradingEnabled = false;
+function renderFireExecution(data) {
+  const button=byId("fire-preview"), container=byId("fire-results"), status=byId("fire-status");
+  if(!button || !container || !status)return;
+  fireTradingEnabled=true;
+  text("fire-mode-label","DELTA INDIA DEMO · ORDER EXECUTION");
+  text("fire-description","One tap asks GPT-6 to decide BTCUSD direction, contract size, stop-loss and take-profit. The demo broker must verify an entry fill and BOTH protective orders. Kimi cannot trade.");
+  text("fire-disclosure","REAL DELTA DEMO ORDERS — no real funds. One paid GPT-6 completion per press. Uncertain exchange outcomes block additional FIRE requests. Contract pilot cap: "+data.max_contracts_per_fire+".");
+  const stages={
+    idle:"Ready for a manual GPT-6 Demo trade.",
+    requested:"FIRE accepted. Starting GPT-6…",
+    reasoning:"GPT-6 is deciding the trade…",
+    preflight:"Checking fresh BTC quote, account orders, and margin eligibility…",
+    submitting:"Submitting the BTCUSD market entry with attached SL/TP…",
+    reconciling:"Checking the entry against Delta Demo. Never resubmitting on timeout…",
+    verifying_protection:"Checking the fill and BOTH broker protective orders…",
+    protected_active:"Entry filled; STOP-LOSS and TAKE-PROFIT are verified on Delta Demo.",
+    flat_verified:"Delta Demo has been verified flat; no active FIRE exposure recorded.",
+    rejected_no_order:"No valid trade was submitted. Review GPT-6 response and demo account.",
+    exposure_unknown:"ALERT: Exposure/protection uncertain! Check Delta Demo account immediately.",
+    aborted_flat:"Previous FIRE was abandoned before submission; exchange flat.",
+    cancelled_flat_verified:"Entry cancelled and demo account flat."
+  };
+  button.disabled=!["idle","flat_verified","rejected_no_order","aborted_flat","cancelled_flat_verified"].includes(data.status);
+  button.textContent=button.disabled?"FIRE · "+(data.status||"processing").replaceAll("_"," ").toUpperCase():"FIRE · EXECUTE DEMO";
+  const active=data.status==="protected_active";
+  status.textContent=stages[data.status]||"Unknown FIRE execution state; inspect account before pressing again.";
+  container.replaceChildren();
+  if(data.direction){
+    const tile=node("div","fire-result");
+    tile.append(node("div","fire-result-title","GPT-6 · DELTA DEMO"));
+    tile.append(node("strong","fire-direction",data.direction+" · "+data.contracts+" contract(s)"));
+    const grid=node("div","fire-points");
+    for(const [label,value] of [["STOP LOSS",data.stop_loss],["TAKE PROFIT",data.take_profit]]){
+      const metric=node("div","fire-point");
+      metric.append(node("small","",label),node("b","",value==null?"—":value));
+      grid.append(metric);
+    }
+    tile.append(grid);
+    tile.append(node("p","fire-proof",
+      active?"BROKER CONFIRMED: entry and two protective orders.":
+      data.status==="flat_verified"?"EXCHANGE FLAT: no live position or orders.":
+      "Broker protection NOT YET verified. This is not a confirmed protected position."));
+    container.append(tile);
+  }
+  if(data.status==="exposure_unknown") {
+    container.append(node("p","fire-error",
+      "Manual broker verification required. Do not fire again until all BTC Demo positions and pending orders are reconciled."));
+  }
+}
+
 function renderFire(data) {
   const button=byId("fire-preview"), container=byId("fire-results"), status=byId("fire-status");
   if(!button || !container || !status)return;
@@ -416,6 +467,16 @@ async function refreshFire() {
   const button=byId("fire-preview");
   if(!button)return;
   try {
+    const modeResponse=await fetch("/api/fire",{credentials:"same-origin",cache:"no-store"});
+    if(!modeResponse.ok)throw new Error("FIRE mode unavailable");
+    const mode=await modeResponse.json();
+    if(mode.execution_enabled===true){
+      renderFireExecution(mode);
+      return;
+    }
+    fireTradingEnabled=false;
+    text("fire-mode-label","READ-ONLY PROBE");
+    text("fire-disclosure","Read-only research. One paid GPT-6 completion may be made. No demo orders are submitted.");
     const response=await fetch("/api/fire-preview",{credentials:"same-origin",cache:"no-store"});
     if(!response.ok)throw new Error("Fire status unavailable");
     renderFire(await response.json());
@@ -427,22 +488,28 @@ async function refreshFire() {
 const fireButton=byId("fire-preview");
 if(fireButton)fireButton.addEventListener("click",async()=>{
   if(fireButton.disabled)return;
-  if(!window.confirm("Run GPT-6 FIRE analysis? This may use one paid Top Billing completion. It will NOT place any orders."))return;
+  if(!fireTradingEnabled &&
+      !window.confirm("Run a read-only GPT-6 analysis? This may use one paid Top Billing completion. It will NOT place orders."))return;
   fireButton.disabled=true;
-  text("fire-status","Requesting a read-only GPT-6 analysis…");
+  text("fire-status",fireTradingEnabled?
+    "Executing one GPT-6 Delta DEMO trade request…":"Requesting a read-only GPT-6 analysis…");
   try {
-    const response=await fetch("/api/fire-preview",{
+    const path=fireTradingEnabled?"/api/fire":"/api/fire-preview";
+    const response=await fetch(path,{
       method:"POST", credentials:"same-origin",cache:"no-store",
-      headers:{"X-Tradebot-Action":"fire-preview"}
+      headers:{"X-Tradebot-Action":fireTradingEnabled?"fire-execute":"fire-preview"}
     });
     const payload=await response.json();
-    renderFire(payload);
-    if(!response.ok && payload.reason==="cooldown_active")
-      text("fire-status","Please wait for the five-minute cooldown.");
-    else if(!response.ok)
-      text("fire-status","Request blocked or already running. No orders placed.");
+    if(fireTradingEnabled)renderFireExecution(payload);
+    else renderFire(payload);
+    if(!response.ok)
+      text("fire-status",fireTradingEnabled?
+        "FIRE blocked: another trade, unresolved broker state, or cooldown. No NEW request was accepted.":
+        "Preview blocked or in cooldown. No orders placed.");
   } catch(err) {
-    text("fire-status","Unable to start comparison. No orders placed.");
+    text("fire-status",fireTradingEnabled?
+      "FIRE request status uncertain. Check Delta Demo positions and refresh; do not press again.":
+      "Unable to start GPT-6 preview. No orders placed.");
     fireButton.disabled=false;
   }
 });
