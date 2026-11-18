@@ -156,8 +156,16 @@ class BotRunner:
         self.last_ai_utc = instant
         plan = self.planner.propose(
             context, products, recent(self.config.journal_path))
+        usage = getattr(self.planner, "last_usage", None)
+        model = getattr(self.planner, "model", None)
+        trace = getattr(self.planner, "last_request_id", None)
         self._record("ai_decision", {
             "at": instant.isoformat(), "mode": self.config.mode,
+            "model": model if isinstance(model, str) else None,
+            "gateway_request_id": trace if isinstance(trace, str) else None,
+            "ai_tokens": {name: usage[name]
+                          for name in ("prompt_tokens", "completion_tokens", "total_tokens")
+                          if isinstance(usage, dict) and name in usage},
             "strategy": plan.strategy, "rationale": plan.rationale,
             "legs": [{"product_id": leg.product_id, "side": leg.side,
                       "size": leg.size} for leg in plan.orders],
