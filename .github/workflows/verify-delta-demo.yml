@@ -1,0 +1,38 @@
+name: Delta India DEMO read-only integration
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/verify-delta-demo.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  demo-connectivity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      DELTA_DEMO_API_KEY: ${{ secrets.DELTA_DEMO_API_KEY }}
+      DELTA_DEMO_API_SECRET: ${{ secrets.DELTA_DEMO_API_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Public India demo BTC ticker, book and candles
+        run: PYTHONPATH=src python -m tradebot.delta_probe
+      - name: Authenticated demo read-only account inspection
+        run: |
+          if [ -n "$DELTA_DEMO_API_KEY" ] && [ -n "$DELTA_DEMO_API_SECRET" ]; then
+            echo "Demo secrets present; verifying signed GET endpoints."
+            PYTHONPATH=src python -m tradebot.delta_probe --authenticated
+          elif [ -z "$DELTA_DEMO_API_KEY" ] && [ -z "$DELTA_DEMO_API_SECRET" ]; then
+            echo "NOT VERIFIED: Delta demo API key and secret are not configured."
+            echo "Add DELTA_DEMO_API_KEY and DELTA_DEMO_API_SECRET to Actions secrets."
+          else
+            echo "FAIL: Only one Delta credential is configured."
+            exit 1
+          fi
+          echo "No exchange orders were submitted."
