@@ -1,0 +1,350 @@
+"""Explicit one-tap, GPT-6-only BTCUSD Delta India DEMO FIRE execution.
+
+A separate opt-in systemd dashboard setting is required before any POST order.
+The broker must confirm the entry fill AND both protective stop orders. The
+broker is the authority: acceptance, AI output, or a returned order ID alone
+never means a protected trade. No production Delta hostname is supported.
+
+This is NOT a substitute for a continuously running external reconciliation
+watchdog and supervised first-order commissioning.
+"""
+from contextlib import closing
+from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
+from pathlib import Path
+import json
+import os
+import sqlite3
+from threading import Thread
+from time import sleep
+from uuid import uuid4
+
+from tradebot.delta import DEMO_API, DeltaDemo, DeltaError
+from tradebot.execution import DemoExecutor
+from tradebot.fire_entry import FireEntries
+from tradebot.fire_probe import ROLES, load_snapshot, run_probe, validate
+from tradebot.market import _age_seconds
+
+
+TERMINAL = frozenset({
+    "rejected_no_order", "aborted_flat", "flat_verified",
+    "cancelled_flat_verified",
+})
+# Do not convert unknown exchange states to terminal: they require evidence.
+EXPOSED = frozenset({
+    "submitting", "reconciling", "verifying_protection",
+    "protected_active", "exposure_unknown",
+})
+
+
+class FireTradeError(RuntimeError):
+    pass
+
+
+def _now():
+    return datetime.now(timezone.utc)
+
+
+def _dec(raw):
+    try:
+        d = Decimal(str(raw))
+        if not d.is_finite():
+            raise ValueError
+        return d
+    except (TypeError, ValueError, InvalidOperation):
+        raise FireTradeError("Invalid broker numeric field") from None
+
+
+def active_position(exchange, product_id):
+    rows = exchange.btc_positions()
+    if not isinstance(rows, list):
+        raise FireTradeError("Invalid broker position list")
+    active = []
+    for row in rows:
+        if not isinstance(row, dict):
+            raise FireTradeError("Invalid broker position entry")
+        size = _dec(row.get("size"))
+        if size != size.to_integral_value():
+            raise FireTradeError("Non-integral exchange contract size")
+        if size:
+            active.append(row)
+    if not active:
+        return None
+    if len(active) != 1 or str(active[0].get("product_id")) != str(product_id):
+        raise FireTradeError("Unexpected BTC exposure")
+    return active[0]
+
+
+def protective_orders_verified(orders, *, product_id, plan):
+    """Both distinct child stop orders must be present and active.
+
+    The intended tick-precision SL/TP must appear as broker triggers.
+    Price rounding by the broker is NOT silently interpreted as verification.
+    """
+    if not isinstance(orders, list):
+        raise FireTradeError("Invalid open-order list")
+    side = "sell" if plan["direction"] == "LONG" else "buy"
+    found = {}
+    for order in orders:
+        if not isinstance(order, dict):
+            raise FireTradeError("Malformed broker open-order")
+        if str(order.get("product_id")) != str(product_id):
+            continue
+        category = order.get("stop_order_type")
+        if category not in ("stop_loss_order", "take_profit_order"):
+            continue
+        if (order.get("bracket_order") is not True or
+                order.get("side") != side or
+                order.get("state") not in ("open", "pending") or
+                not order.get("id")):
+            continue
+        requested = plan["stop_loss"] if category == "stop_loss_order" else plan["take_profit"]
+        try:
+            matched = _dec(order.get("stop_price")) == _dec(requested)
+        except FireTradeError:
+            matched = False
+        if matched:
+            found.setdefault(category, set()).add(str(order["id"]))
+    return bool(found.get("stop_loss_order") and found.get("take_profit_order")
+                and found["stop_loss_order"].isdisjoint(found["take_profit_order"]))
+
+
+class FireTradeStore:
+    """Durable cross-process manual-press reservation; no automatic reposting."""
+
+    def __init__(self, path):
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with closing(sqlite3.connect(self.path, timeout=10)) as db:
+            db.execute("""CREATE TABLE IF NOT EXISTS fire_requests(
+                press TEXT PRIMARY KEY, created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL, status TEXT NOT NULL,
+                result TEXT NOT NULL)""")
+            db.commit()
+
+    def _connect(self):
+        return sqlite3.connect(self.path, timeout=10)
+
+    def latest(self):
+        with closing(self._connect()) as db:
+            row = db.execute(
+                "SELECT press,created_at,updated_at,status,result "
+                "FROM fire_requests ORDER BY created_at DESC LIMIT 1"
+            ).fetchone()
+        if not row:
+            return {"status": "idle"}
+        return dict(press=row[0], created_at=row[1], updated_at=row[2],
+                    status=row[3], **json.loads(row[4]))
+
+    def reserve(self, *, when=None):
+        when = when or _now()
+        if when.tzinfo is None:
+            raise FireTradeError("Timezone-aware clock required")
+        press = uuid4().hex
+        with closing(self._connect()) as db:
+            db.execute("BEGIN IMMEDIATE")
+            old = db.execute(
+                "SELECT status,created_at FROM fire_requests "
+                "ORDER BY created_at DESC LIMIT 1"
+            ).fetchone()
+            if old:
+                if old[0] not in TERMINAL:
+                    raise FireTradeError("Previous FIRE needs broker reconciliation")
+                age = (when - datetime.fromisoformat(old[1])).total_seconds()
+                if age < 300:
+                    raise FireTradeError("FIRE cooldown active")
+            stamp = when.isoformat()
+            db.execute("INSERT INTO fire_requests VALUES (?,?,?,?,?)",
+                       (press, stamp, stamp, "requested", "{}"))
+            db.commit()
+        return press
+
+    def update(self, press, status, **fields):
+        if status not in (TERMINAL | EXPOSED |
+                          {"requested", "reasoning", "preflight"}):
+            raise FireTradeError("Unsupported FIRE state")
+        # Only audited fields; never accept provider response bodies or keys.
+        allowed = {"model", "direction", "contracts", "stop_loss",
+                   "take_profit", "broker_order_id", "order_state",
+                   "protection_verified", "orders_submitted",
+                   "reason_code", "snapshot_at"}
+        if set(fields) - allowed:
+            raise FireTradeError("Unexpected FIRE status data")
+        with closing(self._connect()) as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT status,result FROM fire_requests WHERE press=?", (press,)
+            ).fetchone()
+            if row is None:
+                raise FireTradeError("FIRE receipt missing")
+            current = json.loads(row[1])
+            current.update(fields)
+            db.execute(
+                "UPDATE fire_requests SET status=?,updated_at=?,result=? WHERE press=?",
+                (status, _now().isoformat(),
+                 json.dumps(current, separators=(",", ":"), allow_nan=False), press)
+            )
+            db.commit()
+            return {"press": press, "status": status, **current}
+
+
+def _live_preflight(exchange, snapshot, plan):
+    if getattr(exchange, "base_url", None) != DEMO_API or not exchange.allow_orders:
+        raise FireTradeError("Demo-only trading API required")
+    ticker = exchange.ticker("BTCUSD")
+    if not isinstance(ticker, dict) or ticker.get("symbol") != "BTCUSD":
+        raise FireTradeError("Invalid BTCUSD ticker")
+    if _age_seconds(ticker.get("timestamp"), _now()) > 30:
+        raise FireTradeError("Stale broker quote")
+    q = ticker.get("quotes") or {}
+    bid, ask = _dec(q.get("best_bid")), _dec(q.get("best_ask"))
+    if bid <= 0 or ask <= bid:
+        raise FireTradeError("Invalid broker spread")
+    validate(plan, {"best_bid": str(bid), "best_ask": str(ask)})
+    earlier = (_dec(snapshot["core"]["best_bid"]) +
+               _dec(snapshot["core"]["best_ask"])) / 2
+    current = (bid + ask) / 2
+    if abs(current / earlier - 1) > Decimal("0.005"):
+        raise FireTradeError("BTC moved after GPT-6 analysis")
+    if exchange.open_orders():
+        raise FireTradeError("Existing exchange orders require reconciliation")
+    if active_position(exchange, snapshot["core"]["ticker"]["product_id"]):
+        raise FireTradeError("An existing position must be closed first")
+
+
+def _protection_check(exchange, receipt, *, pause=sleep, attempts=6):
+    plan = receipt["plan"]
+    product_id = receipt["product_id"]
+    direction = 1 if plan["direction"] == "LONG" else -1
+    for attempt in range(attempts):
+        position = active_position(exchange, product_id)
+        orders = exchange.open_orders()
+        if position is None and not orders:
+            # Parent has filled and exchange reports no further exposure.
+            # This is verified flat, not evidence that SL or TP caused exit.
+            return "flat_verified"
+        if position is not None:
+            size = _dec(position["size"])
+            if int(size) != direction * plan["contracts"]:
+                raise FireTradeError("Exchange position does not match entry fill")
+            if protective_orders_verified(orders, product_id=product_id, plan=plan):
+                return "protected_active"
+        if attempt < attempts - 1:
+            pause(1)
+    raise FireTradeError("Both protective orders not verified")
+
+
+class FireDemoController:
+    """Background worker only when manually activated via authenticated UI."""
+
+    def __init__(self, path, *, enabled=False, exchange_factory=None,
+                 snapshot_loader=load_snapshot, probe=run_probe,
+                 max_contracts=1, pause=sleep, spawn=None):
+        self.enabled = bool(enabled)
+        self.store = FireTradeStore(path)
+        self.path = Path(path)
+        self.exchange_factory = exchange_factory or (lambda: DeltaDemo(
+            api_key=os.environ["DELTA_DEMO_API_KEY"],
+            api_secret=os.environ["DELTA_DEMO_API_SECRET"],
+            allow_orders=True,
+        ))
+        self.snapshot_loader = snapshot_loader
+        self.probe = probe
+        self.max_contracts = max_contracts
+        self.pause = pause
+        self.spawn = spawn or (lambda f: Thread(target=f, daemon=True).start())
+
+    def snapshot(self):
+        result = self.store.latest()
+        return {**result,
+                "mode": "delta_india_demo_execution" if self.enabled else "disabled",
+                "execution_enabled": self.enabled, "model": "tb-gpt-6",
+                "account": "Delta India Demo only",
+                "max_contracts_per_fire": self.max_contracts,
+                "protection_verified": result.get("protection_verified") is True,
+                "orders_submitted": result.get("orders_submitted") is True}
+
+    def start(self):
+        if not self.enabled:
+            return False, "execution_disabled"
+        try:
+            press = self.store.reserve()
+        except FireTradeError:
+            return False, "existing_trade_or_cooldown"
+        self.spawn(lambda: self._run(press))
+        return True, "accepted"
+
+    def _run(self, press):
+        submitted = False
+        exchange = None
+        try:
+            self.store.update(press, "reasoning", model="tb-gpt-6",
+                              orders_submitted=False, protection_verified=False)
+            # One fresh snapshot is used by both GPT-6 and this execution.
+            snapshot = self.snapshot_loader()
+            collected = datetime.fromisoformat(snapshot["collected_at"])
+            if (collected.tzinfo is None or
+                    (_now() - collected).total_seconds() > 60):
+                raise FireTradeError("Stale market snapshot")
+            report = self.probe(dict(ROLES), lambda: snapshot)
+            raw = (report.get("results") or {}).get("fire") or {}
+            if "decision" not in raw:
+                raise FireTradeError("GPT-6 did not produce a valid decision")
+            plan = validate(raw["decision"], snapshot["core"])
+            if not 1 <= plan["contracts"] <= self.max_contracts:
+                raise FireTradeError("Pilot order size exceeds configured contract limit")
+            self.store.update(
+                press, "preflight", direction=plan["direction"],
+                contracts=plan["contracts"], stop_loss=plan["stop_loss"],
+                take_profit=plan["take_profit"],
+                snapshot_at=snapshot["collected_at"])
+            exchange = self.exchange_factory()
+            _live_preflight(exchange, snapshot, plan)
+            self.store.update(press, "submitting")
+            submitted = True  # Exchange outcome could become uncertain after call.
+            entries = FireEntries(self.path, exchange)
+            receipt = entries.submit_first_entry(press, snapshot, plan)
+            for attempt in range(5):
+                if receipt["status"] == "filled":
+                    break
+                if receipt["status"] in ("cancelled",):
+                    break
+                self.store.update(press, "reconciling")
+                if attempt:
+                    self.pause(1)
+                receipt = entries.reconcile(press)
+            if receipt["status"] != "filled":
+                raise FireTradeError("No fully reconciled entry fill")
+            self.store.update(
+                press, "verifying_protection", broker_order_id=str(
+                    receipt.get("order_id") or "")[:64], order_state="filled",
+                orders_submitted=True)
+            state = _protection_check(exchange, receipt, pause=self.pause)
+            self.store.update(
+                press, state, protection_verified=state == "protected_active",
+                orders_submitted=True)
+        except Exception:
+            # No raw provider/broker error is logged or returned to browser.
+            if not submitted:
+                self.store.update(press, "rejected_no_order",
+                                  reason_code="pretrade_failed",
+                                  protection_verified=False,
+                                  orders_submitted=False)
+                return
+            # An ambiguous POST result might still have filled.
+            # Close out BTC exposure; never repost the original FIRE request.
+            self.store.update(press, "exposure_unknown",
+                              reason_code="execution_or_protection_unverified",
+                              orders_submitted=True, protection_verified=False)
+            try:
+                exchange = exchange or self.exchange_factory()
+                DemoExecutor(
+                    exchange, schedule="crypto-24x7", pause=self.pause,
+                    journal_path=str(self.path.parent / "trades.jsonl")
+                ).closeout(max_attempts=3)
+                self.store.update(
+                    press, "flat_verified", orders_submitted=True,
+                    protection_verified=False, reason_code="emergency_flat_verified")
+            except Exception:
+                # Only separate broker reconciliation can resolve this halt.
+                pass
