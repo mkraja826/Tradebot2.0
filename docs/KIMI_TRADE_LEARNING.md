@@ -2,8 +2,10 @@
 
 ## Roles and scope
 
-GPT-6 is the sole FIRE decision-maker. FIRE remains research-only until
-supervised Delta Demo order execution is separately implemented and verified.
+GPT-6 is the sole FIRE decision-maker. The Delta India Demo FIRE order
+adapter is implemented behind an **explicit disabled-by-default switch**;
+its first broker-connected test has not yet been verified. See
+[GPT-6 FIRE Demo activation](FIRE_EXECUTION_DEMO.md).
 DeepSeek V4.1 Flash remains the 24/7 opportunity scanner.
 
 Kimi K3.1 Pro is a separate **research-only** learning reviewer. It has no
@@ -53,7 +55,8 @@ Restart dashboard separately to see **Kimi Learning Lab**:
 
 The response distinguishes persistent research data from fresh watcher
 heartbeats. Database exists does not mean the Kimi watcher is running.
-Both demo execution and GPT-6 memory injection remain disabled.
+The FIRE Demo execution path is disabled until explicitly enabled on the
+dashboard; GPT-6 memory injection remains disabled.
 
 ## Confirmed-fill evidence (manual, read-only)
 
