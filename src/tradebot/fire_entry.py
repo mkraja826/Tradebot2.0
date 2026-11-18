@@ -12,6 +12,7 @@ from tradebot.fire_probe import validate
 class FireEntries:
     def __init__(self, path, exchange):
         self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
         self.exchange = exchange
         with closing(sqlite3.connect(self.path)) as db:
             db.execute("""CREATE TABLE IF NOT EXISTS fire_entries (
@@ -46,9 +47,13 @@ class FireEntries:
             if type(product_id) is not int or product_id <= 0:
                 raise DeltaError("Invalid BTCUSD product ID")
             positions = self.exchange.btc_positions()
-            if snapshot["position_contracts"] or any(int(p["size"]) for p in positions
-                                                      if str(p["product_id"]) == str(product_id)):
-                raise DeltaError("First-entry submission requires a flat BTCUSD position")
+            if (not isinstance(positions, list) or snapshot["position_contracts"]
+                    or any(int(p["size"]) != 0 for p in positions)):
+                raise DeltaError("First entry requires zero BTC positions")
+            # Attached brackets cannot safely coexist with an unknown
+            # pre-existing order or stop order on this dedicated demo account.
+            if self.exchange.open_orders():
+                raise DeltaError("First entry requires zero existing open orders")
             receipt = dict(press=press, product_id=product_id, plan=plan, status="submitting")
             self._save(db, receipt)
             try:
@@ -56,6 +61,8 @@ class FireEntries:
                     "product_id": product_id, "client_order_id": press,
                     "side": "buy" if plan["direction"] == "LONG" else "sell",
                     "size": plan["contracts"], "order_type": "market_order",
+                    "reduce_only": False,
+                    "bracket_stop_trigger_method": "mark_price",
                     "bracket_stop_loss_price": plan["stop_loss"],
                     "bracket_take_profit_price": plan["take_profit"],
                 })["result"]
@@ -75,6 +82,11 @@ class FireEntries:
             raise DeltaError("Order identity unconfirmed")
         receipt["order_id"] = order["id"]
         receipt["exchange_state"] = order.get("state")
+        # The parent echo is NOT proof of triggered protective orders.
+        receipt["bracket_parent_acknowledged"] = (
+            str(order.get("bracket_stop_loss_price") or "") == receipt["plan"]["stop_loss"]
+            and str(order.get("bracket_take_profit_price") or "") == receipt["plan"]["take_profit"]
+        )
         if order.get("state") == "closed" and str(order.get("unfilled_size")) == "0":
             receipt["status"] = "filled"
         elif order.get("state") == "cancelled":
