@@ -370,3 +370,80 @@ function renderDesk(data){
 }
 byId("dismiss-record").onclick=resumeLive;
 update();
+
+function renderFire(data) {
+  const button=byId("fire-preview"), container=byId("fire-results"), status=byId("fire-status");
+  if(!button || !container || !status)return;
+  const remaining=Number(data.cooldown_seconds||0);
+  button.disabled=data.status==="running"||remaining>0;
+  button.textContent=data.status==="running"?"Analyzing two models…":
+    remaining>0?"FIRE · Retry in "+Math.ceil(remaining/60)+"m":"FIRE · Analyze only";
+  const messages={
+    idle:"Ready. Pressing FIRE analyzes BTC demo market; it never submits an order.",
+    running:"Contacting Kimi and GPT-6. Two paid requests may be in progress.",
+    completed:"Analysis completed. Compare two proposed plans below. No orders submitted.",
+    failed:"No valid comparison was completed. No orders submitted."
+  };
+  status.textContent=messages[data.status]||"Comparison unavailable.";
+  if(!data.result || !data.result.results)return;
+  container.replaceChildren();
+  for(const [role,title] of [["fire","Kimi K3.1 Pro · FIRE"],["paper","GPT-6 · Paper comparison"]]) {
+    const value=data.result.results[role]||{}, tile=node("div","fire-result");
+    tile.append(node("div","fire-result-title",title));
+    if(value.decision) {
+      const p=value.decision;
+      tile.append(node("strong","fire-direction",String(p.direction||"")+
+        " · "+String(p.contracts||"")+" contract(s)"));
+      const grid=node("div","fire-points");
+      for(const [label,number] of [["STOP LOSS",p.stop_loss],["TAKE PROFIT",p.take_profit]]) {
+        const metric=node("div","fire-point");
+        metric.append(node("small","",label),node("b","",number));
+        grid.append(metric);
+      }
+      tile.append(grid);
+    } else {
+      tile.append(node("p","fire-error","No validated trading decision returned."));
+    }
+    tile.append(node("small","fire-time",
+      typeof value.latency_ms==="number"?"Model latency: "+value.latency_ms+"ms":"Research only · Not executed"));
+    container.append(tile);
+  }
+  const footer=node("p","fire-proof","Snapshot: "+String(data.result.snapshot_at||"unknown")+
+    " · Both models used the same market evidence. These are not executions.");
+  container.append(footer);
+}
+async function refreshFire() {
+  const button=byId("fire-preview");
+  if(!button)return;
+  try {
+    const response=await fetch("/api/fire-preview",{credentials:"same-origin",cache:"no-store"});
+    if(!response.ok)throw new Error("Fire status unavailable");
+    renderFire(await response.json());
+  } catch(err) {
+    text("fire-status","AI comparison unavailable. No trading order can be placed from this panel.");
+    button.disabled=true;
+  }
+}
+const fireButton=byId("fire-preview");
+if(fireButton)fireButton.addEventListener("click",async()=>{
+  if(fireButton.disabled)return;
+  if(!window.confirm("Run Kimi FIRE research and GPT-6 paper comparison? This can use two paid Top Billing completions. It will NOT place any orders."))return;
+  fireButton.disabled=true;
+  text("fire-status","Submitting read-only comparison request…");
+  try {
+    const response=await fetch("/api/fire-preview",{
+      method:"POST", credentials:"same-origin",cache:"no-store",
+      headers:{"X-Tradebot-Action":"fire-preview"}
+    });
+    const payload=await response.json();
+    renderFire(payload);
+    if(!response.ok && payload.reason==="cooldown_active")
+      text("fire-status","Please wait for the five-minute cooldown.");
+    else if(!response.ok)
+      text("fire-status","Request blocked or already running. No orders placed.");
+  } catch(err) {
+    text("fire-status","Unable to start comparison. No orders placed.");
+    fireButton.disabled=false;
+  }
+});
+refreshFire();setInterval(refreshFire,6000);
