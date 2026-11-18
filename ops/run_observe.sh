@@ -29,9 +29,10 @@ export ENABLE_DEMO_ORDERS=false
 export TRADEBOT_JOURNAL="$PROJECT/data/trades.jsonl"
 export PYTHONUNBUFFERED=1
 
-# 60 s polling; DeepSeek can make at most one proposal attempt each hour
-# within the permitted NYSE entry window. Never submit or cancel orders.
+# 60 s polling; target one DeepSeek proposal attempt every 30 minutes
+# around the clock (up to about 48/day without restarts). No orders.
 exec "$PROJECT/.venv/bin/tradebot" run --mode observe \
+  --schedule crypto-24x7 \
   --poll-seconds 60 \
-  --ai-interval-seconds 3600 \
+  --ai-interval-seconds 1800 \
   --max-options 32
