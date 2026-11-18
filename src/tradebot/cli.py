@@ -7,15 +7,20 @@ from pathlib import Path
 
 from tradebot.delta import DeltaDemo
 from tradebot.market import collect_market_snapshot
+from tradebot.ai import AIPlanner
+from tradebot.decision import build_ai_context
+from tradebot.journal import record, recent
 from tradebot.session import session_phase, NEW_YORK
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Tradebot 2.0 (Delta India demo only)")
-    parser.add_argument("command", choices=("status", "catalog", "snapshot", "balances"))
+    parser.add_argument("command", choices=("status", "catalog", "snapshot", "balances", "preview"))
     parser.add_argument("--include-balances", action="store_true",
                         help="Include signed read-only demo wallet balances in snapshot")
-    parser.add_argument("--output", help="Save complete snapshot as JSON to this path")
+    parser.add_argument("--output", help="Save a complete snapshot or preview JSON to this path")
+    parser.add_argument("--max-options", type=int, default=128,
+                        help="Option quote context budget for preview (8-512)")
     args = parser.parse_args()
 
     if args.command == "status":
@@ -60,7 +65,42 @@ def main() -> None:
         return
 
     snapshot = collect_market_snapshot(
-        exchange, include_balances=args.include_balances)
+        exchange, include_balances=args.include_balances or args.command == "preview")
+    if args.command == "preview":
+        # Research-only: the model can choose any strategy, but nothing
+        # produced here can place an exchange order.
+        context, products = build_ai_context(
+            snapshot, max_options=args.max_options)
+        path = os.getenv("TRADEBOT_JOURNAL", "data/trades.jsonl")
+        proposal = AIPlanner().propose(context, products, recent(path))
+        output = {
+            "environment": "delta-india-demo",
+            "snapshot_at": snapshot["collected_at"],
+            "session_phase": snapshot["session_phase"],
+            "strategy": proposal.strategy,
+            "rationale": proposal.rationale,
+            "orders": [
+                {"product_id": o.product_id, "side": o.side, "size": o.size}
+                for o in proposal.orders
+            ],
+            "candidate_coverage": context["coverage"],
+            "orders_submitted": False,
+            "margin_verified": False,
+            "warning": "Research proposal only. No broker order or P&L was produced.",
+        }
+        record(path, "ai_preview", {
+            "strategy": proposal.strategy,
+            "rationale": proposal.rationale,
+            "orders": output["orders"],
+            "snapshot_at": snapshot["collected_at"],
+        })
+        if args.output:
+            destination = Path(args.output)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(json.dumps(output, indent=2) + "\\n",
+                                   encoding="utf-8")
+        print(json.dumps(output, indent=2))
+        return
     if args.output:
         destination = Path(args.output)
         destination.parent.mkdir(parents=True, exist_ok=True)
