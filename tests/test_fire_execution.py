@@ -42,6 +42,7 @@ class FakeDemo:
     def ticker(self, symbol):
         return {
             "symbol": "BTCUSD", "product_id": 27,
+            "mark_price": "63214.25",
             "timestamp": int(datetime.now(timezone.utc).timestamp()),
             "quotes": {"best_bid": "63214", "best_ask": "63214.5"},
         }
