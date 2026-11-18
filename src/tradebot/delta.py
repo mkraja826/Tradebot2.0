@@ -117,20 +117,31 @@ class DeltaDemo:
         """Read-only demo URL. Callers cannot change it to a production host."""
         return DEMO_API
 
-    def open_orders(self) -> list[dict]:
-        """All currently open/pending orders; abort if response is not a list.
-
-        Note: the demo account must be dedicated to this bot. Pagination support
-        is required before production-scale order loads.
-        """
-        reply = self._request(
-            "GET", "/v2/orders", params={"states": "open,pending"}, auth=True)
-        result = reply["result"]
-        if not isinstance(result, list):
-            raise DeltaError("Unexpected open orders response")
-        if (reply.get("meta") or {}).get("after"):
-            raise DeltaError("Open-order pagination not supported; refusing closeout")
-        return result
+    def open_orders(self, *, max_pages: int = 100) -> list[dict]:
+        """Read every open/pending order page, or fail closed if incomplete."""
+        if type(max_pages) is not int or not 1 <= max_pages <= 200:
+            raise ValueError("max_pages must be 1..200")
+        orders, after, seen = [], None, set()
+        for _ in range(max_pages):
+            params = {"states": "open,pending", "page_size": 50}
+            if after:
+                params["after"] = after
+            reply = self._request("GET", "/v2/orders", params=params, auth=True)
+            result = reply.get("result")
+            if not isinstance(result, list) or any(not isinstance(v, dict) for v in result):
+                raise DeltaError("Unexpected open orders response")
+            orders.extend(result)
+            meta = reply.get("meta") or {}
+            if not isinstance(meta, dict):
+                raise DeltaError("Malformed open-order pagination metadata")
+            nxt = meta.get("after")
+            if not nxt:
+                return orders
+            if nxt in seen:
+                raise DeltaError("Open-order pagination loop")
+            seen.add(nxt)
+            after = nxt
+        raise DeltaError("Open-order pagination incomplete: refuse closeout")
 
     def cancel_product_orders(self, product_id: int) -> None:
         if type(product_id) is not int or product_id <= 0:
@@ -209,3 +220,46 @@ class DeltaDemo:
         if not isinstance(meta, dict):
             raise DeltaError("Malformed wallet meta")
         return {"balances": reply["result"], "meta": meta}
+
+    def btc_fills(self, *, start_time_us: int, end_time_us: int,
+                  max_pages: int = 40) -> list[dict]:
+        """Read recent signed fills in <=50 record pages; no mutation.
+
+        Delta may return products for multiple assets even with a contract-type
+        filter; locally retain BTC fills only. This is a full requested-window
+        read or an error, never silently truncated partial data.
+        """
+        if (type(start_time_us) is not int or type(end_time_us) is not int
+                or start_time_us < 1 or end_time_us <= start_time_us):
+            raise ValueError("Invalid fill window in epoch microseconds")
+        if type(max_pages) is not int or not 1 <= max_pages <= 200:
+            raise ValueError("Invalid max_pages")
+        out, after, seen = [], None, set()
+        for _ in range(max_pages):
+            params = {
+                "start_time": start_time_us, "end_time": end_time_us,
+                "page_size": 50,
+                "contract_types": "perpetual_futures,futures,call_options,put_options",
+            }
+            if after:
+                params["after"] = after
+            response = self._request("GET", "/v2/fills", params=params, auth=True)
+            results = response.get("result")
+            if not isinstance(results, list) or any(not isinstance(x, dict)
+                                                    for x in results):
+                raise DeltaError("Malformed fills response")
+            for fill in results:
+                symbol = str(fill.get("product_symbol") or "").upper()
+                if symbol.startswith(("BTC", "C-BTC-", "P-BTC-")):
+                    out.append(fill)
+            meta = response.get("meta") or {}
+            if not isinstance(meta, dict):
+                raise DeltaError("Malformed fills pagination metadata")
+            nxt = meta.get("after")
+            if not nxt:
+                return out
+            if nxt in seen:
+                raise DeltaError("Fills pagination loop")
+            seen.add(nxt)
+            after = nxt
+        raise DeltaError("Fills pagination incomplete: refuse inaccurate summary")
