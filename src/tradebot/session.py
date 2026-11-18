@@ -36,3 +36,22 @@ def session_phase(instant: datetime) -> SessionPhase:
         return SessionPhase.FLATTEN
     return SessionPhase.CLOSED
 
+
+
+SUPPORTED_SCHEDULES = frozenset({"nyse", "crypto-24x7"})
+
+
+def entry_phase(instant: datetime, *, schedule: str = "nyse") -> SessionPhase:
+    """Return whether new BTC entries are permitted for the explicit schedule.
+
+    Legacy NYSE behavior remains the default. The crypto-24x7 policy never
+    enforces NYSE closure and instead depends on independent execution, market
+    freshness and account-risk gates. The timestamp must still be aware.
+    """
+    if schedule not in SUPPORTED_SCHEDULES:
+        raise ValueError("Unsupported trade entry schedule")
+    if instant.tzinfo is None or instant.utcoffset() is None:
+        raise ValueError("Timezone-aware datetime is required")
+    if schedule == "crypto-24x7":
+        return SessionPhase.TRADING
+    return session_phase(instant)
