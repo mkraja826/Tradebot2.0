@@ -112,7 +112,7 @@ A Bitcoin-only AI futures and options bot project for the **Delta Exchange India
 ### M11 — Continuous BTC crypto opportunities (24/7, explicit opt-in)
 
 - New schedule `--schedule crypto-24x7` lets the bot analyze and (in separately gated testnet-only demo mode) consider BTC positions on weekends and outside NYSE hours. The default `nyse` schedule is unchanged for legacy runs. DeepSeek is instructed to assess the crypto market continuously and retain WAIT when conditions are poor.
-- The 24/7 observer systemd entrypoint now uses `--mode observe --schedule crypto-24x7 --ai-interval-seconds 1800 --poll-seconds 60`. Model inference can run ~48 times per day and consume paid credits; the observer NEVER executes orders.
+- The 24/7 observer systemd entrypoint now uses `--mode observe --schedule crypto-24x7 --ai-interval-seconds 300 --poll-seconds 60`. Model inference can run ~288 times per day and consume paid credits; the observer NEVER executes orders.
 - The **unattended demo order service is intentionally NOT enabled**. A new explicit `ALLOW_CRYPTO_24X7_DEMO=true` opt-in is required in addition to existing `--demo-execute` and `ENABLE_DEMO_ORDERS=true` switches. A first pilot is limited to 4 legs and 1 contract per leg, no position stacking, a 15-minute closeout timer, and a persistent halt marker after execution faults.
 - The position-close API lifecycle, reduce-only exits, broker fills, live demo margin and independent watchdog/pager are **not yet verified**. Demo execution must be tested with supervision before running unattended. See [24/7 crypto pilot guide](docs/CRYPTO_24X7_DEMO_PILOT.md).
 
