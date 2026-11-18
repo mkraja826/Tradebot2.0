@@ -19,14 +19,14 @@ The installer uses `sudo` only for the systemd service file and service controls
 The service uses `ops/run_observe.sh` as its entrypoint. It sources the protected user-owned credentials file inside the service process and immediately forces `ENABLE_DEMO_ORDERS=false`, then executes:
 
 ```bash
-tradebot run --mode observe --schedule crypto-24x7 --poll-seconds 60 --ai-interval-seconds 1800 --max-options 32
+tradebot run --mode observe --schedule crypto-24x7 --poll-seconds 60 --ai-interval-seconds 300 --max-options 32
 ```
 
 Behavior:
 - Runs continuously while the VM is on; starts automatically when the VM boots and restarts after process failure (45-second delay).
 - Runs on weekends and outside NYSE hours, checking demo BTC account state on each 60-second poll. An existing open order can block new AI analysis. **Observe mode cannot close positions or cancel orders.**
-- Around the clock, requests fresh BTC market data and asks DeepSeek for a **non-executable proposal roughly once every 30 minutes per uninterrupted process** if data/account health checks pass. Invalid responses and stale market quotes are rejected; no trade occurs.
-- **Billing warning:** Top Billing model proposals incur charges. At 30-minute intervals this can mean up to about 48 paid proposals per day, possibly more after restarts; set an external Top Billing key spend limit before enabling the service.
+- Around the clock, requests fresh BTC market data and asks DeepSeek for a **non-executable proposal roughly once every 5 minutes per uninterrupted process** if data/account health checks pass. Invalid responses and stale market quotes are rejected; no trade occurs.
+- **Billing warning:** Top Billing model proposals incur charges. At 5-minute intervals this can mean up to about 288 paid proposals per day, possibly more after restarts; set an external Top Billing key spend limit before enabling the service.
 - Is independent of your browser/phone being connected. However, VM shutdown, Google Cloud billing suspension, outages, CPU/memory pressure, or lack of Delta connectivity can interrupt service availability. Automatic process restarts **do not guarantee 100% uptime**.
 
 ## Check and control it (no secrets printed)
