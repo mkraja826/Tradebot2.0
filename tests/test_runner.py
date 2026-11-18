@@ -4,7 +4,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import Mock
 
-from tradebot.ai import OrderIntent, TradePlan
+from tradebot.ai import OrderIntent, TradePlan, PlanError
+from tradebot.journal import recent
 from tradebot.delta import DEMO_API
 from tradebot.runner import (
     BotRunner, ExposureAlert, RunnerConfig, RunnerError, SingleInstance
@@ -128,6 +129,24 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(result["legs"], 2)
         self.assertEqual(self.exchange.trades, [])
         self.planner.propose.assert_called_once()
+
+    def test_bad_ai_response_records_metadata_and_never_places_order(self):
+        self.planner.propose.side_effect = PlanError(
+            "AI did not return one complete JSON trading plan")
+        self.planner.last_response_diagnostics = {
+            "reason": "invalid_json", "finish_reason": "stop",
+            "content_chars": 41,
+        }
+        self.planner.last_usage = {"total_tokens": 301, "completion_tokens": 101}
+        runner = self.runner()
+        with self.assertRaises(PlanError):
+            runner.tick()
+        self.assertEqual(self.exchange.trades, [])
+        logged = recent(self.path)
+        self.assertEqual(logged[-1]["kind"], "ai_response_rejected")
+        self.assertEqual(logged[-1]["details"]["reason"], "invalid_json")
+        self.assertEqual(logged[-1]["details"]["content_chars"], 41)
+        self.assertEqual(logged[-1]["details"]["ai_tokens"]["total_tokens"], 301)
 
     def test_cooldown_avoids_repeated_llm_calls(self):
         runner = self.runner()
