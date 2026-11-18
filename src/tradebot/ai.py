@@ -65,6 +65,55 @@ def validate_plan(raw: dict[str, Any], products: list[dict]) -> TradePlan:
     return TradePlan(strategy.strip(), rationale.strip(), tuple(valid))
 
 
+
+def _compact_market_context(market: dict) -> dict:
+    """Keep execution-relevant evidence, not duplicate full exchange payloads.
+
+    The planner already receives the approved product catalog separately.
+    Large duplicate option records increase inference costs and can crowd out
+    the required final JSON. Do not discard bid/ask, greeks, IV, expiries,
+    liquidity and fees: strategies need those to assess execution risk.
+    """
+    if not isinstance(market, dict) or not isinstance(market.get("core"), dict):
+        return market
+    core = market["core"]
+    ticker = core.get("ticker") or {}
+    technical = market.get("technical") or {}
+
+    def compact_quote(quote):
+        return {name: quote[name] for name in (
+            "product_id", "bid", "ask", "bid_iv", "ask_iv", "mark_price",
+            "greeks", "volume", "open_interest", "taker_commission_rate",
+            "age_seconds",
+        ) if name in quote}
+
+    return {
+        "environment": market.get("environment"),
+        "session_phase": market.get("session_phase"),
+        "collected_at": market.get("collected_at"),
+        "btc": {
+            "best_bid": core.get("best_bid"),
+            "best_ask": core.get("best_ask"),
+            "book_age_seconds": core.get("book_age_seconds"),
+            "spot_price": ticker.get("spot_price"),
+            "mark_price": ticker.get("mark_price"),
+            "ticker_age_seconds": ticker.get("age_seconds"),
+        },
+        "technical": {
+            "return_1h_pct": technical.get("return_1h_pct"),
+            "realized_vol_1h_pct": technical.get("realized_vol_1h_pct"),
+            "latest": technical.get("latest"),
+            "recent_candles": technical.get("last_24", [])[-8:],
+        },
+        "futures": [compact_quote(q) for q in market.get("futures", [])],
+        "options": [compact_quote(q) for q in market.get("options", [])],
+        "demo_funds": market.get("demo_funds"),
+        "btc_positions": market.get("btc_positions"),
+        "open_orders_count": market.get("open_orders_count"),
+        "coverage": market.get("coverage"),
+    }
+
+
 class AIPlanner:
     """One Top Billing model, no unrequested extra models or fallback calls.
 
@@ -83,6 +132,7 @@ class AIPlanner:
         self._transport = transport or urlopen
         self.last_usage = None
         self.last_request_id = None
+        self.last_finish_reason = None
 
     def _call(self, url: str, *, body: dict | None = None, timeout: int = 45) -> dict:
         if not self.api_key:
@@ -144,6 +194,8 @@ class AIPlanner:
             "Only choose products in the candidate list. "
             "Be aware of spreads, time decay, execution costs, uncertain margin "
             "and the possibility that no trade is best. "
+            "Keep strategy under 80 characters and rationale under 250 characters "
+            "to ensure the full JSON completes within the response budget. "
             "Return exactly one syntactically valid JSON object, with keys "
             "strategy (string), rationale (string), and orders (array of 0-12 "
             "objects each containing product_id (integer), side ('buy' or 'sell'), "
@@ -155,8 +207,9 @@ class AIPlanner:
             "messages": [
                 {"role": "system", "content": instructions},
                 {"role": "user", "content": json.dumps({
-                    "market": market, "products": simple_products,
-                    "recent_trades": (recent_journal or [])[-12:],
+                    "market": _compact_market_context(market),
+                    "products": simple_products,
+                    "recent_trades": (recent_journal or [])[-6:],
                 }, separators=(",", ":"), default=str)},
             ],
             # This is a real credit-spending call; cap generated tokens.
@@ -164,16 +217,28 @@ class AIPlanner:
             # Deliberately omit response_format. The selected model does not
             # advertise structured-output capability in Top Billing's catalogue.
         }
+        self.last_finish_reason = None
+        self.last_usage = None
         response = self._call(TOPBILLING_CHAT_URL, body=payload, timeout=45)
         self.last_usage = response.get("usage")
         try:
             choice = response["choices"][0]
-            if choice.get("finish_reason") not in (None, "stop"):
-                raise ValueError("Incomplete model response")
+            if not isinstance(choice, dict):
+                raise ValueError("Malformed AI choice")
+            finish = choice.get("finish_reason")
+            self.last_finish_reason = finish if isinstance(finish, str) else None
+            if finish not in (None, "stop"):
+                # Do not parse truncated content even if it appears to contain
+                # plausible orders. No paid retry is made automatically.
+                if finish == "length":
+                    raise PlanError("AI response hit its completion-token limit; no plan accepted")
+                raise PlanError("AI response stopped without completion; no plan accepted")
             content = choice["message"]["content"]
             if not isinstance(content, str) or not content:
                 raise ValueError("Empty model response")
             raw = json.loads(content)
+        except PlanError:
+            raise
         except (KeyError, TypeError, ValueError, IndexError):
             raise PlanError("AI did not return one complete JSON trading plan") from None
         return validate_plan(raw, allowed_products)
