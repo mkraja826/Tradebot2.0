@@ -27,7 +27,7 @@ python -m pip install -e .
 bash ops/install_observe_service.sh
 ```
 
-The service uses `--schedule crypto-24x7`, polls every 60 seconds, and requests a DeepSeek plan at most once per 30 minutes *per uninterrupted process* if the exchange permits. This can produce up to about **48 paid AI completions per 24 hours**, plus extras after restarts. It never sends exchange orders.
+The service uses `--schedule crypto-24x7`, polls every 60 seconds, and requests a DeepSeek plan at most once per 5 minutes *per uninterrupted process* if the exchange permits. This can produce up to about **288 paid AI completions per 24 hours**, plus extras after restarts. It never sends exchange orders.
 
 ```bash
 sudo systemctl status tradebot2-observe --no-pager
