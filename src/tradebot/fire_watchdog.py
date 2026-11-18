@@ -13,7 +13,6 @@ import time
 
 from tradebot.delta import DEMO_API, DeltaDemo
 from tradebot.execution import DemoExecutor
-from tradebot.fire_entry import FireEntries
 from tradebot.fire_execution import (
     EXPOSED, FireTradeStore, active_position, protective_orders_verified
 )
@@ -36,15 +35,8 @@ def watchdog_tick(exchange, store, *, pause=None):
     if status in {"submitting", "reconciling", "verifying_protection"} and age < 90:
         return {"status": "waiting_for_fire", "last_fire_status": status}
 
-    with FireEntries(store.path, exchange)._connect() if False else _noop():
-        pass
-
     # Read-only broker reconciliation first. Never assume a request was
     # rejected merely because the app lost its original HTTP response.
-    entries = FireEntries(store.path, exchange)
-    with entries._db() if False else _noop():
-        pass
-
     import sqlite3
     with sqlite3.connect(store.path, timeout=10) as db:
         row = db.execute(
