@@ -9,10 +9,13 @@ from unittest.mock import patch
 
 from tradebot.ai import AIPlanner, PlanError, TradePlan, OrderIntent, _compact_market_context
 from tradebot import cli
+from tradebot.market import MarketDataError
+from tradebot.delta import DeltaError
+from tradebot.session import SessionPhase
 
 
 class PreviewRecoveryTests(unittest.TestCase):
-    def _run(self, session, *, planner=None):
+    def _run(self, session, *, planner=None, market_error=None):
         snapshot = {
             "environment": "delta-india-demo",
             "collected_at": "2026-11-18T17:00:00+00:00",
@@ -23,8 +26,9 @@ class PreviewRecoveryTests(unittest.TestCase):
             argv = ["tradebot", "preview", "--max-options", "8",
                     "--output", str(output_path)]
             with patch("sys.argv", argv), \
-                 patch("tradebot.cli.DeltaDemo"), \
-                 patch("tradebot.cli.collect_market_snapshot", return_value=snapshot), \
+                 patch("tradebot.cli.DeltaDemo") as exchange_factory, \
+                 patch("tradebot.cli.session_phase", return_value=SessionPhase(session)), \
+                 patch("tradebot.cli.collect_market_snapshot", return_value=snapshot, side_effect=market_error) as market_reader, \
                  patch("tradebot.cli.record") as record, \
                  patch("tradebot.cli.recent", return_value=[]), \
                  patch("tradebot.cli.build_ai_context", return_value=(
@@ -42,6 +46,9 @@ class PreviewRecoveryTests(unittest.TestCase):
                 result = json.loads(buf.getvalue())
                 self.assertEqual(result, json.loads(output_path.read_text()))
                 self.assertFalse(result["orders_submitted"])
+                if session != "trading":
+                    exchange_factory.assert_not_called()
+                    market_reader.assert_not_called()
                 return status, result, planner_factory.call_count, record.call_args
 
     def test_closed_session_skips_ai_and_spending(self):
@@ -99,6 +106,27 @@ class PreviewRecoveryTests(unittest.TestCase):
         self.assertEqual(result["orders"], [{"product_id": 1, "side": "buy", "size": 1}])
         self.assertFalse(result["orders_submitted"])
         self.assertEqual(journal.args[1], "ai_preview")
+
+    def test_stale_btc_quote_during_trading_is_not_sent_to_ai(self):
+        status, result, count, journal = self._run(
+            "trading", market_error=MarketDataError(
+                "BTCUSD ticker missing, stale, or unquotable"))
+        self.assertEqual(status, 2)
+        self.assertEqual(count, 0)
+        self.assertFalse(result["ai_called"])
+        self.assertEqual(result["status"], "market_data_unavailable")
+        self.assertEqual(result["orders"], [])
+        self.assertNotIn("strategy", result)
+        self.assertEqual(journal.args[1], "market_data_preview_rejected")
+
+    def test_failed_signed_demo_read_is_redacted_and_has_no_paid_ai_call(self):
+        status, result, count, _ = self._run(
+            "trading", market_error=DeltaError("DEMO ACCOUNT IDENTIFIER 123"))
+        self.assertEqual(status, 2)
+        self.assertEqual(count, 0)
+        self.assertEqual(result["status"], "market_data_unavailable")
+        self.assertNotIn("123", json.dumps(result))
+        self.assertFalse(result["orders_submitted"])
 
     def test_compacted_context_removes_duplicate_metadata_not_trade_evidence(self):
         sample = {
