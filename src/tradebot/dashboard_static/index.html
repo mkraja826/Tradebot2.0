@@ -18,6 +18,7 @@
       <a href="#market" class="nav"><span class="nav-icon">⌁</span> Market &amp; Account</a>
       <a href="#intelligence" class="nav"><span class="nav-icon">✧</span> AI Decisions</a>
       <a href="#activity" class="nav"><span class="nav-icon">≡</span> Activity Log</a>
+      <a href="#learning" class="nav"><span class="nav-icon">◈</span> Kimi Learning</a>
       <div class="sidebar-bottom">
         <div class="secure-mark">◈ &nbsp;PRIVATE MONITOR</div>
         <div class="sidebar-caption">Delta India testnet only<br/>Read-only interface. No trade controls.</div>
@@ -76,6 +77,21 @@
           </div>
           <p id="fire-status" role="status" aria-live="polite">Ready for a manually requested GPT-6 analysis.</p>
           <div class="fire-results" id="fire-results"></div>
+        </section>
+        <section class="panel learning-panel" id="learning">
+          <div class="panel-header">
+            <div><div class="eyebrow">TRADE INTELLIGENCE · READ-ONLY RESEARCH</div><h2>Kimi <span class="fire-accent">Learning Lab</span></h2></div>
+            <span class="tiny-label">DOES NOT CONTROL GPT-6</span>
+          </div>
+          <p class="fire-description">Kimi observes verified BTC Demo position evidence and develops testable hypotheses. Every suggestion is unverified until independently evaluated. None are automatically fed into GPT-6 or used to place orders.</p>
+          <div class="learning-stats" aria-label="Learning evidence counters">
+            <div><small>EVIDENCE RECORDS</small><strong id="learning-events">—</strong></div>
+            <div><small>CANDIDATE LESSONS</small><strong id="learning-candidates">—</strong></div>
+            <div><small>VALIDATED LESSONS</small><strong id="learning-validated">—</strong></div>
+          </div>
+          <p id="learning-status" role="status">Learning database not checked yet.</p>
+          <div id="learning-hypotheses" class="learning-hypotheses"></div>
+          <p class="learning-disclosure">Kimi can never place orders, override GPT-6 or declare its own lessons proven. This panel is not a performance or profit claim.</p>
         </section>
         <div class="metrics">
           <div class="metric card"><div class="metric-label">BTC USD / BEST BID <span>₿</span></div><div class="metric-value" id="btc-bid">—</div><div class="metric-foot" id="quote-status">Waiting for exchange data</div></div>
