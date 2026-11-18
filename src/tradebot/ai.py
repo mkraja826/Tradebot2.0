@@ -90,6 +90,8 @@ def _compact_market_context(market: dict) -> dict:
     return {
         "environment": market.get("environment"),
         "session_phase": market.get("session_phase"),
+        "trading_schedule": market.get("trading_schedule", "nyse"),
+        "max_hold_seconds": market.get("max_hold_seconds"),
         "collected_at": market.get("collected_at"),
         "btc": {
             "best_bid": core.get("best_bid"),
@@ -185,12 +187,23 @@ class AIPlanner:
              "contract_value": p.get("contract_value")}
             for p in allowed_products
         ]
+        schedule = market.get("trading_schedule", "nyse")
+        if schedule not in ("nyse", "crypto-24x7"):
+            raise PlanError("Unknown trading schedule in AI market context")
+        timing_instruction = (
+            "BTC crypto market is available around the clock; do not use NYSE hours "
+            "as an entry filter. Pilot exit is enforced after at most "
+            + str(market.get("max_hold_seconds") or 900)
+            + " seconds, even if you would hold longer. "
+            if schedule == "crypto-24x7"
+            else "All positions must be closed before the end of the US stock session. "
+        )
         instructions = (
             "You are researching Bitcoin derivatives on Delta India DEMO. "
             "Choose autonomously among futures, options, valid multi-leg strategies, "
             "hedges, or waiting; do not invent contract IDs. "
-            "All positions must be closed before the end of the US stock session. "
-            "Use historical trades as evidence, not proof of an edge. "
+            + timing_instruction
+            + "Use historical trades as evidence, not proof of an edge. "
             "Only choose products in the candidate list. "
             "Be aware of spreads, time decay, execution costs, uncertain margin "
             "and the possibility that no trade is best. "
