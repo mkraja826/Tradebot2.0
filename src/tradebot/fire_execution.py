@@ -300,7 +300,17 @@ class FireDemoController:
             if (collected.tzinfo is None or
                     (_now() - collected).total_seconds() > 60):
                 raise FireTradeError("Stale market snapshot")
-            report = self.probe(dict(ROLES), lambda: snapshot)
+            # Give GPT-6 the pilot's mechanical exchange constraint as
+            # market context, rather than silently reducing its chosen size
+            # after the decision. GPT-6 is still the sole strategist.
+            model_snapshot = {**snapshot, "fire_execution_scope": {
+                "environment": "delta-india-demo",
+                "instrument": "BTCUSD perpetual futures",
+                "max_contracts_per_entry": self.max_contracts,
+                "attached_stop_loss_and_take_profit_required": True,
+                "separate_learning_model_has_no_trade_authority": True,
+            }}
+            report = self.probe(dict(ROLES), lambda: model_snapshot)
             raw = (report.get("results") or {}).get("fire") or {}
             if "decision" not in raw:
                 raise FireTradeError("GPT-6 did not produce a valid decision")
