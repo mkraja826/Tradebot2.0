@@ -119,6 +119,12 @@ class TestExecution(unittest.TestCase):
         self.assertEqual(len(self.exchange.open_pending), 1)
         self.assertEqual(self.exchange.open_pending[0]["product_symbol"], "ETHUSD")
 
+    def test_unknown_open_order_prevents_false_flat_confirmation(self):
+        # Missing symbol could represent a BTC order. Never claim all flat.
+        self.exchange.open_pending = [{"product_id": 1}]
+        with self.assertRaises(CloseoutError):
+            self.engine.closeout(max_attempts=1)
+
     def test_closeout_requires_real_position_verification(self):
         self.exchange.positions[1] = -5
         self.exchange.unclear_closes = True
