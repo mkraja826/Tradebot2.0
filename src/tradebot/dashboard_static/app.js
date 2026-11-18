@@ -447,3 +447,40 @@ if(fireButton)fireButton.addEventListener("click",async()=>{
   }
 });
 refreshFire();setInterval(refreshFire,6000);
+
+
+async function refreshLearning() {
+  const container=byId("learning-hypotheses");
+  if(!container)return;
+  try {
+    const response=await fetch("/api/learning", {credentials:"same-origin",cache:"no-store"});
+    if(!response.ok)throw new Error("Research status unavailable");
+    const data=await response.json();
+    text("learning-events",data.evidence_events);
+    text("learning-candidates",data.candidate_lessons);
+    text("learning-validated",data.validated_lessons);
+    const freshness=data.last_observation_at ? " · Last broker observation "+timeLabel(data.last_observation_at):"";
+    text("learning-status",data.status==="available"?
+      (data.active_position?"BTC Demo position observed; Kimi research is independent":
+      "No active BTC position observed")+freshness:
+      "Learning watcher not initialized yet. No active research claims.");
+    container.replaceChildren();
+    if(!Array.isArray(data.recent_hypotheses)||!data.recent_hypotheses.length) {
+      container.append(node("p","empty","No Kimi hypotheses yet. Research starts after a BTC Demo position is observed."));
+    } else {
+      for(const item of data.recent_hypotheses.slice(0,3)) {
+        const entry=node("article","learning-hypothesis");
+        entry.append(
+          node("div","learning-tag","UNVERIFIED · KIMI HYPOTHESIS"),
+          node("strong","",item.hypothesis||"Hypothesis unavailable"),
+          node("p","","Counterevidence: "+(item.counterevidence||"Not supplied")),
+          node("p","","Applies when: "+(item.applicable_when||"Not supplied"))
+        );
+        container.append(entry);
+      }
+    }
+  } catch(error) {
+    text("learning-status","Learning status unavailable. GPT-6 remains independent.");
+  }
+}
+refreshLearning();setInterval(refreshLearning,20000);
