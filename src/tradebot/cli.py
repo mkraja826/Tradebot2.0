@@ -7,7 +7,7 @@ from pathlib import Path
 
 from tradebot.delta import DeltaDemo
 from tradebot.market import collect_market_snapshot
-from tradebot.ai import AIPlanner
+from tradebot.ai import AIPlanner, PlanError
 from tradebot.decision import build_ai_context
 from tradebot.journal import record, recent
 from tradebot.session import session_phase, NEW_YORK
@@ -150,42 +150,109 @@ def main() -> None:
     snapshot = collect_market_snapshot(
         exchange, include_balances=args.include_balances or args.command == "preview")
     if args.command == "preview":
-        # Research-only: the model can choose any strategy, but nothing
-        # produced here can place an exchange order.
-        context, products = build_ai_context(
-            snapshot, max_options=args.max_options)
+        # A research proposal is never an order. When the NYSE entry window
+        # is closed or flattening, do not spend an AI completion merely to
+        # learn that opening new positions is forbidden by our local clock.
         path = os.getenv("TRADEBOT_JOURNAL", "data/trades.jsonl")
-        planner = AIPlanner()
-        proposal = planner.propose(context, products, recent(path))
-        output = {
-            "environment": "delta-india-demo",
-            "snapshot_at": snapshot["collected_at"],
-            "session_phase": snapshot["session_phase"],
-            "strategy": proposal.strategy,
-            "rationale": proposal.rationale,
-            "orders": [
-                {"product_id": o.product_id, "side": o.side, "size": o.size}
-                for o in proposal.orders
-            ],
-            "candidate_coverage": context["coverage"],
-            "model": planner.model,
-            "ai_tokens": {k: planner.last_usage[k] for k in
-                          ("prompt_tokens", "completion_tokens", "total_tokens")
-                          if isinstance(planner.last_usage, dict)
-                          and k in planner.last_usage},
-            "orders_submitted": False,
-            "margin_verified": False,
-            "warning": "Research proposal only. No broker order or P&L was produced.",
-        }
-        record(path, "ai_preview", {
-            "strategy": proposal.strategy,
-            "rationale": proposal.rationale,
-            "orders": output["orders"],
-            "snapshot_at": snapshot["collected_at"],
-            "model": planner.model,
-            "ai_tokens": output["ai_tokens"],
-        })
+        invalid_ai_plan = False
+        if snapshot["session_phase"] != "trading":
+            output = {
+                "environment": "delta-india-demo",
+                "snapshot_at": snapshot["collected_at"],
+                "session_phase": snapshot["session_phase"],
+                "strategy": "WAIT",
+                "rationale": "NYSE entry window is not open; no new positions are allowed.",
+                "decision_source": "deterministic_session_gate_not_ai",
+                "ai_called": False,
+                "ai_tokens": {},
+                "orders": [],
+                "orders_submitted": False,
+                "margin_verified": False,
+                "warning": "Local safety rule, not an AI trading recommendation.",
+            }
+            record(path, "session_gate_preview", {
+                "snapshot_at": snapshot["collected_at"],
+                "phase": snapshot["session_phase"],
+                "orders_submitted": False,
+            })
+        else:
+            context, products = build_ai_context(
+                snapshot, max_options=args.max_options)
+            planner = AIPlanner()
+            try:
+                proposal = planner.propose(context, products, recent(path))
+            except PlanError as exc:
+                # Never convert an invalid completion into executable legs or
+                # misrepresent it as the model deliberately choosing WAIT.
+                invalid_ai_plan = True
+                output = {
+                    "environment": "delta-india-demo",
+                    "snapshot_at": snapshot["collected_at"],
+                    "session_phase": snapshot["session_phase"],
+                    "status": "invalid_ai_response_no_plan",
+                    "decision_source": "failed_ai_validation",
+                    "ai_called": True,
+                    "error": str(exc),
+                    "finish_reason": planner.last_finish_reason,
+                    "ai_tokens": {k: planner.last_usage[k] for k in
+                                  ("prompt_tokens", "completion_tokens", "total_tokens")
+                                  if isinstance(planner.last_usage, dict)
+                                  and k in planner.last_usage},
+                    "model": planner.model,
+                    "orders": [],
+                    "orders_submitted": False,
+                    "margin_verified": False,
+                    "warning": "No valid proposal. No retry; a completion may have incurred charges.",
+                }
+                record(path, "ai_preview_rejected", {
+                    "snapshot_at": snapshot["collected_at"],
+                    "reason": str(exc),
+                    "finish_reason": planner.last_finish_reason,
+                    "model": planner.model,
+                    "ai_tokens": output["ai_tokens"],
+                    "orders_submitted": False,
+                })
+            else:
+                output = {
+                    "environment": "delta-india-demo",
+                    "snapshot_at": snapshot["collected_at"],
+                    "session_phase": snapshot["session_phase"],
+                    "strategy": proposal.strategy,
+                    "rationale": proposal.rationale,
+                    "decision_source": "validated_ai_plan",
+                    "ai_called": True,
+                    "orders": [
+                        {"product_id": o.product_id, "side": o.side, "size": o.size}
+                        for o in proposal.orders
+                    ],
+                    "candidate_coverage": context["coverage"],
+                    "model": planner.model,
+                    "ai_tokens": {k: planner.last_usage[k] for k in
+                                  ("prompt_tokens", "completion_tokens", "total_tokens")
+                                  if isinstance(planner.last_usage, dict)
+                                  and k in planner.last_usage},
+                    "orders_submitted": False,
+                    "margin_verified": False,
+                    "warning": "Research proposal only. No broker order or P&L was produced.",
+                }
+                record(path, "ai_preview", {
+                    "strategy": proposal.strategy,
+                    "rationale": proposal.rationale,
+                    "orders": output["orders"],
+                    "snapshot_at": snapshot["collected_at"],
+                    "model": planner.model,
+                    "ai_tokens": output["ai_tokens"],
+                })
         if args.output:
+            destination = Path(args.output)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(json.dumps(output, indent=2) + "\n",
+                                   encoding="utf-8")
+        print(json.dumps(output, indent=2))
+        if invalid_ai_plan:
+            raise SystemExit(2)
+        return
+    if args.output:
             destination = Path(args.output)
             destination.parent.mkdir(parents=True, exist_ok=True)
             destination.write_text(json.dumps(output, indent=2) + "\n",
