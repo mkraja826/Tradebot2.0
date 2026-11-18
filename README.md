@@ -84,6 +84,14 @@ A Bitcoin-only AI futures and options bot project for the **Delta Exchange India
 - **Nothing has been imported into Google Cloud yet.** The GitHub Actions repository variables, WIF setup, manual sync, VM service-account attachment and authenticated test must be completed by the user. The GitHub repository connection cannot administer the user's Google Cloud account.
 - Full mobile-friendly setup guide: [docs/GOOGLE_CLOUD_SECRETS.md](docs/GOOGLE_CLOUD_SECRETS.md).
 
+### M8 — One-time GitHub Actions → Iowa VM secret transfer (no Cloud Shell)
+
+- [SSH-only setup guide](docs/SSH_ONLY_GITHUB_SECRETS_TRANSFER.md): generate a one-time private/public recipient keypair **on the VM**, share only its 49-character `tbx1:` public key, then manually run `.github/workflows/sealed-demo-credentials.yml`.
+- GitHub Actions reads the existing `DELTA_DEMO_API_KEY`, `DELTA_DEMO_API_SECRET`, and `TB_API_KEY` repository secrets, encrypts them to the VM with X25519 + HKDF-SHA256 + AES-256-GCM, and commits **only encrypted ciphertext** to `ops/sealed/tradebot-demo-credentials.enc.json`.
+- **Important:** the repository is public, therefore the ciphertext and its history are public. The VM's private decryption key is never published and is removed after a successful local import. The imported `~/.config/tradebot2/keys.env` is private (0600) plaintext on the VM.
+- No user API credentials need to be retyped. No Cloud Shell, GCP IAM, Delta orders, or paid AI model requests are involved in transferring secrets.
+- **Prepared but NOT activated:** the assistant still needs the user's VM public key in `ops/recipient-public-key.txt`; the manual workflow and subsequent VM import have not run.
+
 ## Setup
 
 Python 3.11+, install with:
