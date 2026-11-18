@@ -5,12 +5,12 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 
-from tradebot.delta import DeltaDemo
-from tradebot.market import collect_market_snapshot
+from tradebot.delta import DeltaDemo, DeltaError
+from tradebot.market import collect_market_snapshot, MarketDataError
 from tradebot.ai import AIPlanner, PlanError
 from tradebot.decision import build_ai_context
 from tradebot.journal import record, recent
-from tradebot.session import session_phase, NEW_YORK
+from tradebot.session import session_phase, SessionPhase, NEW_YORK
 from tradebot.runner import BotRunner, RunnerConfig
 from tradebot.ledger import ingest_fills, fill_summary, record_equity
 from datetime import timedelta
@@ -76,6 +76,42 @@ def main() -> None:
             "phase": session_phase(instant).value,
         }, indent=2))
         return
+
+    if args.command == "preview":
+        # An off-session proposal cannot be executed under NYSE entry rules.
+        # Gate BEFORE even constructing a Delta client or fetching live quotes:
+        # stale/offline demo tickers must never break our deterministic WAIT.
+        instant = datetime.now(timezone.utc)
+        phase = session_phase(instant)
+        if phase != SessionPhase.TRADING:
+            output = {
+                "environment": "delta-india-demo",
+                "snapshot_at": None,
+                "checked_at": instant.isoformat(),
+                "session_phase": phase.value,
+                "strategy": "WAIT",
+                "rationale": "NYSE entry window is not open; no new positions are allowed.",
+                "decision_source": "deterministic_session_gate_not_ai",
+                "ai_called": False,
+                "ai_tokens": {},
+                "orders": [],
+                "orders_submitted": False,
+                "margin_verified": False,
+                "warning": "Local safety rule. No market snapshot or AI inference requested.",
+            }
+            record(os.getenv("TRADEBOT_JOURNAL", "data/trades.jsonl"),
+                   "session_gate_preview", {
+                       "checked_at": instant.isoformat(),
+                       "phase": phase.value,
+                       "orders_submitted": False,
+                   })
+            if args.output:
+                destination = Path(args.output)
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_text(json.dumps(output, indent=2) + "\n",
+                                       encoding="utf-8")
+            print(json.dumps(output, indent=2))
+            return
 
     exchange = DeltaDemo(
         api_key=os.getenv("DELTA_DEMO_API_KEY", ""),
@@ -147,8 +183,41 @@ def main() -> None:
         }, indent=2))
         return
 
-    snapshot = collect_market_snapshot(
-        exchange, include_balances=args.include_balances or args.command == "preview")
+    try:
+        snapshot = collect_market_snapshot(
+            exchange, include_balances=args.include_balances or args.command == "preview")
+    except (MarketDataError, DeltaError) as exc:
+        if args.command != "preview":
+            raise
+        # Never create a model proposal based on stale/absent BTC quotes.
+        # Explicitly report "unavailable", not a strategy chosen by DeepSeek.
+        issue = str(exc) if isinstance(exc, MarketDataError) else (
+            "Delta Demo read failed; check testnet market and account connectivity")
+        output = {
+            "environment": "delta-india-demo",
+            "checked_at": datetime.now(timezone.utc).isoformat(),
+            "session_phase": session_phase(datetime.now(timezone.utc)).value,
+            "status": "market_data_unavailable",
+            "decision_source": "data_validation_failed_not_ai",
+            "ai_called": False,
+            "error": issue,
+            "orders": [],
+            "orders_submitted": False,
+            "margin_verified": False,
+            "warning": "No valid live BTC snapshot; no AI request or order.",
+        }
+        record(os.getenv("TRADEBOT_JOURNAL", "data/trades.jsonl"),
+               "market_data_preview_rejected", {
+                   "reason": type(exc).__name__,
+                   "orders_submitted": False,
+               })
+        if args.output:
+            destination = Path(args.output)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(json.dumps(output, indent=2) + "\n",
+                                   encoding="utf-8")
+        print(json.dumps(output, indent=2))
+        raise SystemExit(2) from None
     if args.command == "preview":
         # A research proposal is never an order. When the NYSE entry window
         # is closed or flattening, do not spend an AI completion merely to
