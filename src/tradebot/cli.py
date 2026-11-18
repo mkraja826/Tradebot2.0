@@ -11,17 +11,35 @@ from tradebot.ai import AIPlanner
 from tradebot.decision import build_ai_context
 from tradebot.journal import record, recent
 from tradebot.session import session_phase, NEW_YORK
+from tradebot.runner import BotRunner, RunnerConfig
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Tradebot 2.0 (Delta India demo only)")
-    parser.add_argument("command", choices=("status", "catalog", "snapshot", "balances", "preview"))
+    parser.add_argument("command", choices=("status", "catalog", "snapshot", "balances", "preview", "run"))
     parser.add_argument("--include-balances", action="store_true",
                         help="Include signed read-only demo wallet balances in snapshot")
     parser.add_argument("--output", help="Save a complete snapshot or preview JSON to this path")
     parser.add_argument("--max-options", type=int, default=128,
                         help="Option quote context budget for preview (8-512)")
+    parser.add_argument("--mode", choices=("observe", "demo"), default="observe",
+                        help="Runner mode. Observe is the safe default.")
+    parser.add_argument("--demo-execute", action="store_true",
+                        help="Explicit permission for demo orders; requires env opt-in too")
+    parser.add_argument("--poll-seconds", type=int, default=15)
+    parser.add_argument("--ai-interval-seconds", type=int, default=300)
     args = parser.parse_args()
+    if args.demo_execute and (args.command != "run" or args.mode != "demo"):
+        parser.error("--demo-execute is only valid with: run --mode demo")
+    if args.command == "run" and args.mode == "demo":
+        if not args.demo_execute or os.getenv("ENABLE_DEMO_ORDERS") != "true":
+            parser.error(
+                "Demo orders require --demo-execute and ENABLE_DEMO_ORDERS=true; "
+                "supervise your first testnet session"
+            )
+        if not os.getenv("DELTA_DEMO_API_KEY") or not os.getenv("DELTA_DEMO_API_SECRET"):
+            parser.error("Demo order mode requires demo-only key and secret")
+
 
     if args.command == "status":
         instant = datetime.now(timezone.utc)
@@ -36,8 +54,27 @@ def main() -> None:
     exchange = DeltaDemo(
         api_key=os.getenv("DELTA_DEMO_API_KEY", ""),
         api_secret=os.getenv("DELTA_DEMO_API_SECRET", ""),
-        allow_orders=False,
+        allow_orders=(args.command == "run" and args.mode == "demo"),
     )
+    if args.command == "run":
+        runner = BotRunner(
+            exchange, AIPlanner(),
+            config=RunnerConfig(mode=args.mode,
+                                journal_path=os.getenv(
+                                    "TRADEBOT_JOURNAL", "data/trades.jsonl"),
+                                ai_interval_seconds=args.ai_interval_seconds,
+                                poll_seconds=args.poll_seconds,
+                                max_options=args.max_options),
+        )
+        print(json.dumps({
+            "environment": exchange.base_url,
+            "mode": args.mode,
+            "orders": "DEMO ENABLED" if args.mode == "demo"
+                      else "READ ONLY",
+            "message": "Stop with Ctrl+C. Use process supervision for emergencies.",
+        }), flush=True)
+        runner.run_forever()
+        return
     if args.command == "catalog":
         contracts = exchange.products()
         print(json.dumps({
