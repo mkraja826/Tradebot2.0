@@ -12,6 +12,8 @@ from uuid import uuid4
 import fcntl
 import os
 import sys
+import signal
+from threading import Event
 
 from tradebot.decision import build_ai_context
 from tradebot.delta import DEMO_API
@@ -195,35 +197,47 @@ class BotRunner:
                 "strategy": plan.strategy, "legs": len(plan.orders)}
 
     def run_forever(self, *, stop=None):
-        """Keep retrying closeout even after faults; emit stderr alerts.
+        """Keep retrying closeout on faults and flatten on graceful shutdown.
 
-        Process monitoring and external paging are necessary in deployment:
-        stderr is not a reliable unattended emergency notification service.
+        stderr alerts are NOT sufficient as an unattended paging system.
+        Independent process monitoring is required for host/power failures.
         """
         lock_path = self.config.journal_path + ".lock"
-        with SingleInstance(lock_path):
+        requested_stop = Event()
+        old_sigterm = None
+        if stop is None:
+            # Container/process supervisors typically send SIGTERM.
             try:
-                while stop is None or not stop():
-                    try:
-                        result = self.tick()
-                        print(result, flush=True)
-                    except KeyboardInterrupt:
-                        raise
-                    except Exception as exc:
-                        print("TRADEBOT ALERT: " + type(exc).__name__ + ": " +
-                              str(exc), file=sys.stderr, flush=True)
-                    self.pause(self.config.poll_seconds)
-            finally:
-                if self.config.mode == "demo":
-                    # A graceful exit must not abandon positions midway
-                    # through the market session. A hard crash or host outage
-                    # still requires independent process supervision.
-                    try:
-                        self.executor.closeout()
-                    except Exception as exc:
-                        self._record("shutdown_exposure_alert", {
-                            "reason": type(exc).__name__,
-                        })
-                        print("TRADEBOT CRITICAL: Shutdown cannot confirm "
-                              "BTC positions are flat", file=sys.stderr, flush=True)
-                        raise
+                old_sigterm = signal.getsignal(signal.SIGTERM)
+                signal.signal(signal.SIGTERM, lambda *_: requested_stop.set())
+            except ValueError:
+                # Tests and embedded runners may execute in another thread.
+                old_sigterm = None
+        try:
+            with SingleInstance(lock_path):
+                try:
+                    while not requested_stop.is_set() and (stop is None or not stop()):
+                        try:
+                            result = self.tick()
+                            print(result, flush=True)
+                        except KeyboardInterrupt:
+                            raise
+                        except Exception as exc:
+                            print("TRADEBOT ALERT: " + type(exc).__name__ + ": " +
+                                  str(exc), file=sys.stderr, flush=True)
+                        self.pause(self.config.poll_seconds)
+                finally:
+                    if self.config.mode == "demo":
+                        # Shutdown midway through a session must not abandon
+                        # positions. Exchange downtime can still prevent exit.
+                        try:
+                            self.executor.closeout()
+                        except Exception as exc:
+                            self._record("shutdown_exposure_alert", {
+                                "reason": type(exc).__name__})
+                            print("TRADEBOT CRITICAL: Shutdown cannot confirm "
+                                  "BTC positions are flat", file=sys.stderr, flush=True)
+                            raise
+        finally:
+            if old_sigterm is not None:
+                signal.signal(signal.SIGTERM, old_sigterm)
