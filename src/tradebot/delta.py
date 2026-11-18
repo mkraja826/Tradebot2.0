@@ -60,12 +60,16 @@ class DeltaDemo:
                 message = json.load(response)
         except (HTTPError, URLError, TimeoutError) as exc:
             raise DeltaError(f"Demo exchange request failed: {exc}") from exc
+        if not isinstance(message, dict):
+            raise DeltaError("Unexpected Delta API response")
         if message.get("success") is not True:
             raise DeltaError(f"Delta demo API rejected request: {message.get('error')}")
         return message
 
-    def products(self, *, limit_pages: int = 10) -> list[dict]:
+    def products(self, *, limit_pages: int = 100) -> list[dict]:
         """Paginate active derivatives catalog; fail if pagination may be incomplete."""
+        if not isinstance(limit_pages, int) or not 1 <= limit_pages <= 200:
+            raise ValueError("limit_pages must be 1..200")
         out, cursor = [], None
         for _ in range(limit_pages):
             params = {"states": "live", "page_size": "100",
@@ -148,3 +152,60 @@ class DeltaDemo:
         if not isinstance(result.get("result"), dict):
             raise DeltaError("Unexpected order result")
         return result["result"]
+
+    def btc_tickers(self) -> list[dict]:
+        """Public BTC futures and option quotes, with Delta's documented filters."""
+        response = self._request(
+            "GET", "/v2/tickers",
+            params={"underlying_asset_symbols": "BTC",
+                    "contract_types": "perpetual_futures,futures,call_options,put_options"},
+        )
+        result = response.get("result")
+        if not isinstance(result, list):
+            raise DeltaError("Unexpected BTC ticker response")
+        # Do not trust upstream filter alone.
+        def btc_symbol(row):
+            symbol = str(row.get("symbol") or "").upper()
+            return (symbol.startswith("BTC") or symbol.startswith(("C-BTC-", "P-BTC-")))
+        return [row for row in result if isinstance(row, dict) and btc_symbol(row)]
+
+    def candles(self, *, symbol: str = "BTCUSD", resolution: str = "5m",
+                start: int, end: int) -> list[dict]:
+        """Return <=2000 time-ordered BTC OHLCV candles. Times are epoch seconds."""
+        if symbol != "BTCUSD":
+            raise ValueError("Initial candle feed is BTCUSD only")
+        if resolution not in {"1m", "3m", "5m", "15m", "30m",
+                              "1h", "2h", "4h", "6h", "1d", "1w"}:
+            raise ValueError("Unsupported Delta candle resolution")
+        if (type(start) is not int or type(end) is not int
+                or start <= 0 or end <= start):
+            raise ValueError("Invalid candle start/end epoch seconds")
+        result = self._request(
+            "GET", "/v2/history/candles",
+            params={"resolution": resolution, "symbol": symbol,
+                    "start": start, "end": end},
+        ).get("result")
+        if not isinstance(result, list) or not result or len(result) > 2000:
+            raise DeltaError("Empty or malformed BTC candles response")
+        return result
+
+    def btc_orderbook(self, *, depth: int = 20) -> dict:
+        """L2 BTCUSD book. Caller validates depth, timestamp and bid/ask spread."""
+        if type(depth) is not int or not 1 <= depth <= 100:
+            raise ValueError("depth must be 1..100")
+        result = self._request(
+            "GET", "/v2/l2orderbook/BTCUSD", params={"depth": depth}
+        ).get("result")
+        if not isinstance(result, dict) or result.get("symbol") != "BTCUSD":
+            raise DeltaError("Malformed BTC order book response")
+        return result
+
+    def wallet_balances(self) -> dict:
+        """Signed read-only demo balances; never sum across different assets."""
+        reply = self._request("GET", "/v2/wallet/balances", auth=True)
+        if not isinstance(reply.get("result"), list):
+            raise DeltaError("Malformed demo wallet response")
+        meta = reply.get("meta") or {}
+        if not isinstance(meta, dict):
+            raise DeltaError("Malformed wallet meta")
+        return {"balances": reply["result"], "meta": meta}
