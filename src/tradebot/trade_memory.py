@@ -110,6 +110,23 @@ class TradeMemory:
                     status TEXT NOT NULL, completed_at TEXT,
                     token_count INTEGER
                 );
+                CREATE TABLE IF NOT EXISTS unattributed_fills (
+                    fill_id TEXT PRIMARY KEY, at_us INTEGER NOT NULL,
+                    symbol TEXT NOT NULL, side TEXT NOT NULL,
+                    size TEXT NOT NULL, price TEXT NOT NULL,
+                    fee TEXT NOT NULL, fee_asset TEXT NOT NULL,
+                    order_id TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_unattributed_fill_time
+                    ON unattributed_fills(at_us);
+                CREATE TRIGGER IF NOT EXISTS learning_fills_immutable_update
+                    BEFORE UPDATE ON unattributed_fills BEGIN
+                    SELECT RAISE(ABORT, 'Broker fill evidence cannot be edited');
+                END;
+                CREATE TRIGGER IF NOT EXISTS learning_fills_immutable_delete
+                    BEFORE DELETE ON unattributed_fills BEGIN
+                    SELECT RAISE(ABORT, 'Broker fill evidence cannot be deleted');
+                END;
                 CREATE TABLE IF NOT EXISTS position_state (
                     singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
                     trade_id TEXT, active INTEGER NOT NULL,
@@ -267,6 +284,61 @@ class TradeMemory:
             ).fetchall()
         return [dict(row) | {"evidence_refs": json.loads(row["evidence_refs"])}
                 for row in rows]
+
+    def ingest_unattributed_broker_fills(self, fills):
+        """Store only normalized broker-confirmed fill facts, without attribution.
+
+        No fill may be assigned to a GPT-6 decision, watcher position,
+        win/loss or realized P&L without order-ID-level reconciliation.
+        Never persist raw broker responses or account identifiers.
+        """
+        from tradebot.ledger import _normalize, LedgerError
+        if not isinstance(fills, list) or len(fills) > 2000:
+            raise MemoryError("Invalid broker fill batch")
+        prepared = []
+        try:
+            for fill in fills:
+                normalized = _normalize(fill)
+                # Reuse the exact ledger validator; deliberately discard raw_json
+                # and other provider data before storing this learning evidence.
+                (fill_id, at_us, symbol, side, size, price, fee,
+                 asset, _notional, order_id, _raw_json) = normalized
+                if len(fill_id) > 96 or len(order_id) > 96 or len(symbol) > 96:
+                    raise MemoryError("Fill identifier too long")
+                prepared.append((fill_id, at_us, symbol, side, size,
+                                 price, fee, asset, order_id))
+        except LedgerError as exc:
+            raise MemoryError("Invalid verified BTC fill") from None
+        added = 0
+        with self._db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            for row in prepared:
+                old = db.execute(
+                    "SELECT fill_id,at_us,symbol,side,size,price,fee,fee_asset,order_id "
+                    "FROM unattributed_fills WHERE fill_id=?", (row[0],)
+                ).fetchone()
+                if old:
+                    if tuple(old) != row:
+                        raise MemoryError("Broker fill ID changed across reads")
+                    continue
+                db.execute("INSERT INTO unattributed_fills VALUES (?,?,?,?,?,?,?,?,?)", row)
+                added += 1
+            db.commit()
+        return {"received": len(prepared), "new": added,
+                "duplicates": len(prepared) - added,
+                "trade_attribution_verified": False, "realized_pnl_verified": False}
+
+    def unattributed_fill_summary(self):
+        """Only aggregate facts; never mistake fees or fills for net profit."""
+        with self._db() as db:
+            rows = db.execute("SELECT fee,fee_asset FROM unattributed_fills").fetchall()
+        fees = {}
+        for row in rows:
+            asset = row["fee_asset"]
+            fees[asset] = fees.get(asset, Decimal(0)) + Decimal(row["fee"])
+        return {"confirmed_btc_fills": len(rows),
+                "fees_by_asset": {key: str(v) for key, v in sorted(fees.items())},
+                "trade_attribution_verified": False, "realized_pnl_verified": False}
 
     def fire_advisories(self, *, limit=3):
         """Only validated lessons; default is empty even if Kimi wrote candidates."""
