@@ -21,7 +21,7 @@
       <a href="#learning" class="nav"><span class="nav-icon">◈</span> Kimi Learning</a>
       <div class="sidebar-bottom">
         <div class="secure-mark">◈ &nbsp;PRIVATE MONITOR</div>
-        <div class="sidebar-caption">Delta India testnet only<br/>Read-only interface. No trade controls.</div>
+        <div class="sidebar-caption">Delta India testnet only<br/>FIRE execution requires explicit Demo activation.</div>
       </div>
     </aside>
     <main id="terminal">
@@ -68,12 +68,12 @@
         <section class="panel fire-panel" id="fire">
           <div class="panel-header">
             <div><div class="eyebrow">MANUAL DECISION LAB · BTCUSD PERPETUAL</div><h2>FIRE <span class="fire-accent">GPT-6</span></h2></div>
-            <span class="tiny-label">READ-ONLY PROBE</span>
+            <span class="tiny-label" id="fire-mode-label">READ-ONLY PROBE</span>
           </div>
-          <p class="fire-description">One tap asks <strong>GPT-6</strong> for a BTC direction, contract size, stop-loss and take-profit using a fresh Delta Demo snapshot. Kimi is disabled.</p>
+          <p class="fire-description" id="fire-description">GPT-6 decides BTC direction, contract size, stop-loss and take-profit from a fresh Delta India Demo snapshot. Kimi does not make trading decisions.</p>
           <div class="fire-controls">
             <button id="fire-preview" type="button">FIRE · Analyze only</button>
-            <div class="fire-disclosure">One paid GPT-6 Top Billing completion may be made per press. <strong>No demo or real-money orders are placed.</strong> Cooldown: 5 minutes.</div>
+            <div class="fire-disclosure" id="fire-disclosure">One paid GPT-6 Top Billing completion may be made per press. Demo order execution is disabled until explicitly activated.</div>
           </div>
           <p id="fire-status" role="status" aria-live="polite">Ready for a manually requested GPT-6 analysis.</p>
           <div class="fire-results" id="fire-results"></div>
