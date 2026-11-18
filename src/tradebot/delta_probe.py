@@ -58,29 +58,45 @@ def check_public(exchange, *, now=None) -> dict:
             "orders_submitted": False}
 
 
+def _safe_get(getter, stage: str):
+    """Classify a read-only auth failure without printing provider response.
+
+    Do not include exception text, keys, signatures, request URLs or any
+    private account fields in an Actions log.
+    """
+    from urllib.error import HTTPError
+    try:
+        return getter()
+    except DeltaError as exc:
+        cause = exc.__cause__
+        if isinstance(cause, HTTPError):
+            raise ProbeError(f"AUTH_STAGE={stage} STATUS=HTTP_{cause.code}") from None
+        raise ProbeError(f"AUTH_STAGE={stage} STATUS=DELTA_API_REJECTED_OR_UNAVAILABLE") from None
+
+
 def check_authenticated(exchange) -> dict:
     _require(getattr(exchange, "base_url", None) == DEMO_API,
              "Refusing non-demo credentials")
     _require(getattr(exchange, "allow_orders", None) is False,
              "Read-only probe requires order mutations disabled")
 
-    wallet = exchange.wallet_balances()
+    wallet = _safe_get(exchange.wallet_balances, "wallet")
     balances = wallet.get("balances")
-    _require(isinstance(balances, list), "Demo balances malformed")
+    _require(isinstance(balances, list), "AUTH_STAGE=wallet STATUS=BAD_SCHEMA")
     _require(all(isinstance(b, dict) and "asset_symbol" in b
                  and "available_balance" in b for b in balances),
-             "Demo wallet fields malformed")
+             "AUTH_STAGE=wallet STATUS=BAD_FIELDS")
 
-    orders = exchange.open_orders()
-    _require(isinstance(orders, list), "Demo open orders malformed")
+    orders = _safe_get(exchange.open_orders, "open_orders")
+    _require(isinstance(orders, list), "AUTH_STAGE=open_orders STATUS=BAD_SCHEMA")
     _require(all(isinstance(o, dict) and o.get("product_symbol")
                  and o.get("product_id") is not None for o in orders),
-             "Demo open order identity fields missing")
+             "AUTH_STAGE=open_orders STATUS=BAD_FIELDS")
 
-    positions = exchange.btc_positions()
-    _require(isinstance(positions, list), "Demo BTC positions malformed")
+    positions = _safe_get(exchange.btc_positions, "positions")
+    _require(isinstance(positions, list), "AUTH_STAGE=positions STATUS=BAD_SCHEMA")
     _require(all(isinstance(p, dict) and "size" in p for p in positions),
-             "Demo BTC position schema malformed")
+             "AUTH_STAGE=positions STATUS=BAD_FIELDS")
 
     # Numeric values, IDs and even exact exposure are deliberately omitted.
     return {"environment": "delta-india-demo",
@@ -127,10 +143,15 @@ def main() -> None:
             public["account"] = check_authenticated(exchange)
         else:
             public["account"] = {"authenticated_read": "not_requested"}
-    except (DeltaError, MarketDataError, ProbeError):
-        # Never leak exception details from authenticated API responses in CI.
-        print("Delta India demo diagnostic failed. Review endpoint or "
-              "credential configuration securely.")
+    except ProbeError as exc:
+        # Only fixed stage/status markers are permitted for authenticated
+        # failures. Never emit the originating HTTP response or its body.
+        if args.authenticated and str(exc).startswith("AUTH_STAGE="):
+            print(str(exc))
+        print("Delta India demo diagnostic failed (sanitized details only).")
+        raise SystemExit(1) from None
+    except (DeltaError, MarketDataError):
+        print("Delta India demo diagnostic failed (no credentials logged).")
         raise SystemExit(1) from None
 
     print(json.dumps(public, indent=2))
