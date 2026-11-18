@@ -202,13 +202,28 @@ class BotRunner:
         """
         lock_path = self.config.journal_path + ".lock"
         with SingleInstance(lock_path):
-            while stop is None or not stop():
-                try:
-                    result = self.tick()
-                    print(result, flush=True)
-                except KeyboardInterrupt:
-                    raise
-                except Exception as exc:
-                    print("TRADEBOT ALERT: " + type(exc).__name__ + ": " +
-                          str(exc), file=sys.stderr, flush=True)
-                self.pause(self.config.poll_seconds)
+            try:
+                while stop is None or not stop():
+                    try:
+                        result = self.tick()
+                        print(result, flush=True)
+                    except KeyboardInterrupt:
+                        raise
+                    except Exception as exc:
+                        print("TRADEBOT ALERT: " + type(exc).__name__ + ": " +
+                              str(exc), file=sys.stderr, flush=True)
+                    self.pause(self.config.poll_seconds)
+            finally:
+                if self.config.mode == "demo":
+                    # A graceful exit must not abandon positions midway
+                    # through the market session. A hard crash or host outage
+                    # still requires independent process supervision.
+                    try:
+                        self.executor.closeout()
+                    except Exception as exc:
+                        self._record("shutdown_exposure_alert", {
+                            "reason": type(exc).__name__,
+                        })
+                        print("TRADEBOT CRITICAL: Shutdown cannot confirm "
+                              "BTC positions are flat", file=sys.stderr, flush=True)
+                        raise
