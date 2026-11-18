@@ -70,7 +70,29 @@ def _safe_get(getter, stage: str):
     except DeltaError as exc:
         cause = exc.__cause__
         if isinstance(cause, HTTPError):
-            raise ProbeError(f"AUTH_STAGE={stage} STATUS=HTTP_{cause.code}") from None
+            # Match ONLY documented error categories; never print Delta's
+            # response body, contexts, IP addresses or account identifiers.
+            known = {
+                "invalid_api_key": "INVALID_API_KEY",
+                "signatureexpired": "SIGNATURE_EXPIRED",
+                "signature mismatch": "SIGNATURE_MISMATCH",
+                "unauthorizedapiaccess": "UNAUTHORIZED_API_ACCESS",
+                "ip_not_whitelisted_for_api_key": "IP_NOT_WHITELISTED",
+                "forbidden": "CDN_FORBIDDEN",
+            }
+            reason = "UNKNOWN"
+            try:
+                data = json.loads(cause.read(8192))
+                err = data.get("error", "")
+                raw = (err.get("code") or err.get("message") or "")
+                      if isinstance(err, dict) else err
+                if isinstance(raw, str):
+                    reason = known.get(raw.strip().lower(), "UNKNOWN")
+            except (ValueError, TypeError, AttributeError, OSError):
+                pass
+            raise ProbeError(
+                f"AUTH_STAGE={stage} STATUS=HTTP_{cause.code} CATEGORY={reason}"
+            ) from None
         raise ProbeError(f"AUTH_STAGE={stage} STATUS=DELTA_API_REJECTED_OR_UNAVAILABLE") from None
 
 
