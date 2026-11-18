@@ -204,6 +204,13 @@ class BotRunner:
 
         positions = self.exchange.btc_positions()
         snapshot = self.snapshot_fn(self.exchange, now=instant, include_balances=True)
+        if self.config.schedule == "crypto-24x7":
+            # The BTC market is continuous regardless of NYSE phase. Retain
+            # the NYSE status separately for diagnostics and AI consistency.
+            snapshot = dict(snapshot)
+            snapshot["nyse_phase"] = snapshot.get("session_phase")
+            snapshot["session_phase"] = "trading"
+            snapshot["trading_schedule"] = "crypto-24x7"
         context, products = build_ai_context(
             snapshot, max_options=self.config.max_options)
         context["btc_positions"] = positions
