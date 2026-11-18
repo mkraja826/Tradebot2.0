@@ -459,6 +459,7 @@ async function refreshLearning() {
     text("learning-events",data.evidence_events);
     text("learning-candidates",data.candidate_lessons);
     text("learning-validated",data.validated_lessons);
+    text("learning-fills",data.unattributed_broker_fills||0);
     const freshness=data.last_observation_at ? " · Last broker observation "+timeLabel(data.last_observation_at):"";
     const watcherStatus=data.watcher_status||"not_running";
     const monitoring=watcherStatus==="not_running"||watcherStatus==="stale"?
