@@ -81,6 +81,8 @@ function renderEvents(events) {
   });
 }
 function render(data) {
+  latest = data;
+  updateTape(data.live);
   const runner=data.runner||{}, live=data.live||{}, market=live.market||{}, account=live.account||{}, ledger=data.ledger||{};
   text("refresh-label","Updated "+new Date().toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"}));
   text("runtime-status",runner.status==="running" ? "RUNNING · "+(runner.mode==="demo"?"DEMO TRADING":"OBSERVING") : runner.status==="stale" ? "HEARTBEAT STALE" : runner.status==="stopped"?"STOPPED":"NO RUNNING BOT VERIFIED");
@@ -115,6 +117,8 @@ async function update() {
     if(!res.ok)throw new Error("API unavailable");
     render(await res.json());
   } catch(err) {
+    latest = null;
+    updateTape(null);
     text("refresh-label","Dashboard offline");
     text("runtime-status","DATA CONNECTION LOST");
     byId("runtime-pill").dataset.state="stale";
@@ -123,4 +127,95 @@ async function update() {
 document.querySelectorAll(".nav").forEach(link=>link.addEventListener("click",()=>{
   document.querySelectorAll(".nav").forEach(x=>x.classList.remove("active"));link.classList.add("active");
 }));
+
+let latest = null;
+const samples = [];
+
+function paintTrace() {
+  const canvas = byId("trace");
+  const width = canvas.clientWidth, height = canvas.clientHeight;
+  const ratio = window.devicePixelRatio || 1;
+  canvas.width = Math.round(width * ratio);
+  canvas.height = Math.round(height * ratio);
+  if (!samples.length || !width || !height) return;
+  const ctx = canvas.getContext("2d");
+  ctx.scale(ratio, ratio);
+  const prices = samples.map(s => s.price);
+  const low = Math.min(...prices), high = Math.max(...prices);
+  const first = samples[0], last = samples[samples.length - 1];
+  const duration = Math.max(1, last.at - first.at);
+  ctx.strokeStyle = ctx.fillStyle = "#71efcc";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  let previous, x, y;
+  for (const sample of samples) {
+    x = 5 + (width - 10) * (sample.at - first.at) / duration;
+    y = high === low ? height / 2 : 8 + (height - 16) * (high - sample.price) / (high - low);
+    if (!previous || sample.at - previous.at > 90000) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+    previous = sample;
+  }
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(x, y, 4, 0, 2 * Math.PI);
+  ctx.fill();
+}
+
+function updateTape(live) {
+  const market = live?.market;
+  const at = Date.parse(live?.checked_at);
+  const age = Date.now() - at;
+  const price = (Number(market?.bid) + Number(market?.ask)) / 2;
+  if (market?.status !== "fresh" || !(age < 90000) || !Number.isFinite(price)) {
+    text("mid", "—");
+    text("sample-info", "Waiting for a fresh BTC quote");
+    return;
+  }
+  text("mid", "$" + nfmt(price));
+  if (samples.length && at <= samples[samples.length - 1].at) return;
+  samples.push({at, price});
+  if (samples.length > 180) samples.shift();
+  paintTrace();
+  text("sample-info", samples.length + " observations · " + new Date(at).toLocaleTimeString());
+  byId("mid").classList.remove("new-price");
+  void byId("mid").offsetWidth;
+  byId("mid").classList.add("new-price");
+}
+
+function answer(question) {
+  if (!latest) return "Dashboard disconnected. Please try again after it reconnects.";
+  const live = latest.live || {};
+  if (/decision|why|wait|strategy|analysis/i.test(question)) {
+    const event = latest.events?.find(e => ["ai_decision","ai_preview","ai_preview_rejected"].includes(e.kind));
+    if (!event) return "No decision has been recorded yet.";
+    return [event.details?.strategy || "Decision record", event.details?.rationale || event.details?.reason, timeLabel(event.time)].filter(Boolean).join(" · ");
+  }
+  if (!(Date.now() - Date.parse(live.checked_at) < 90000)) return "Waiting for a current exchange snapshot.";
+  if (/position|order/i.test(question)) {
+    const a = live.account;
+    return a?.status === "connected" ? a.btc_open_positions + " open BTC positions and " + a.account_open_orders + " open account orders at the last exchange check." : "Account data is unavailable.";
+  }
+  if (/price|quote|spread|bid|ask|midpoint/i.test(question)) {
+    const m = live.market;
+    return m?.status === "fresh" ? "Delta demo bid $" + nfmt(m.bid) + ", ask $" + nfmt(m.ask) + ", spread $" + nfmt(Number(m.ask) - Number(m.bid)) + "." : "Waiting for a fresh BTC quote.";
+  }
+  return "I can look up BTC prices, spreads, open positions, open orders and the latest recorded decision.";
+}
+
+function ask(question) {
+  if (!question.trim()) return;
+  const log = byId("messages");
+  log.append(node("p","asker",question),node("p","reply",answer(question)));
+  while (log.children.length > 40) log.firstElementChild.remove();
+  log.scrollTop = log.scrollHeight;
+}
+byId("chat-form").addEventListener("submit", event => {
+  event.preventDefault();
+  ask(byId("question").value);
+  byId("question").value = "";
+});
+byId("prompts").addEventListener("click", event => {
+  if (event.target.tagName === "BUTTON") ask(event.target.textContent);
+});
+new ResizeObserver(paintTrace).observe(byId("trace").parentElement);
 update();setInterval(update,10000);
