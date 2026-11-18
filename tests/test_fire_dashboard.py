@@ -27,10 +27,6 @@ def fake_report(routes, snapshot_loader):
                 "usage": {"total_tokens": 410},
                 "request_id": "private-id",
             },
-            "paper": {
-                "model": routes["paper"], "latency_ms": 112,
-                "error": "upstream secret provider content",
-            },
         },
     }
 
@@ -65,8 +61,9 @@ class FirePreviewTests(unittest.TestCase):
         self.assertEqual(status["status"], "completed")
         self.assertFalse(status["orders_submitted"])
         self.assertEqual(status["result"]["results"]["fire"]["decision"]["direction"], "LONG")
-        self.assertIn("error", status["result"]["results"]["paper"])
-        self.assertNotIn("upstream secret", json.dumps(status))
+        self.assertEqual(set(status["result"]["results"]), {"fire"})
+        self.assertEqual(status["models"], {"fire": "tb-gpt-6"})
+        self.assertNotIn("kimi", json.dumps(status).lower())
         self.assertNotIn("private-id", json.dumps(status))
         self.assertEqual(len(invocations), 1)
         allowed, reason = controller.start()
