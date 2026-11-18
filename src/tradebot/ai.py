@@ -116,25 +116,11 @@ def _compact_market_context(market: dict) -> dict:
     }
 
 
-class AIPlanner:
-    """One Top Billing model, no unrequested extra models or fallback calls.
-
-    Top Billing's selected DeepSeek route does not advertise structured-output
-    support. Do not send response_format=json_object/json_schema. Request
-    textual JSON and validate strictly. Malformed output is a failed decision,
-    never a reason to submit an unvalidated order.
-    """
-
-    def __init__(self, *, api_key: str | None = None, model: str | None = None,
-                 transport=None):
+class TopBillingClient:
+    def __init__(self, *, api_key=None, transport=None):
         self.api_key = api_key if api_key is not None else os.getenv("TB_API_KEY", "")
-        self.model = model if model is not None else os.getenv("TB_MODEL", PRIMARY_MODEL)
-        if self.model not in ALLOWED_MODELS:
-            raise PlanError("AI model not in the approved low-cost model list")
         self._transport = transport or urlopen
-        self.last_usage = None
         self.last_request_id = None
-        self.last_finish_reason = None
 
     def _call(self, url: str, *, body: dict | None = None, timeout: int = 45) -> dict:
         if not self.api_key:
@@ -163,6 +149,24 @@ class AIPlanner:
         if not isinstance(result, dict):
             raise PlanError("Malformed Top Billing response")
         return result
+
+class AIPlanner(TopBillingClient):
+    """One Top Billing model, no unrequested extra models or fallback calls.
+
+    Top Billing's selected DeepSeek route does not advertise structured-output
+    support. Do not send response_format=json_object/json_schema. Request
+    textual JSON and validate strictly. Malformed output is a failed decision,
+    never a reason to submit an unvalidated order.
+    """
+
+    def __init__(self, *, api_key: str | None = None, model: str | None = None,
+                 transport=None):
+        super().__init__(api_key=api_key, transport=transport)
+        self.model = model if model is not None else os.getenv("TB_MODEL", PRIMARY_MODEL)
+        if self.model not in ALLOWED_MODELS:
+            raise PlanError("AI model not in the approved low-cost model list")
+        self.last_usage = None
+        self.last_finish_reason = None
 
     def check_model_access(self) -> bool:
         """Read-only model catalogue check, no paid completion request."""
