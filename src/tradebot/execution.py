@@ -13,7 +13,7 @@ from uuid import uuid4
 from tradebot.ai import TradePlan
 from tradebot.delta import is_btc_contract
 from tradebot.journal import record
-from tradebot.session import SessionPhase, session_phase
+from tradebot.session import SessionPhase, entry_phase, session_phase
 
 
 class ExecutionError(RuntimeError):
@@ -67,18 +67,21 @@ class DemoExecutor:
     """
 
     def __init__(self, exchange, *, journal_path: str = "data/trades.jsonl",
-                 now=None, pause=None):
+                 now=None, pause=None, schedule: str = "nyse"):
         self.exchange = exchange
         self.journal_path = journal_path
         self.now = now or (lambda: datetime.now(timezone.utc))
         self.pause = pause or sleep
+        if schedule not in ("nyse", "crypto-24x7"):
+            raise ValueError("Unsupported execution schedule")
+        self.schedule = schedule
 
     def _log(self, kind: str, info: dict):
         record(self.journal_path, kind, info)
 
     def execute(self, plan: TradePlan, products: list[dict]) -> ExecutionReport:
-        if session_phase(self.now()) != SessionPhase.TRADING:
-            raise ExecutionError("New positions are forbidden outside NYSE entry window")
+        if entry_phase(self.now(), schedule=self.schedule) != SessionPhase.TRADING:
+            raise ExecutionError("New positions are forbidden outside the configured entry window")
         ids_to_products = {int(p["id"]): p for p in products if is_btc_contract(p)}
         if not plan.orders:
             self._log("wait", {"strategy": plan.strategy, "rationale": plan.rationale})
@@ -91,7 +94,7 @@ class DemoExecutor:
         submitted = []
         try:
             for leg in plan.orders:
-                if session_phase(self.now()) != SessionPhase.TRADING:
+                if entry_phase(self.now(), schedule=self.schedule) != SessionPhase.TRADING:
                     raise ExecutionError("Session cutoff crossed during multi-leg entry")
                 cid = "tb2-" + uuid4().hex[:24]
                 self.exchange.place_order(product=ids_to_products[leg.product_id],
