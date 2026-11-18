@@ -7,7 +7,7 @@ name = "tradebot2"
 version = "0.2.0"
 description = "Demo-only autonomous BTC derivatives trading bot foundation"
 requires-python = ">=3.11"
-dependencies = ["exchange-calendars>=4.10,<5"]
+dependencies = ["exchange-calendars>=4.10,<5", "cryptography>=44,<47"]
 
 [project.scripts]
 tradebot = "tradebot.cli:main"
