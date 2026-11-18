@@ -45,7 +45,7 @@ trap 'rm -f "$tmp_unit"' EXIT
 
 cat > "$tmp_unit" <<EOF
 [Unit]
-Description=Tradebot 2.0 - continuous read-only Delta India DEMO observer
+Description=Tradebot 2.0 - 24x7 read-only Delta India DEMO opportunity scanner
 After=network-online.target
 Wants=network-online.target
 StartLimitIntervalSec=0
@@ -87,7 +87,7 @@ sudo systemctl restart "$UNIT_NAME"
 echo
 echo "Service configured to auto-start on VM boot and restart after a crash."
 echo "Observer mode: Delta India DEMO, NO order submission."
-echo "Polling: 60 seconds. Model proposals: hourly while NYSE entry window is open."
+echo "Polling: 60 seconds. Model proposals: around every 30 minutes, 24x7 (paid Top Billing calls)."
 echo "Check: sudo systemctl status tradebot2-observe --no-pager"
 echo "Logs: sudo journalctl -u tradebot2-observe -n 20 --no-pager"
 echo "Stop: sudo systemctl stop tradebot2-observe"
