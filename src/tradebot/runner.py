@@ -5,6 +5,7 @@ demo-only exchange client, and MUST be run in a supervised, verified testnet.
 A model is never trusted to decide when the end-of-session rule applies.
 """
 from dataclasses import dataclass
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 from time import sleep
@@ -283,6 +284,30 @@ class BotRunner:
         return {"phase": phase.value, "action": "demo_order_submitted",
                 "strategy": plan.strategy, "legs": len(plan.orders)}
 
+    def _dashboard_heartbeat(self, action: str) -> None:
+        """Publish non-secret runtime status for the read-only browser UI."""
+        try:
+            destination = Path(self.config.journal_path).parent / "runtime.json"
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            state = {
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+                "mode": self.config.mode,
+                "schedule": self.config.schedule,
+                "action": str(action)[:80],
+                "pid": os.getpid(),
+                "environment": "delta-india-demo",
+            }
+            temporary = destination.with_name(destination.name + "." + str(os.getpid()) + ".tmp")
+            handle = os.open(str(temporary), os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
+            with os.fdopen(handle, "w", encoding="utf-8") as stream:
+                json.dump(state, stream, separators=(",", ":"))
+                stream.write("\n")
+            os.replace(temporary, destination)
+        except OSError:
+            # An unavailable dashboard must not compromise exchange safety.
+            print("TRADEBOT WARNING: runtime dashboard status write failed",
+                  file=sys.stderr, flush=True)
+
     def run_forever(self, *, stop=None):
         """Keep retrying closeout on faults and flatten on graceful shutdown.
 
@@ -306,10 +331,12 @@ class BotRunner:
                     while not requested_stop.is_set() and (stop is None or not stop()):
                         try:
                             result = self.tick()
+                            self._dashboard_heartbeat(result.get("action", "tick"))
                             print(result, flush=True)
                         except KeyboardInterrupt:
                             raise
                         except Exception as exc:
+                            self._dashboard_heartbeat("error:" + type(exc).__name__)
                             print("TRADEBOT ALERT: " + type(exc).__name__ + ": " +
                                   str(exc), file=sys.stderr, flush=True)
                         self.pause(self.config.poll_seconds)
@@ -326,5 +353,6 @@ class BotRunner:
                                   "BTC positions are flat", file=sys.stderr, flush=True)
                             raise
         finally:
+            self._dashboard_heartbeat("stopped")
             if old_sigterm is not None:
                 signal.signal(signal.SIGTERM, old_sigterm)
