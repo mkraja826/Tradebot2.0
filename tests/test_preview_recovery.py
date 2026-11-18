@@ -27,7 +27,7 @@ class PreviewRecoveryTests(unittest.TestCase):
                     "--output", str(output_path)]
             with patch("sys.argv", argv), \
                  patch("tradebot.cli.DeltaDemo") as exchange_factory, \
-                 patch("tradebot.cli.session_phase", return_value=SessionPhase(session)), \
+                 patch("tradebot.cli.entry_phase", return_value=SessionPhase(session)), \
                  patch("tradebot.cli.collect_market_snapshot", return_value=snapshot, side_effect=market_error) as market_reader, \
                  patch("tradebot.cli.record") as record, \
                  patch("tradebot.cli.recent", return_value=[]), \
