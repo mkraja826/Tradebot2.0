@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 import json
 import os
+from pathlib import Path
 import time
 from uuid import uuid4
 
@@ -208,6 +209,23 @@ def main(argv=None):
                 output = {"status": "broker_evidence_unavailable",
                           "error_type": type(exc).__name__, "orders_submitted": False}
             output["kimi_paid_enabled"] = args.paid_kimi
+            # Non-secret atomic heartbeat for dashboard visibility. A stale
+            # heartbeat cannot be presented as evidence that Kimi is running.
+            runtime_path = Path(args.database).resolve().parent / "learning-runtime.json"
+            tmp = runtime_path.with_name(runtime_path.name + "." + str(os.getpid()) + ".tmp")
+            try:
+                with os.fdopen(os.open(
+                    str(tmp), os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600
+                ), "w", encoding="utf-8") as out:
+                    json.dump({
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                        "watcher_status": output["status"],
+                        "kimi_paid_enabled": args.paid_kimi,
+                        "orders_submitted": False,
+                    }, out, separators=(",", ":"))
+                os.replace(tmp, runtime_path)
+            except OSError:
+                pass
             print(json.dumps(output, separators=(",", ":")), flush=True)
             if not args.watch:
                 break
