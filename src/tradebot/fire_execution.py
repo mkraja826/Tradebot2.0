@@ -115,6 +115,12 @@ class FireTradeStore:
     def __init__(self, path):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        if self.path.is_symlink():
+            raise FireTradeError("FIRE database cannot be a symlink")
+        fd = os.open(str(self.path), os.O_CREAT | os.O_RDWR |
+                     getattr(os, "O_NOFOLLOW", 0), 0o600)
+        os.close(fd)
+        os.chmod(self.path, 0o600)
         with closing(sqlite3.connect(self.path, timeout=10)) as db:
             db.execute("""CREATE TABLE IF NOT EXISTS fire_requests(
                 press TEXT PRIMARY KEY, created_at TEXT NOT NULL,
@@ -177,6 +183,8 @@ class FireTradeStore:
             ).fetchone()
             if row is None:
                 raise FireTradeError("FIRE receipt missing")
+            if row[0] in TERMINAL and status != row[0]:
+                raise FireTradeError("Terminal verified FIRE cannot be reopened")
             current = json.loads(row[1])
             current.update(fields)
             db.execute(
