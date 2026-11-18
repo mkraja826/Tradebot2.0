@@ -141,7 +141,7 @@ body{background:var(--bg)}.eyebrow{color:#ddb982}.panel,.metric.card{border-colo
 
 /* Separate Kimi research lab: hypotheses are never automatic trade instructions */
 .learning-panel{border-color:#404c59;background:linear-gradient(120deg,#19252c,#171d24 70%);margin:4px 0 17px}
-.learning-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:11px;margin:16px 0 12px}
+.learning-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:11px;margin:16px 0 12px}
 .learning-stats>div{display:flex;flex-direction:column;gap:9px;background:#202a2f;border:1px solid #394852;border-radius:9px;padding:15px}
 .learning-stats small{color:#9bafba;font-size:9px;letter-spacing:.5px}
 .learning-stats strong{font-size:23px;color:#f4f7f6;font-variant-numeric:tabular-nums}
@@ -153,3 +153,5 @@ body{background:var(--bg)}.eyebrow{color:#ddb982}.panel,.metric.card{border-colo
 .learning-tag{font-size:9px;color:#f1cb93;font-weight:800;letter-spacing:.6px}
 .learning-disclosure{font-size:10px;color:#8095a4;margin-top:15px;line-height:1.6}
 @media(max-width:650px){.learning-stats{gap:6px}.learning-stats>div{padding:10px}.learning-stats small{font-size:8px}.learning-stats strong{font-size:18px}.learning-hypotheses{grid-template-columns:1fr}}
+
+@media(max-width:750px){.learning-stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
