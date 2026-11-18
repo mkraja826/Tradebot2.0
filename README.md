@@ -56,6 +56,23 @@ A Bitcoin-only AI futures and options bot project for the **Delta Exchange India
 - **Synthetic paid smoke test passed (2026-11-18):** DeepSeek V4.1 Flash returned a valid locally-validated JSON strategy, selected **WAIT** with 0 legs when given no live market evidence, using 357 prompt tokens and 151 completion tokens (508 total). Exactly **one** billed completion was submitted; no Delta API calls or orders were made.
 - GitHub workflow `.github/workflows/smoke-topbilling.yml` is manually rerunnable, but each run spends provider credits. It also triggers when that workflow file itself changes. No paid AI completions are part of ordinary unit tests.
 
+### M6 — Delta India demo API connectivity (public verified; account pending)
+
+- The India demo-only API host is fixed to `https://cdn-ind.testnet.deltaex.org`; no production exchange endpoint is configurable.
+- New `python -m tradebot.delta_probe` validates the real BTCUSD ticker, L2 order book timestamp, and 5-minute OHLC candles without placing or cancelling orders.
+- `python -m tradebot.delta_probe --full-snapshot` verifies live BTC futures/options catalog, quotes, option Greeks where provided, order book, 5-minute candles and analysis features.
+- **Verified on GitHub Actions 2026-11-18:** public demo check passed, returning 36 five-minute candles. Full market snapshot passed with **303 BTC derivatives, including 1 future and 302 options**. These are point-in-time demo testnet observations, not counts guaranteed for subsequent sessions.
+- **Authenticated demo checks are not yet verified** because `DELTA_DEMO_API_KEY` and `DELTA_DEMO_API_SECRET` are not set as Actions repository secrets. The test uses only signed GET methods when configured, and produces sanitized status information (no account values or IDs).
+- The workflow `.github/workflows/verify-delta-demo.yml` runs public checks on workflow changes and via manual `workflow_dispatch`; if both demo credentials exist, it additionally validates wallet, active-order and real-time BTC position response schemas. No Delta order mutations are performed by this workflow.
+
+#### Configure Delta India **demo** credentials
+
+1. Open the **demo account**, not the production Delta India account: https://testnet.delta.exchange/
+2. Create a **testnet-only API key** for the bot with **read permission** first. Keep the key and secret private.
+3. In GitHub repository `Settings → Secrets and variables → Actions`, create two repository secrets named `DELTA_DEMO_API_KEY` and `DELTA_DEMO_API_SECRET`.
+4. From the GitHub Actions tab, manually run **Delta India DEMO read-only integration**. It verifies read-only wallet, order and position shapes without placing orders.
+5. Only after verifying the authenticated response schema, order fills, and independent closeout alerting should trading permissions ever be considered. The demo order feature remains disabled unless separately authorized.
+
 ## Setup
 
 Python 3.11+, install with:
@@ -112,7 +129,7 @@ Do not commit `.env`, preview artifacts, balance exports, JSONL logs or SQLite l
 
 ## Status and next work
 
-**M1–M5 code implemented with passing offline GitHub tests, and Top Billing gateway access verified through one real paid AI smoke test.** No hosting deployment or continuous trading has begun, and **Delta demo account integration remains unverified**. The Top Billing key exists only in the GitHub Actions secret store, not in repository source; credentials must be injected separately into any VPS or JioPC runtime.
+**M1–M6 market-data and AI integration implemented with passing GitHub tests; Delta public demo API and full options pipeline verified in GitHub Actions.** Top Billing gateway access passed one paid AI smoke test. No hosting deployment or continuous trading has begun; **Delta demo account authentication, order execution and closeout remain unverified**. The Top Billing key exists only in the GitHub Actions secret store, not in repository source; credentials must be injected separately into any VPS or JioPC runtime.
 
 Before unattended testnet trading, verify all endpoint payloads and exchange order/fill states with a supervised demo-only API smoke test; add independent heartbeat/paging/closeout monitoring, accurate realized P&L (including fees, funding and position changes), strategy evaluation on held-out periods, a supervised model-update process and resilient reconciliation after network timeouts. Do not describe the bot as profitable or self-learning until it has verified outcomes and a model-improvement pipeline.
 
