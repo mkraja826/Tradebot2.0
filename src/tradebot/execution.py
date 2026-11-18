@@ -35,6 +35,20 @@ def _btc_symbol(symbol: str) -> bool:
     return symbol.startswith(("BTC", "C-BTC-", "P-BTC-"))
 
 
+def _btc_pending_orders(orders: list[dict]) -> list[dict]:
+    """Unknown active order symbols must not be silently assumed unrelated."""
+    active = []
+    for order in orders:
+        if not isinstance(order, dict):
+            raise CloseoutError("Malformed active order returned by exchange")
+        symbol = order.get("product_symbol")
+        if not isinstance(symbol, str) or not symbol.strip():
+            raise CloseoutError("Active order missing product symbol; flatness uncertain")
+        if _btc_symbol(symbol):
+            active.append(order)
+    return active
+
+
 def _position_size(pos: dict) -> int:
     try:
         value = Decimal(str(pos["size"]))
@@ -116,7 +130,7 @@ class DemoExecutor:
         for attempt in range(max_attempts):
             try:
                 open_orders = self.exchange.open_orders()
-                btc_open = [o for o in open_orders if _btc_symbol(o.get("product_symbol"))]
+                btc_open = _btc_pending_orders(open_orders)
                 for product_id in sorted({int(o["product_id"]) for o in btc_open}):
                     self.exchange.cancel_product_orders(product_id)
 
@@ -143,8 +157,7 @@ class DemoExecutor:
                 # Verify using fresh remote state; request acceptance != filled.
                 remaining = [p for p in self.exchange.btc_positions()
                              if _position_size(p) != 0]
-                pending = [o for o in self.exchange.open_orders()
-                           if _btc_symbol(o.get("product_symbol"))]
+                pending = _btc_pending_orders(self.exchange.open_orders())
                 if not remaining and not pending:
                     self._log("btc_flat_verified", {"attempt": attempt + 1})
                     return
