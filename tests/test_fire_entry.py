@@ -15,6 +15,7 @@ class FireEntryTest(unittest.TestCase):
         self.db = Path(directory.name) / "entries.db"
         self.exchange = Mock()
         self.exchange.btc_positions.return_value = []
+        self.exchange.open_orders.return_value = []
         self.entries = FireEntries(self.db, self.exchange)
         self.press = uuid4().hex
         self.plan = dict(direction="LONG", contracts=2, stop_loss="90", take_profit="115")
@@ -34,6 +35,7 @@ class FireEntryTest(unittest.TestCase):
         payload = self.exchange._request.call_args.kwargs["payload"]
         self.assertEqual((payload["side"], payload["size"], payload["bracket_stop_loss_price"],
                           payload["bracket_take_profit_price"]), ("buy", 2, "90", "115"))
+        self.assertEqual(payload["bracket_stop_trigger_method"], "mark_price")
         self.entries = FireEntries(self.db, self.exchange)
         self.assertEqual(self.submit(), first)
         self.exchange._request.assert_called_once()
