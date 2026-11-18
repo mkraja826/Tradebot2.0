@@ -296,3 +296,50 @@ class TradeMemory:
                  str(review_mark) if review_mark is not None else None, review_at)
             )
             db.commit()
+
+
+def public_learning_summary(path):
+    """Bounded read-only dashboard projection; never opens the DB for writes."""
+    path = Path(path)
+    initial = {
+        "status": "not_initialized", "active_position": False,
+        "evidence_events": 0, "candidate_lessons": 0,
+        "validated_lessons": 0, "recent_hypotheses": [],
+        "gpt6_memory_injection_enabled": False,
+        "kimi_can_place_orders": False,
+    }
+    if not path.is_file() or path.is_symlink():
+        return initial
+    from urllib.parse import quote
+    uri = "file:" + quote(str(path.resolve()), safe="/") + "?mode=ro"
+    try:
+        with sqlite3.connect(uri, uri=True, timeout=1) as db:
+            active = db.execute(
+                "SELECT active, last_observed FROM position_state WHERE singleton=1"
+            ).fetchone()
+            events = db.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+            candidates = db.execute(
+                "SELECT COUNT(*) FROM lessons WHERE status='candidate'").fetchone()[0]
+            validated = db.execute(
+                "SELECT COUNT(*) FROM lessons WHERE status='validated'").fetchone()[0]
+            rows = db.execute(
+                "SELECT hypothesis,counterevidence,applicable_when,confidence,created_at "
+                "FROM lessons WHERE status='candidate' "
+                "ORDER BY created_at DESC LIMIT 3"
+            ).fetchall()
+        return {
+            "status": "available",
+            "active_position": bool(active and active[0]),
+            "last_observation_at": active[1] if active else None,
+            "evidence_events": events,
+            "candidate_lessons": candidates,
+            "validated_lessons": validated,
+            "recent_hypotheses": [
+                {"hypothesis": r[0], "counterevidence": r[1],
+                 "applicable_when": r[2], "confidence": r[3],
+                 "created_at": r[4]} for r in rows],
+            "gpt6_memory_injection_enabled": False,
+            "kimi_can_place_orders": False,
+        }
+    except (sqlite3.Error, OSError):
+        return {**initial, "status": "unavailable"}
