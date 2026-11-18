@@ -64,6 +64,14 @@ Cloudflare access to the hostname is an authentication layer **outside the app**
 
 ## Performance and costs
 
-The dashboard refreshes its display every 10 seconds; broker GET results are cached and refreshed at most once every 20 seconds while a browser is open. It **never invokes a paid DeepSeek completion**, but normal Delta rate limits still apply. Cloudflare Tunnel, cloud VM and any external hosting can incur plan-specific costs. The dashboard doesn't start the trading bot; separately use the observer service or supervised demo trading workflow.
+The dashboard refreshes its display every 10 seconds; broker GET results are cached and refreshed at most once every 20 seconds while a browser is open. Normal page views **never invoke a paid model completion**. The explicit **FIRE · Analyze only** button requests Kimi K3.1 Pro and GPT-6 (up to two paid Top Billing completions) from one shared Delta Demo BTCUSD snapshot. Results are research proposals only and **never place or modify exchange orders**. A five-minute server-side cooldown prevents rapid repeat requests; Top Billing spend limits are still recommended. Normal Delta rate limits apply. Cloudflare Tunnel, cloud VM and any external hosting can incur plan-specific costs. The dashboard doesn't start the trading bot; separately use the observer service or supervised demo trading workflow.
 
 Do not present account net equity changes as realized P&L. If the confirmed-fill database has no entries, the dashboard honestly shows zero confirmed fills; this does not mean no exchange fills exist until reconciliation has run.
+
+## FIRE AI comparison (read-only commissioning)
+
+After completing Cloudflare Access login, the dashboard includes a **FIRE · Analyze only** section. Pressing the button requires an explicit confirmation that up to two billable Top Billing model calls may occur. The Kimi and GPT-6 responses share a single Delta Demo market snapshot; the dashboard displays their BTCUSD directional plans, contract count, stop-loss and target (if valid). Kimi's plan is **not** submitted to Delta, and GPT-6 is **not** an exchange account. The button cannot start autonomous trading. Invalid model responses display a validation failure, not a fabricated recommendation.
+
+The background model requests are only launched by a same-origin POST with a specific custom action header and no request body; cross-origin forms and unsupported HTTP routes cannot start them. Cloudflare Access must remain configured to allow only the account owner's email. Do not expose the VM's loopback dashboard as a public unauthenticated service. Model requests and costs are not capped by the VM UI beyond its short cooldown: configure a provider-side budget.
+
+Run the updated code on VM with `git pull --ff-only`, `python -m pip install -e .`, then `sudo systemctl restart tradebot2-dashboard`. **This restarts only the web dashboard; it does not restart the observer or enable demo order execution.**
