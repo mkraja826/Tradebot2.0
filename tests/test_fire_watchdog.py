@@ -34,6 +34,10 @@ class Broker:
     def open_orders(self):
         return list(self.orders)
 
+    def order_by_client_id(self, press):
+        return {"id": 1234, "client_order_id": press, "product_id": 27,
+                "state": "closed", "unfilled_size": 0}
+
     def cancel_product_orders(self, product_id):
         self.orders = []
 
