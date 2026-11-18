@@ -111,3 +111,30 @@ body{background:var(--bg)}.eyebrow{color:#ddb982}.panel,.metric.card{border-colo
 
 #sequence{max-height:90px;overflow:auto;color:#b9c3d0;padding-left:20px;font-size:12px}#sequence:empty{display:none}
 @media(max-width:850px){#inspection:not([hidden]){position:fixed;bottom:58px;left:5px;right:5px;z-index:6;padding:16px;background:#22262c;border:1px solid #625742;border-radius:14px;box-shadow:0 -6px 24px #0006;max-height:36dvh;overflow:auto}.chat.open{z-index:11}.top-right{flex-wrap:wrap;justify-content:flex-end}}
+
+/* Manual Kimi/GPT-6 FIRE commissioning lab (paid read-only research) */
+.fire-panel{margin:14px 0 18px;border-color:#5c4d36;background:linear-gradient(135deg,#1f211e,#171d24 68%);position:relative;overflow:hidden}
+.fire-panel:before{content:"";position:absolute;right:-90px;top:-120px;width:260px;height:260px;border-radius:50%;background:#b8852d12;pointer-events:none}
+.fire-accent{color:#ffc976}
+.fire-description{font-size:12px;color:#b6bfc8;line-height:1.65;max-width:800px}
+.fire-description strong{color:#eef2ea}
+.fire-controls{display:flex;gap:18px;align-items:center;flex-wrap:wrap;margin-top:17px}
+#fire-preview{border:1px solid #ffc473;background:linear-gradient(135deg,#d79a42,#a96d28);color:#141314;border-radius:9px;padding:13px 21px;font-size:13px;font-weight:850;letter-spacing:.35px;cursor:pointer;box-shadow:0 6px 25px #ce953327;transition:transform .15s ease,filter .15s ease}
+#fire-preview:hover:not(:disabled){transform:translateY(-2px);filter:brightness(1.08)}
+#fire-preview:disabled{opacity:.58;cursor:not-allowed;box-shadow:none}
+.fire-disclosure{font-size:11px;line-height:1.6;max-width:430px;color:#a8b3bf}
+.fire-disclosure strong{color:#f3d8a9}
+#fire-status{min-height:18px;font-size:11px;color:#d0bc9e;margin:15px 0 0}
+.fire-results{display:grid;grid-template-columns:1fr 1fr;gap:13px;margin-top:14px}
+.fire-result{padding:18px;border:1px solid #454544;border-radius:10px;background:#171d24}
+.fire-result-title{color:#a5b5c3;font-size:11px;font-weight:800;letter-spacing:.5px;margin-bottom:12px}
+.fire-direction{font-size:20px;color:#f2deb1;display:block;margin-bottom:15px}
+.fire-points{display:flex;gap:12px}
+.fire-point{flex:1;background:#222726;border:1px solid #3f493d;border-radius:7px;padding:11px;display:flex;flex-direction:column;gap:8px}
+.fire-point small{color:#839a9e;font-size:9px;letter-spacing:.6px}
+.fire-point b{font-size:14px;color:#e8f4ef;font-variant-numeric:tabular-nums}
+.fire-error{color:#e7a6a6;font-size:12px;line-height:1.5}
+.fire-time,.fire-proof{color:#8594a3;font-size:10px;line-height:1.5}
+.fire-time{display:block;margin-top:12px}
+.fire-proof{grid-column:1/-1;margin:4px 2px}
+@media(max-width:650px){.fire-results{grid-template-columns:1fr}.fire-proof{grid-column:1}.fire-panel{margin:10px 0 15px}.fire-controls{align-items:stretch}.fire-controls button{width:100%}}
