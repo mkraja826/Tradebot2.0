@@ -1,0 +1,201 @@
+"""Offline GPT-6 one-tap Demo FIRE with actual mock POST and bracket verification."""
+from datetime import datetime, timezone
+from pathlib import Path
+import tempfile
+import unittest
+
+from tradebot.delta import DEMO_API, DeltaError
+from tradebot.fire_execution import (
+    FireDemoController, FireTradeStore, protective_orders_verified,
+)
+
+
+def snapshot():
+    return {
+        "environment": "delta-india-demo",
+        "collected_at": datetime.now(timezone.utc).isoformat(),
+        "position_contracts": 0,
+        "core": {
+            "best_bid": "63214.0", "best_ask": "63214.5",
+            "ticker": {"product_id": 27, "symbol": "BTCUSD",
+                       "contract_type": "perpetual_futures"},
+        },
+    }
+
+
+PLAN = {"direction": "LONG", "contracts": 1,
+        "stop_loss": "62800", "take_profit": "63750"}
+
+
+class FakeDemo:
+    base_url = DEMO_API
+    allow_orders = True
+
+    def __init__(self):
+        self.requests = []
+        self.position = 0
+        self.with_brackets = True
+        self.submit_timeout = False
+        self.active_orders = []
+        self.order = None
+
+    def ticker(self, symbol):
+        return {
+            "symbol": "BTCUSD", "product_id": 27,
+            "timestamp": int(datetime.now(timezone.utc).timestamp()),
+            "quotes": {"best_bid": "63214", "best_ask": "63214.5"},
+        }
+
+    def btc_positions(self):
+        return ([{"product_id": 27, "size": str(self.position),
+                  "product_symbol": "BTCUSD"}] if self.position else [])
+
+    def open_orders(self):
+        return list(self.active_orders)
+
+    def _request(self, method, path, *, auth, payload):
+        self.requests.append((method, path, payload))
+        if self.submit_timeout:
+            raise TimeoutError("response lost, possible fill")
+        self.position = payload["size"] if payload["side"] == "buy" else -payload["size"]
+        self.order = {
+            "id": 1234, "client_order_id": payload["client_order_id"],
+            "product_id": 27, "state": "closed", "unfilled_size": 0,
+            "bracket_stop_loss_price": payload["bracket_stop_loss_price"],
+            "bracket_take_profit_price": payload["bracket_take_profit_price"],
+        }
+        if self.with_brackets:
+            side = "sell" if self.position > 0 else "buy"
+            self.active_orders = [
+                {"id": 9991, "product_id": 27, "stop_order_type": "stop_loss_order",
+                 "bracket_order": True, "side": side, "state": "pending",
+                 "stop_price": payload["bracket_stop_loss_price"],
+                 "product_symbol": "BTCUSD"},
+                {"id": 9992, "product_id": 27, "stop_order_type": "take_profit_order",
+                 "bracket_order": True, "side": side, "state": "pending",
+                 "stop_price": payload["bracket_take_profit_price"],
+                 "product_symbol": "BTCUSD"},
+            ]
+        return {"result": self.order}
+
+    def order_by_client_id(self, order_id):
+        if self.order:
+            return self.order
+        raise DeltaError("No matching broker order")
+
+    def cancel_product_orders(self, product_id):
+        self.active_orders = []
+
+    def products(self):
+        return [{"id": 27, "symbol": "BTCUSD", "contract_type": "perpetual_futures",
+                 "state": "live"}]
+
+    def place_order(self, **kwargs):
+        if not kwargs.get("reduce_only"):
+            raise AssertionError("No additional ENTRY allowed")
+        self.position = 0
+        return {"id": 987}
+
+
+class FireExecutionTests(unittest.TestCase):
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.path = Path(temp.name) / "fire-ops.sqlite"
+        self.exchange = FakeDemo()
+        self.calls = []
+
+    def make(self, *, enabled=True, plan=None):
+        p = plan or PLAN
+        def model(routes, loader):
+            self.calls.append(routes)
+            loader()
+            return {"results": {"fire": {"decision": p}}}
+        return FireDemoController(
+            self.path, enabled=enabled,
+            exchange_factory=lambda: self.exchange,
+            snapshot_loader=snapshot,
+            probe=model, spawn=lambda callback: callback(),
+            pause=lambda seconds: None,
+            max_contracts=1,
+        )
+
+    def test_one_click_posts_one_order_and_verifies_both_protective_stops(self):
+        fire = self.make()
+        accepted, _ = fire.start()
+        self.assertTrue(accepted)
+        state = fire.snapshot()
+        self.assertEqual(state["status"], "protected_active")
+        self.assertTrue(state["protection_verified"])
+        self.assertTrue(state["orders_submitted"])
+        self.assertEqual(state["model"], "tb-gpt-6")
+        self.assertEqual(len(self.calls), 1)
+        self.assertEqual(len(self.exchange.requests), 1)
+        method, path, payload = self.exchange.requests[0]
+        self.assertEqual((method, path), ("POST", "/v2/orders"))
+        self.assertEqual(payload["bracket_stop_trigger_method"], "mark_price")
+        self.assertEqual(payload["bracket_stop_loss_price"], "62800")
+        self.assertEqual(payload["bracket_take_profit_price"], "63750")
+        self.assertEqual(payload["size"], 1)
+        self.assertEqual(payload["side"], "buy")
+        self.assertFalse(fire.start()[0])
+        self.assertEqual(len(self.exchange.requests), 1)
+        self.assertFalse(self.make().start()[0])  # persistent across restart
+
+    def test_unverified_protection_forces_emergency_closeout(self):
+        self.exchange.with_brackets = False
+        fire = self.make()
+        self.assertTrue(fire.start()[0])
+        self.assertEqual(fire.snapshot()["status"], "flat_verified")
+        self.assertFalse(fire.snapshot()["protection_verified"])
+        self.assertEqual(fire.snapshot()["reason_code"], "emergency_flat_verified")
+        self.assertEqual(self.exchange.position, 0)
+
+    def test_broker_timeout_is_not_retried_and_exposure_is_closed(self):
+        self.exchange.submit_timeout = True
+        fire = self.make()
+        self.assertTrue(fire.start()[0])
+        self.assertEqual(len(self.exchange.requests), 1)
+        self.assertEqual(fire.snapshot()["status"], "flat_verified")
+        self.assertEqual(fire.snapshot()["reason_code"], "emergency_flat_verified")
+
+    def test_disabled_fire_makes_no_paid_ai_or_exchange_requests(self):
+        fire = self.make(enabled=False)
+        self.assertEqual(fire.start(), (False, "execution_disabled"))
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.exchange.requests, [])
+
+    def test_pilot_cap_rejects_unbounded_ai_plan_before_order(self):
+        fire = self.make(plan=PLAN | {"contracts": 8})
+        self.assertTrue(fire.start()[0])
+        self.assertEqual(fire.snapshot()["status"], "rejected_no_order")
+        self.assertEqual(fire.snapshot()["orders_submitted"], False)
+        self.assertEqual(len(self.exchange.requests), 0)
+
+    def test_protection_requires_two_distinct_valid_opposite_side_brackets(self):
+        self.exchange.position = 1
+        self.exchange.active_orders = [
+            {"id": 11, "product_id": 27, "bracket_order": True,
+             "stop_order_type": "stop_loss_order", "state": "pending",
+             "side": "sell", "stop_price": "62800"},
+            {"id": 12, "product_id": 27, "bracket_order": True,
+             "stop_order_type": "take_profit_order", "state": "pending",
+             "side": "sell", "stop_price": "63750"},
+        ]
+        self.assertTrue(protective_orders_verified(self.exchange.active_orders,
+                       product_id=27, plan=PLAN))
+        invalid = list(self.exchange.active_orders)
+        invalid[1] = dict(invalid[1], id=11)
+        self.assertFalse(protective_orders_verified(invalid, product_id=27, plan=PLAN))
+        invalid[1] = dict(invalid[1], stop_price="63800")
+        self.assertFalse(protective_orders_verified(invalid, product_id=27, plan=PLAN))
+
+    def test_read_failed_model_never_posts_to_exchange(self):
+        fire = self.make(plan=PLAN | {"stop_loss": "64000"})
+        self.assertTrue(fire.start()[0])
+        self.assertEqual(fire.snapshot()["status"], "rejected_no_order")
+        self.assertEqual(len(self.exchange.requests), 0)
+
+
+if __name__ == "__main__":
+    unittest.main()
