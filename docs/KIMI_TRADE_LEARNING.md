@@ -55,6 +55,27 @@ The response distinguishes persistent research data from fresh watcher
 heartbeats. Database exists does not mean the Kimi watcher is running.
 Both demo execution and GPT-6 memory injection remain disabled.
 
+## Confirmed-fill evidence (manual, read-only)
+
+For an independent snapshot of actual Delta Demo BTC fills (up to the last
+24 hours), run the following after loading your private shell environment:
+
+    python -m tradebot.trade_fill_evidence --lookback-hours 24
+
+This command uses only signed broker GETs. It does not consume Top Billing
+credits, ask Kimi or GPT-6 to make a decision, or place orders. It writes
+selected normalized facts to the **immutable unattributed fills** table in
+`data/trade-learning.sqlite`; raw broker payloads and account identifiers are
+discarded. Repeated observations use exchange fill IDs for deduplication.
+The learning dashboard displays **Confirmed fills · unattributed**, separate
+from Kimi's evidence records and candidate lessons.
+
+Important: a confirmed fill is not automatically attributed to an observed
+trade. The software deliberately does NOT infer net P&L, stop-loss execution,
+winning/losing trades, or broker order identity from fills alone. Automatic
+trade-level attribution awaits the supervised execution and order-ID
+reconciliation milestone.
+
 ## Persistence and evidence handling
 
 - Private immutable evidence: data/trade-learning.sqlite, mode 0600.
