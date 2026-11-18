@@ -2,6 +2,26 @@
 
 A Bitcoin-only AI futures and options bot project for the **Delta Exchange India testnet/demo account**. The repository has **no live-account support**. Trading is not running or deployed. The CLI defaults to read-only, with an **explicitly gated testnet-only order mode**. No keys are stored in this repository.
 
+## Current GPT-6 FIRE Demo release (operator opt-in; not broker commissioned)
+
+The private dashboard can now run **one user-pressed GPT-6 BTCUSD Delta India
+DEMO** entry with an attached mark-price stop-loss and take-profit. This code
+is **OFF by default** and has not yet placed a verified real exchange-connected
+testnet trade. The first supervised pilot limits entry to one contract.
+
+A durable order receipt, signed parent-fill reconciliation, verified protective
+SL/TP child orders and separate reboot-safe protective-order watchdog are
+implemented. If protection fails, BTC-only emergency closeout is attempted;
+exchange outages may prevent verification. Repeated FIRE presses cannot
+repost an ambiguous order. Production Delta APIs are unsupported.
+
+**Manual deployment / first supervised Delta Demo test**:
+[docs/FIRE_EXECUTION_DEMO.md](docs/FIRE_EXECUTION_DEMO.md).
+
+DeepSeek V4.1 Flash remains the 24/7 read-only scanner. Kimi K3.1 Pro is
+a separate opt-in research watcher that cannot change orders or override GPT-6.
+Unverified Kimi lessons are never automatically fed into GPT-6.
+
 ## User requirements
 
 - Bitcoin futures and options only; the AI chooses its strategy, hedges, strike, expiry, number of legs, or WAIT without a strategy whitelist.
