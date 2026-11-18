@@ -6,7 +6,7 @@ import tempfile
 import unittest
 
 from tradebot.delta import DEMO_API
-from tradebot.trade_memory import MemoryError, TradeMemory
+from tradebot.trade_memory import MemoryError, TradeMemory, public_learning_summary
 from tradebot.trade_fill_evidence import collect_fill_evidence
 
 
@@ -59,6 +59,11 @@ class FillEvidenceTests(unittest.TestCase):
         self.assertFalse(summary["realized_pnl_verified"])
         self.assertFalse(summary["trade_attribution_verified"])
         self.assertFalse(summary["orders_submitted"])
+        dashboard = public_learning_summary(self.file)
+        self.assertEqual(dashboard["unattributed_broker_fills"], 1)
+        self.assertFalse(dashboard["fill_trade_attribution_verified"])
+        self.assertEqual(dashboard["candidate_lessons"], 0)
+        self.assertEqual(self.store.fire_advisories(), [])
         self.assertEqual(len(self.broker.calls), 1)
 
         again = collect_fill_evidence(self.broker, TradeMemory(self.file), now=NOW)
