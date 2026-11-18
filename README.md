@@ -45,14 +45,16 @@ A Bitcoin-only AI futures and options bot project for the **Delta Exchange India
 - `tradebot reconcile`: fetches all paginated BTC fills in the requested lookback window and inserts them into an idempotent SQLite ledger with unique exchange fill IDs. `tradebot ledger`: reports confirmed fill counts and fees grouped by settlement currency.
 - **The ledger does NOT yet calculate realized P&L, win rate, funding-adjusted returns or learning performance.** Net-equity observations are stored separately, never presented as realized strategy profits. The AI strategy-updating and independent trading outcome benchmarks remain upcoming milestones.
 
-### M5 — Cost-conscious Top Billing AI integration (code ready, not authenticated)
+### M5 — Cost-conscious Top Billing AI integration (gateway authenticated, synthetic smoke-tested)
 
 - **One AI model only:** `tb-deepseek-v4-1-flash` via `https://api.topbilling.in/v1/chat/completions`. No higher-priced model, no fallback requests or automatic second opinions.
 - Credentials are read from `TB_API_KEY` **only at runtime**. A live API key must never be stored in source control, pasted into GitHub issues, written to test fixtures, or printed in logs.
 - `tradebot ai-check` only fetches `/v1/models`; it does not request a billable completion. The token-generating commands are `preview` and `run`.
 - The selected model does not support provider-enforced structured output according to Top Billing's conformance tests. The planner requests a plain JSON object as text and validates it locally; malformed responses stop the decision.
 - Model calls cap `max_completion_tokens` to 2,048; AI request IDs and billed token counts (if returned) are journaled for cost evaluation. Configure **per-key spend caps** in Top Billing as a second control, since prompt tokens and retries can vary.
-- **No real credential is configured in the repository or CI.** Configure a freshly rotated key on the host running the bot, not through chat. No actual Top Billing calls have been made during this implementation.
+- `TB_API_KEY` is securely configured as a GitHub Actions repository secret and was verified through a read-only model-catalog request; no plaintext credential is committed. The secret is **not** automatically available on a VPS or JioPC.
+- **Synthetic paid smoke test passed (2026-11-18):** DeepSeek V4.1 Flash returned a valid locally-validated JSON strategy, selected **WAIT** with 0 legs when given no live market evidence, using 357 prompt tokens and 151 completion tokens (508 total). Exactly **one** billed completion was submitted; no Delta API calls or orders were made.
+- GitHub workflow `.github/workflows/smoke-topbilling.yml` is manually rerunnable, but each run spends provider credits. It also triggers when that workflow file itself changes. No paid AI completions are part of ordinary unit tests.
 
 ## Setup
 
@@ -110,7 +112,7 @@ Do not commit `.env`, preview artifacts, balance exports, JSONL logs or SQLite l
 
 ## Status and next work
 
-**M1–M5 code implemented and offline-tested on GitHub Actions. Not running, not deployed, not authenticated with Delta demo or Top Billing.** The Top Billing live credential is intentionally not stored in GitHub. Delta demo credentials are still required for market balance reads and demo execution.
+**M1–M5 code implemented with passing offline GitHub tests, and Top Billing gateway access verified through one real paid AI smoke test.** No hosting deployment or continuous trading has begun, and **Delta demo account integration remains unverified**. The Top Billing key exists only in the GitHub Actions secret store, not in repository source; credentials must be injected separately into any VPS or JioPC runtime.
 
 Before unattended testnet trading, verify all endpoint payloads and exchange order/fill states with a supervised demo-only API smoke test; add independent heartbeat/paging/closeout monitoring, accurate realized P&L (including fees, funding and position changes), strategy evaluation on held-out periods, a supervised model-update process and resilient reconciliation after network timeouts. Do not describe the bot as profitable or self-learning until it has verified outcomes and a model-improvement pipeline.
 
