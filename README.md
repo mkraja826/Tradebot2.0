@@ -101,6 +101,14 @@ A Bitcoin-only AI futures and options bot project for the **Delta Exchange India
 - During active NYSE trading, a malformed/truncated model response yields `invalid_ai_response_no_plan` with zero orders, a sanitized error and (if supplied) finish reason/token usage, instead of a traceback. It exits nonzero and never retries billable inference automatically.
 - Changes are covered by offline regression tests. **No new live paid AI preview has been requested after the fix.**
 
+### M10 — 24/7 Google Cloud VM **read-only observer** (installation prepared)
+
+- One-command systemd installation: `bash ops/install_observe_service.sh` from the Iowa VM's SSH session. See [24/7 deployment guide](docs/OBSERVE_24_7_VM.md).
+- Auto-start on VM boot and restart on process failure; the service continues after browser/SSH disconnects. **This has not been installed or started on the user's VM by the GitHub changes alone.**
+- Hardcoded to `--mode observe` and `ENABLE_DEMO_ORDERS=false`. Checks account BTC exposure throughout the day; model proposals occur roughly hourly during the NYSE entry window, subject to health checks, and may incur provider charges. No exchange orders are placed or closed.
+- A reboot or runner restart resets the current in-memory AI interval, so configure external Top Billing spend caps. 24/7 process supervision is not a guarantee against VM outages or Google Cloud billing pauses.
+- Before unattended use, verify service status, logs, VM machine type, static IPv4 address, and Google Cloud billing settings. Independent trading closeout/alerting is still **not deployed**.
+
 ## Setup
 
 Python 3.11+, install with:
