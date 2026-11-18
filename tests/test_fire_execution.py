@@ -152,6 +152,31 @@ class FireExecutionTests(unittest.TestCase):
         self.assertEqual(fire.snapshot()["reason_code"], "emergency_flat_verified")
         self.assertEqual(self.exchange.position, 0)
 
+    def test_new_manual_order_between_checks_is_not_cancelled(self):
+        class RacingBroker(FakeDemo):
+            def __init__(self):
+                super().__init__()
+                self.read_count = 0
+                self.cancel_count = 0
+
+            def open_orders(self):
+                self.read_count += 1
+                if self.read_count == 1:
+                    return []
+                return [{"id": 42, "product_id": 27,
+                         "product_symbol": "BTCUSD", "state": "open"}]
+
+            def cancel_product_orders(self, product_id):
+                self.cancel_count += 1
+
+        self.exchange = RacingBroker()
+        fire = self.make()
+        self.assertTrue(fire.start()[0])
+        self.assertEqual(fire.snapshot()["status"], "rejected_no_order")
+        self.assertEqual(fire.snapshot()["reason_code"], "no_durable_broker_intent")
+        self.assertEqual(self.exchange.cancel_count, 0)
+        self.assertEqual(self.exchange.requests, [])
+
     def test_broker_timeout_is_not_retried_and_exposure_is_closed(self):
         self.exchange.submit_timeout = True
         fire = self.make()
