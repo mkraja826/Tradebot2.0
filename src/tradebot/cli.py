@@ -12,11 +12,13 @@ from tradebot.decision import build_ai_context
 from tradebot.journal import record, recent
 from tradebot.session import session_phase, NEW_YORK
 from tradebot.runner import BotRunner, RunnerConfig
+from tradebot.ledger import ingest_fills, fill_summary, record_equity
+from datetime import timedelta
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Tradebot 2.0 (Delta India demo only)")
-    parser.add_argument("command", choices=("status", "catalog", "snapshot", "balances", "preview", "run"))
+    parser.add_argument("command", choices=("status", "catalog", "snapshot", "balances", "preview", "run", "reconcile", "ledger"))
     parser.add_argument("--include-balances", action="store_true",
                         help="Include signed read-only demo wallet balances in snapshot")
     parser.add_argument("--output", help="Save a complete snapshot or preview JSON to this path")
@@ -28,7 +30,13 @@ def main() -> None:
                         help="Explicit permission for demo orders; requires env opt-in too")
     parser.add_argument("--poll-seconds", type=int, default=15)
     parser.add_argument("--ai-interval-seconds", type=int, default=300)
+    parser.add_argument("--lookback-hours", type=int, default=24,
+                        help="1-168 hours of exchange fills to reconcile")
+    parser.add_argument("--ledger-path", default="data/confirmed-fills.sqlite",
+                        help="Local SQLite fill ledger (not committed)")
     args = parser.parse_args()
+    if not 1 <= args.lookback_hours <= 168:
+        parser.error("--lookback-hours must be 1..168")
     if args.demo_execute and (args.command != "run" or args.mode != "demo"):
         parser.error("--demo-execute is only valid with: run --mode demo")
     if args.command == "run" and args.mode == "demo":
@@ -40,6 +48,10 @@ def main() -> None:
         if not os.getenv("DELTA_DEMO_API_KEY") or not os.getenv("DELTA_DEMO_API_SECRET"):
             parser.error("Demo order mode requires demo-only key and secret")
 
+
+    if args.command == "ledger":
+        print(json.dumps(fill_summary(args.ledger_path), indent=2))
+        return
 
     if args.command == "status":
         instant = datetime.now(timezone.utc)
@@ -75,6 +87,26 @@ def main() -> None:
         }), flush=True)
         runner.run_forever()
         return
+    if args.command == "reconcile":
+        end = datetime.now(timezone.utc)
+        start = end - timedelta(hours=args.lookback_hours)
+        fills = exchange.btc_fills(
+            start_time_us=int(start.timestamp() * 1_000_000),
+            end_time_us=int(end.timestamp() * 1_000_000),
+        )
+        persisted = ingest_fills(args.ledger_path, fills)
+        equity = exchange.wallet_balances().get("meta", {}).get("net_equity")
+        if equity is not None:
+            record_equity(args.ledger_path, equity, at=end)
+        print(json.dumps({
+            "mode": "read_only_fill_reconciliation",
+            "window_hours": args.lookback_hours,
+            "fills": persisted,
+            "summary": fill_summary(args.ledger_path),
+            "order_placement_enabled": False,
+        }, indent=2))
+        return
+
     if args.command == "catalog":
         contracts = exchange.products()
         print(json.dumps({
