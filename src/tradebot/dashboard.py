@@ -1,0 +1,360 @@
+"""Read-only, loopback-only BTC demo monitoring dashboard.
+
+No order endpoints or API credentials are ever returned. Bind restricted to
+127.0.0.1 by design; access from a different device requires a separately
+configured authenticated tunnel/reverse proxy.
+"""
+import argparse
+from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from importlib.resources import files
+import json
+import os
+from pathlib import Path
+import sqlite3
+from threading import Lock, Thread
+import time
+from urllib.parse import quote, urlsplit
+
+from tradebot.delta import DeltaDemo
+from tradebot.market import _age_seconds, MarketDataError
+
+SAFE_EVENT_FIELDS = frozenset({
+    "mode", "strategy", "rationale", "model", "phase", "product_id",
+    "side", "size", "contracts", "attempt", "attempts", "count", "at",
+    "reason", "error", "error_type", "orders_submitted", "legs",
+    "ai_tokens", "message",
+})
+ASSET_TYPES = {
+    "/": ("index.html", "text/html; charset=utf-8"),
+    "/styles.css": ("styles.css", "text/css; charset=utf-8"),
+    "/app.js": ("app.js", "text/javascript; charset=utf-8"),
+}
+
+
+def _utc_now():
+    return datetime.now(timezone.utc)
+
+
+def _iso_age(raw, *, now=None):
+    try:
+        at = datetime.fromisoformat(raw)
+        if at.tzinfo is None:
+            return None
+        return max(0, (_utc_now() if now is None else now).timestamp() -
+                   at.timestamp())
+    except (ValueError, TypeError):
+        return None
+
+
+def _safe_decimal(value):
+    try:
+        num = Decimal(str(value))
+        if num.is_finite():
+            return str(num)
+    except (InvalidOperation, TypeError, ValueError):
+        pass
+    return None
+
+
+def _load_json(path: Path):
+    try:
+        if not path.is_file() or path.stat().st_size > 1_000_000:
+            return None
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, UnicodeError):
+        return None
+
+
+def _events(path: Path, limit: int = 70):
+    try:
+        if not path.is_file():
+            return []
+        # Bounded tail: do not read an unbounded journal into RAM.
+        with path.open("rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            end = handle.tell()
+            handle.seek(max(0, end - 250_000))
+            raw = handle.read()
+        if end > len(raw):
+            raw = raw.split(b"\n", 1)[-1]
+        result = []
+        for line in raw.splitlines()[-250:]:
+            try:
+                item = json.loads(line)
+                kind = item.get("kind")
+                details = item.get("details") or {}
+                if not isinstance(kind, str) or not isinstance(details, dict):
+                    continue
+                selected = {k: v for k, v in details.items()
+                            if k in SAFE_EVENT_FIELDS and
+                            isinstance(v, (str, int, float, bool, list, dict))
+                            and len(json.dumps(v, default=str)) <= 1200}
+                result.append({
+                    "time": str(item.get("at_utc") or "")[:35],
+                    "kind": kind[:80],
+                    "details": selected,
+                })
+            except (ValueError, TypeError):
+                continue
+        return result[-limit:][::-1]
+    except OSError:
+        return []
+
+
+def _ledger(path: Path):
+    result = {
+        "confirmed_btc_fills": 0,
+        "fees_by_asset": {},
+        "equity_points": [],
+        "is_realized_pnl": False,
+        "ledger_present": path.exists(),
+    }
+    if not path.is_file():
+        return result
+    uri = "file:" + quote(str(path.resolve()), safe="/") + "?mode=ro"
+    try:
+        with sqlite3.connect(uri, uri=True, timeout=1) as db:
+            rows = db.execute("SELECT commission, settling_asset FROM fills").fetchall()
+            fees = {}
+            for commission, asset in rows:
+                parsed = _safe_decimal(commission)
+                if parsed is None or not isinstance(asset, str):
+                    continue
+                fees[asset] = fees.get(asset, Decimal("0")) + Decimal(parsed)
+            result["confirmed_btc_fills"] = len(rows)
+            result["fees_by_asset"] = {k: str(v) for k, v in fees.items()}
+            points = db.execute(
+                "SELECT captured_at, net_equity FROM equity_snapshots "
+                "ORDER BY captured_at DESC LIMIT 60"
+            ).fetchall()
+            result["equity_points"] = [
+                {"at": str(at), "equity": value}
+                for at, raw in reversed(points)
+                if (value := _safe_decimal(raw)) is not None
+            ]
+    except (sqlite3.Error, OSError):
+        result["ledger_error"] = "Ledger unavailable or not yet initialized"
+    return result
+
+
+def _runtime(path: Path):
+    raw = _load_json(path)
+    if not isinstance(raw, dict):
+        return {"status": "not_started", "age_seconds": None,
+                "mode": "unknown", "action": "No heartbeat"}
+    age = _iso_age(raw.get("updated_at"))
+    action = raw.get("action") if isinstance(raw.get("action"), str) else "unknown"
+    mode = raw.get("mode") if raw.get("mode") in ("observe", "demo") else "unknown"
+    schedule = raw.get("schedule") if raw.get("schedule") in (
+        "nyse", "crypto-24x7") else "unknown"
+    status = "stopped" if action == "stopped" else (
+        "running" if age is not None and age <= 180 else "stale"
+    )
+    return {
+        "status": status, "age_seconds": round(age, 1) if age is not None else None,
+        "mode": mode, "schedule": schedule, "action": action[:80],
+        "updated_at": str(raw.get("updated_at") or "")[:35],
+    }
+
+
+class DashboardData:
+    def __init__(self, data_dir=None, exchange=None, refresh_seconds=20):
+        self.root = Path(data_dir or os.getenv("TRADEBOT_DASHBOARD_DATA", "data")).resolve()
+        self.exchange = exchange or DeltaDemo(
+            api_key=os.getenv("DELTA_DEMO_API_KEY", ""),
+            api_secret=os.getenv("DELTA_DEMO_API_SECRET", ""),
+            allow_orders=False,
+        )
+        self.refresh_seconds = max(10, int(refresh_seconds))
+        self._lock = Lock()
+        self._started_at = 0.0
+        self._updating = False
+        self._live = {
+            "checked_at": None, "market": {"status": "waiting"},
+            "account": {"status": "waiting"},
+        }
+
+    def _load_remote(self):
+        payload = {
+            "checked_at": _utc_now().isoformat(),
+            "market": {"status": "unavailable"},
+            "account": {"status": "unavailable"},
+        }
+        try:
+            ticker = self.exchange.ticker("BTCUSD")
+            quotes = ticker.get("quotes") or {}
+            if not isinstance(quotes, dict):
+                quotes = {}
+            age = _age_seconds(ticker.get("timestamp"), _utc_now())
+            bid = _safe_decimal(quotes.get("best_bid"))
+            ask = _safe_decimal(quotes.get("best_ask"))
+            mark = _safe_decimal(ticker.get("mark_price"))
+            if (age <= 60 and bid is not None and ask is not None and
+                    Decimal(bid) > 0 and Decimal(ask) > Decimal(bid)):
+                payload["market"] = {
+                    "status": "fresh", "symbol": "BTCUSD", "bid": bid,
+                    "ask": ask, "mark": mark, "age_seconds": round(age, 1),
+                }
+            else:
+                payload["market"] = {"status": "stale_or_unquotable"}
+        except (Exception):
+            # Never serialize HTTP response bodies, auth errors or credentials.
+            payload["market"] = {"status": "unavailable"}
+        try:
+            if not self.exchange.api_key or not self.exchange.api_secret:
+                raise ValueError("Read-only credentials not configured")
+            positions = self.exchange.btc_positions()
+            orders = self.exchange.open_orders()
+            wallet = self.exchange.wallet_balances()
+            if not isinstance(positions, list) or not isinstance(orders, list):
+                raise ValueError("Malformed account state")
+            active = []
+            for row in positions:
+                if not isinstance(row, dict):
+                    raise ValueError("Malformed position")
+                size = _safe_decimal(row.get("size"))
+                if size is None:
+                    raise ValueError("Invalid position size")
+                if Decimal(size) != 0:
+                    active.append({
+                        "symbol": str(row.get("product_symbol") or "BTC derivative")[:70],
+                        "size": size,
+                    })
+            meta = wallet.get("meta") or {}
+            payload["account"] = {
+                "status": "connected", "positions": active[:30],
+                "btc_open_positions": len(active),
+                "account_open_orders": len(orders),
+                "net_equity": _safe_decimal(meta.get("net_equity")),
+            }
+        except (Exception):
+            payload["account"] = {"status": "unavailable"}
+        with self._lock:
+            self._live = payload
+            self._updating = False
+
+    def snapshot(self):
+        now = time.monotonic()
+        with self._lock:
+            if (not self._updating and
+                    now - self._started_at >= self.refresh_seconds):
+                self._updating = True
+                self._started_at = now
+                Thread(target=self._load_remote, daemon=True).start()
+            live = dict(self._live)
+        runtime = _runtime(self.root / "runtime.json")
+        return {
+            "environment": "delta-india-demo",
+            "dashboard_mode": "read_only",
+            "generated_at": _utc_now().isoformat(),
+            "runner": runtime,
+            "live": live,
+            "ledger": _ledger(self.root / "confirmed-fills.sqlite"),
+            "events": _events(self.root / "trades.jsonl"),
+            "halted": (self.root / "trades.jsonl.crypto24x7-halt").is_file(),
+            "warnings": [
+                "AI proposals are not executed orders.",
+                "Confirmed fill counts and equity observations are not realized P&L.",
+                "An offline or stale heartbeat does not prove the VM is powered off.",
+            ],
+        }
+
+
+def create_handler(state, *, allowed_hosts=None):
+    hosts = {"127.0.0.1", "localhost", "[::1]"}
+    if allowed_hosts:
+        hosts.update(allowed_hosts)
+
+    class Handler(BaseHTTPRequestHandler):
+        server_version = "TradebotDashboard/1.0"
+        sys_version = ""
+
+        def _headers(self, size, mime, code=200):
+            self.send_response(code)
+            self.send_header("Content-Type", mime)
+            self.send_header("Content-Length", str(size))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("X-Frame-Options", "DENY")
+            self.send_header("Referrer-Policy", "no-referrer")
+            self.send_header("Content-Security-Policy",
+                             "default-src 'none'; script-src 'self'; "
+                             "style-src 'self'; connect-src 'self'; "
+                             "img-src 'self'; frame-ancestors 'none'; "
+                             "base-uri 'none'; form-action 'none'")
+            self.end_headers()
+
+        def _handle(self, *, body=True):
+            authority = (self.headers.get("Host") or "").split(":")[0].lower()
+            if authority not in hosts:
+                data = b"Forbidden host"
+                self._headers(len(data), "text/plain", 403)
+                if body:
+                    self.wfile.write(data)
+                return
+            path = urlsplit(self.path).path
+            if path == "/api/overview":
+                data = json.dumps(state.snapshot(), separators=(",", ":")).encode()
+                mime = "application/json; charset=utf-8"
+            elif path in ASSET_TYPES:
+                filename, mime = ASSET_TYPES[path]
+                data = files("tradebot").joinpath("dashboard_static", filename).read_bytes()
+            else:
+                data = b"Not found"
+                mime = "text/plain; charset=utf-8"
+                self._headers(len(data), mime, 404)
+                if body:
+                    self.wfile.write(data)
+                return
+            self._headers(len(data), mime)
+            if body:
+                self.wfile.write(data)
+
+        def do_GET(self):
+            self._handle()
+
+        def do_HEAD(self):
+            self._handle(body=False)
+
+        def do_POST(self):
+            data = b"Read-only dashboard"
+            self._headers(len(data), "text/plain", 405)
+            self.wfile.write(data)
+
+        def log_message(self, format, *args):
+            # Avoid logging potentially attacker-controlled paths or headers.
+            pass
+
+    return Handler
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Tradebot 2.0 private read-only monitoring dashboard")
+    parser.add_argument("--host", default="127.0.0.1",
+                        choices=["127.0.0.1"],
+                        help="Must bind to loopback; never 0.0.0.0")
+    parser.add_argument("--port", type=int, default=8765)
+    args = parser.parse_args()
+    if not 1024 <= args.port <= 65535:
+        parser.error("Port must be between 1024 and 65535")
+    extra_host = os.getenv("TRADEBOT_DASHBOARD_ALLOWED_HOST", "").strip().lower()
+    allowed = {extra_host} if extra_host and ":" not in extra_host else None
+    server = ThreadingHTTPServer(
+        (args.host, args.port), create_handler(DashboardData(), allowed_hosts=allowed))
+    print("Tradebot 2.0 read-only dashboard on http://127.0.0.1:" + str(args.port),
+          flush=True)
+    print("Private loopback only: configure authenticated tunneling before viewing remotely.",
+          flush=True)
+    try:
+        server.serve_forever(poll_interval=0.5)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()
+
+
+if __name__ == "__main__":
+    main()
