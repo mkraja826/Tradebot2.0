@@ -1,6 +1,6 @@
 # Tradebot 2.0 — Autonomous BTC derivatives research (Delta India demo only)
 
-A Bitcoin-only AI futures and options bot project for the **Delta Exchange India testnet/demo account**. The repository has **no live-account support**. Trading is not running or deployed. All executable CLI commands are **read-only**, and no keys are stored in this repository.
+A Bitcoin-only AI futures and options bot project for the **Delta Exchange India testnet/demo account**. The repository has **no live-account support**. Trading is not running or deployed. The CLI defaults to read-only, with an **explicitly gated testnet-only order mode**. No keys are stored in this repository.
 
 ## User requirements
 
@@ -34,6 +34,17 @@ A Bitcoin-only AI futures and options bot project for the **Delta Exchange India
 - The `preview` CLI produces an AI recommendation and saves it to the journal, but **does not submit orders or verify strategy margin**.
 - All these components have offline deterministic tests; public demo and authenticated demo endpoints have *not* been verified live.
 
+### M4 — Autonomous session runner and confirmed-fill accounting (offline-tested)
+
+- `tradebot run --mode observe`: long-running, **read-only** observer; only requests proposals during NYSE entry hours. If positions remain after close, it logs an exposure alert without touching the account.
+- `tradebot run --mode demo --demo-execute`: **explicit testnet-only order mode**. It also requires `ENABLE_DEMO_ORDERS=true` and Delta India demo API credentials; the client host cannot be changed to production. **This mode is implemented but not yet exchange-verified or deployed. Do not run unattended until the integration tests and emergency notifications are complete.**
+- During demo runs, new entries must pass a fresh quote check for every contract, a read-only balance/equity sanity check, a pending-order check and a real-time NYSE entry-window check. **These do not constitute a precomputed margin approval**: the exchange alone approves initial/maintenance margin, particularly for multi-leg options.
+- AI chooses futures, options, spread legs, hedges and whether to WAIT. Failure on an order causes a BTC-only closeout attempt and a halt on new entries for that runner lifetime. Orders have unique client IDs.
+- Outside the entry window, the testnet runner repeatedly attempts BTC order cancellation and closeout, then checks the remote positions and pending orders. SIGTERM / Ctrl+C initiates a graceful closeout attempt; an exchange outage or hard crash still needs a separate watchdog and alerts.
+- A local file lock prevents two runner processes sharing the same journal path on one Linux host. **Not a distributed lock**.
+- `tradebot reconcile`: fetches all paginated BTC fills in the requested lookback window and inserts them into an idempotent SQLite ledger with unique exchange fill IDs. `tradebot ledger`: reports confirmed fill counts and fees grouped by settlement currency.
+- **The ledger does NOT yet calculate realized P&L, win rate, funding-adjusted returns or learning performance.** Net-equity observations are stored separately, never presented as realized strategy profits. The AI strategy-updating and independent trading outcome benchmarks remain upcoming milestones.
+
 ## Setup
 
 Python 3.11+, install with:
@@ -66,12 +77,29 @@ export OPENAI_MODEL="your-json-capable-model"
 tradebot preview --max-options 128 --output data/ai-proposal.json
 ```
 
-The `preview` command calls an OpenAI model, potentially incurring API charges; it requires demo wallet access for balance awareness. **No actual trading is performed by these commands.** Do not commit `.env`, preview artifacts, balance exports or journal data. The `data/` directory is ignored by Git.
+### Runner and confirmed-fill reconciliation
+
+```bash
+# Requires OPENAI_API_KEY, OPENAI_MODEL and Delta demo read credentials
+tradebot run --mode observe --poll-seconds 15 --ai-interval-seconds 300
+
+# Optional demo-only order mode, AFTER supervised exchange integration testing:
+# export ENABLE_DEMO_ORDERS=true
+# tradebot run --mode demo --demo-execute
+
+# Read-only historical accounting; never submits orders
+tradebot reconcile --lookback-hours 24
+tradebot ledger
+```
+
+**Start with observe mode.** The dry-run planner may incur OpenAI API charges. All order execution depends on broker fills and may be subject to rejected margin requests, option-leg slippage, liquidation and outages. An alert printed to stderr is not a reliable off-machine emergency notification. Supervised smoke tests, an independent watchdog, verified exchange positions, real-time expiry/fee handling and remote alert delivery are required before leaving demo execution unattended.
+
+Do not commit `.env`, preview artifacts, balance exports, JSONL logs or SQLite ledgers. The `data/` directory is ignored by Git.
 
 ## Status and next work
 
-**M1 and M2:** Offline-tested framework. **M3:** Market snapshot and AI proposal code, offline tests. **Not running, not deployed, not connected to a funded demo account.**
+**M1–M4 code implemented and offline-tested on GitHub Actions. Not running, not deployed, not authenticated with Delta demo.** The user has not provided demo credentials in this project.
 
-Before allowing unattended simulated orders, implement a reliable clock-driven daemon, market-data sampling/history, hard fresh-quote and broker-margin validation immediately before entry, exchange-specific order/position reconciliation, fees/realized P&L accounting, closeout alerts and verified demo API integration tests. Add evaluation and controlled model retraining using realistic trading outcomes.
+Before unattended testnet trading, verify all endpoint payloads and exchange order/fill states with a supervised demo-only API smoke test; add independent heartbeat/paging/closeout monitoring, accurate realized P&L (including fees, funding and position changes), strategy evaluation on held-out periods, a supervised model-update process and resilient reconciliation after network timeouts. Do not describe the bot as profitable or self-learning until it has verified outcomes and a model-improvement pipeline.
 
 Read the official exchange specs at https://docs.delta.exchange/. Never enter live-trading secrets in this project.
