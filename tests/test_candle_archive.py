@@ -57,7 +57,7 @@ class CandleArchiveTests(unittest.TestCase):
                 "SELECT h,reason FROM candle_quarantine WHERE symbol=? AND t=?",
                 ("BTCUSD",bad_at)).fetchone()
             self.assertEqual(record,(1000,"extreme_neighbor_dislocation"))
-        level = self.archive.levels("BTCUSD",self.end,3)["periods"]["day"]
+        level = self.archive.levels("BTCUSD",self.end,3)["periods"]["previous_day"]
         self.assertIsNone(level["high"])
         self.assertEqual(level["quality_status"],"quarantined")
 
@@ -68,7 +68,7 @@ class CandleArchiveTests(unittest.TestCase):
             db.execute("UPDATE candles SET l=0.1 WHERE symbol=? AND t=?",
                        ("BTCUSD",bad_at))
             db.commit()
-        level = self.archive.levels("BTCUSD",self.end,3)["periods"]["day"]
+        level = self.archive.levels("BTCUSD",self.end,3)["periods"]["previous_day"]
         self.assertEqual(level["quality_status"],"suspicious_extreme")
         self.assertIsNone(level["low"])
         with self.archive.connect() as db:
