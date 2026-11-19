@@ -22,6 +22,7 @@ from uuid import uuid4
 from tradebot.delta import DEMO_API, DeltaDemo, DeltaError
 from tradebot.execution import DemoExecutor
 from tradebot.fire_budget import entry_budget
+from tradebot.fire_indicators import decision_context
 from tradebot.fire_entry import FireEntries
 from tradebot.fire_market import FireMarket, positions_for_fire
 from tradebot.fire_probe import ROLES, decision_failure_code, load_snapshot, run_probe, validate
@@ -160,6 +161,12 @@ class FireTradeStore:
         return dict(press=row[0], created_at=row[1], updated_at=row[2],
                     status=row[3], **json.loads(row[4]))
 
+    def last_closed_position(self):
+        with closing(self._connect()) as db:
+            row = db.execute("SELECT result FROM fire_requests WHERE status='flat_verified' "
+                             "ORDER BY created_at DESC LIMIT 1").fetchone()
+        return json.loads(row[0]) if row else None
+
     def reserve(self, *, when=None):
         when = when or _now()
         if when.tzinfo is None:
@@ -191,7 +198,7 @@ class FireTradeStore:
         allowed = {"model", "direction", "contracts", "stop_loss",
                    "take_profit", "broker_order_id", "order_state",
                    "protection_verified", "orders_submitted",
-                   "model_latency_ms", "budget", "sizing_estimate", "reason_code", "snapshot_at", "thesis", "decision_at", "entry", "exit_order_ids", "protected_at", "decision_quote"}
+                   "model_latency_ms", "budget", "sizing_estimate", "reason_code", "snapshot_at", "thesis", "decision_at", "entry", "exit_order_ids", "protected_at", "decision_quote", "indicators"}
         if set(fields) - allowed:
             raise FireTradeError("Unexpected FIRE status data")
         with closing(self._connect()) as db:
@@ -338,7 +345,10 @@ class FireDemoController:
             self.store.update(press, "reasoning", budget=budget)
             if budget["max_contracts_per_entry"] < 1:
                 raise FireTradeError("Insufficient margin budget for one contract")
-            model_snapshot = {**snapshot, "fire_execution_scope": {
+            midpoint = (float(snapshot["core"]["best_bid"]) + float(snapshot["core"]["best_ask"])) / 2
+            context = decision_context(exchange, self.store, self.symbol, collected.timestamp(), midpoint)
+            self.store.update(press, "reasoning", indicators=context)
+            model_snapshot = {**snapshot, "indicators": context, "fire_execution_scope": {
                 "environment": "delta-india-demo",
                 "instrument": self.symbol + " perpetual futures",
                 **budget,

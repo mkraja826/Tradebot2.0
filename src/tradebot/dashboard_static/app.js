@@ -408,6 +408,28 @@ function renderFireExecution(data) {
   if(data.status==="rejected_no_order" && data.reason_code)
     status.textContent+=" · "+String(data.reason_code).replaceAll("_"," ");
   container.replaceChildren();
+  if(data.indicators){
+    const i=data.indicators, tile=node("div","fire-result");
+    tile.append(node("div","fire-result-title","Market at last Fire · "+data.symbol+" · "+
+      new Date(i.as_of*1000).toLocaleTimeString()));
+    const grid=node("div","fire-points");
+    for(const [label,t] of [["15m EMA20",i.ema_15m],["1h EMA20",i.ema_1h]]){
+      const item=node("div","fire-point");
+      const side=t && (t.close>t.ema20?"Above":t.close<t.ema20?"Below":"At");
+      item.append(node("small","",label),node("b","",t?side+" · "+t.slope:"Unavailable"));
+      grid.append(item);
+    }
+    tile.append(grid,node("p","fire-proof","UTC session VWAP "+(i.session_vwap??"—")+
+      " · 5m ATR(14) "+(i.atr_5m??"—")));
+    const e=i.since_exit;
+    tile.append(node("p","fire-proof",e?"Since exit at "+e.price+" · "+Math.floor(e.seconds/60)+
+      "m · price change "+e.move+" ("+(e.move_atr??"—")+" ATR)":"Previous verified exit unavailable"));
+    if(e && e.broke_pre_exit_high!=null){
+      const breaks=[e.broke_pre_exit_high && "high",e.broke_pre_exit_low && "low"].filter(Boolean);
+      tile.append(node("p","fire-proof","Since exit · prior 5m range broken: "+(breaks.join(" and ")||"neither side")));
+    }
+    container.append(tile);
+  }
   if(data.budget){
     const b=data.budget;
     container.append(node("p","fire-proof","Budget at last check: $"+Number(b.margin_budget_usd).toFixed(2)+
