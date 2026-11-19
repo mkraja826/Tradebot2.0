@@ -49,3 +49,11 @@ but FIRE's backend sizing could still authorize more than one contract.
 Backend now caps its verified quantity budget at one contract and the
 separate risk gate also rejects any proposal above one contract.
 No existing order is modified; deploying code alone does not restart the VM.
+
+## Increment 3B — Lower default DeepSeek billing cadence
+
+The NYSE-only read-only observer still polls once per minute, but its paid
+DeepSeek proposal cadence is reduced from 5 minutes to 1 hour. This is a
+low-cost interim throttle, not a complete event-triggered scanner. It does
+not modify GPT-6 FIRE, Kimi, or the independent protective-order watchdog.
+A persistent provider-call quota is planned as a separate hardening layer.

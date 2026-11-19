@@ -29,12 +29,12 @@ export ENABLE_DEMO_ORDERS=false
 export TRADEBOT_JOURNAL="$PROJECT/data/trades.jsonl"
 export PYTHONUNBUFFERED=1
 
-# 60 s polling; target one DeepSeek research attempt every 5 minutes ONLY
+# 60 s polling; target one DeepSeek research attempt every hour ONLY
 # between NYSE cash open and close (including early closes). No orders.
 # Remain idle outside cash hours; FIRE and Kimi are separate processes.
 exec "$PROJECT/.venv/bin/tradebot" run --mode observe \
   --schedule nyse \
   --nyse-cash-scan-only \
   --poll-seconds 60 \
-  --ai-interval-seconds 300 \
+  --ai-interval-seconds 3600 \
   --max-options 32
