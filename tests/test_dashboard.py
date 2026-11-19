@@ -100,6 +100,13 @@ class DashboardTests(unittest.TestCase):
         raw["updated_at"] = datetime.now(timezone.utc).isoformat()
         runtime_path.write_text(json.dumps(raw))
         self.assertEqual(_runtime(runtime_path)["status"], "running")
+        raw["schedule"] = "nyse-cash-observe"
+        raw["action"] = "nyse_cash_closed_no_ai"
+        raw["next_scan"] = None
+        runtime_path.write_text(json.dumps(raw))
+        self.assertEqual(_runtime(runtime_path)["schedule"], "nyse-cash-observe")
+        self.assertEqual(_runtime(runtime_path)["action"], "nyse_cash_closed_no_ai")
+        self.assertIsNone(_runtime(runtime_path)["next_scan"])
         raw["action"] = "stopped"
         runtime_path.write_text(json.dumps(raw))
         self.assertEqual(_runtime(runtime_path)["status"], "stopped")
