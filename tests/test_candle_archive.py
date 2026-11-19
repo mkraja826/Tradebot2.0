@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from unittest.mock import Mock
 from tradebot.candle_archive import CandleArchive, DAY, STEP, swing_levels
+from tradebot.market_integrity import suspect_candle_times
 
 
 class CandleArchiveTests(unittest.TestCase):
@@ -38,6 +39,46 @@ class CandleArchiveTests(unittest.TestCase):
         with archive.connect() as db:
             db.execute("DELETE FROM candles WHERE t=?",(self.end,))
         self.assertIsNone(archive.levels("BTCUSD",self.end+STEP,3)["periods"]["day"]["high"])
+
+    def test_extreme_candle_quarantined_not_used_in_level(self):
+        bad_at = self.end - 6 * STEP
+        original = self.exchange._request.side_effect
+        def modified(method,path,params=None):
+            result = original(method,path,params)
+            if path == "/v2/history/candles":
+                for row in result["result"]:
+                    if row["time"] == bad_at:
+                        row["high"] = 1000
+            return result
+        self.exchange._request.side_effect = modified
+        self.archive.sync_page(self.exchange, "BTCUSD", self.end)
+        with self.archive.connect() as db:
+            record = db.execute(
+                "SELECT h,reason FROM candle_quarantine WHERE symbol=? AND t=?",
+                ("BTCUSD",bad_at)).fetchone()
+            self.assertEqual(record,(1000,"extreme_neighbor_dislocation"))
+        level = self.archive.levels("BTCUSD",self.end,3)["periods"]["day"]
+        self.assertIsNone(level["high"])
+        self.assertEqual(level["quality_status"],"quarantined")
+
+    def test_imported_bad_extreme_is_blocked_but_retained(self):
+        self.archive.sync_page(self.exchange, "BTCUSD", self.end)
+        bad_at = self.end - 5 * STEP
+        with self.archive.connect() as db:
+            db.execute("UPDATE candles SET l=0.1 WHERE symbol=? AND t=?",
+                       ("BTCUSD",bad_at))
+            db.commit()
+        level = self.archive.levels("BTCUSD",self.end,3)["periods"]["day"]
+        self.assertEqual(level["quality_status"],"suspicious_extreme")
+        self.assertIsNone(level["low"])
+        with self.archive.connect() as db:
+            self.assertEqual(db.execute(
+                "SELECT l FROM candles WHERE symbol=? AND t=?",
+                ("BTCUSD",bad_at)).fetchone()[0],0.1)
+
+    def test_normal_neighbor_ranges_not_flagged(self):
+        rows = [("BTCUSD",i*300,3,4,2,3,1) for i in range(5)]
+        self.assertEqual(suspect_candle_times(rows),{})
 
     def test_swings_wait_for_confirmation(self):
         bars=[(i*300,8 if i//3==2 else 6,2 if i//3==2 else 4) for i in range(15)]

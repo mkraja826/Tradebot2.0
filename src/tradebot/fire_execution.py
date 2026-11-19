@@ -360,10 +360,21 @@ class FireDemoController:
             midpoint = (float(snapshot["core"]["best_bid"]) + float(snapshot["core"]["best_ask"])) / 2
             context = decision_context(exchange, self.store, self.symbol, collected.timestamp(), midpoint)
             if self.archive is not None:
+                stage = "historical_data_integrity"
                 try:
-                    context["historical_levels"] = self.archive.levels(self.symbol, collected.timestamp(), midpoint)
-                except sqlite3.Error:
-                    context["historical_levels"] = None
+                    levels = self.archive.levels(self.symbol, collected.timestamp(), midpoint)
+                except (sqlite3.Error, ValueError, TypeError):
+                    raise FireTradeError("Historical levels unavailable") from None
+                periods = levels.get("periods") if isinstance(levels, dict) else None
+                required = ("day", "previous_day", "week", "previous_week",
+                            "month", "previous_month")
+                if not isinstance(periods, dict) or any(
+                    not isinstance(periods.get(key), dict)
+                    or periods[key].get("quality_status") != "provisionally_valid"
+                    for key in required
+                ):
+                    raise FireTradeError("Unverified historical levels; no FIRE order")
+                context["historical_levels"] = levels
             self.store.update(press, "reasoning", indicators=context)
             model_snapshot = {**snapshot, "indicators": context, "fire_execution_scope": {
                 "environment": "delta-india-demo",

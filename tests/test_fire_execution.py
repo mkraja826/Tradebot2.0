@@ -181,6 +181,22 @@ class FireExecutionTests(unittest.TestCase):
             self.assertFalse(self.calls)
             self.assertFalse(self.exchange.requests)
 
+    def test_quarantined_historical_levels_block_paid_ai_and_execution(self):
+        class UnverifiedArchive:
+            def levels(self, symbol, at, price):
+                return {"periods": {
+                    key: {"quality_status": "quarantined"}
+                    for key in ("day","previous_day","week","previous_week",
+                                "month","previous_month")
+                }}
+        fire = self.make()
+        fire.archive = UnverifiedArchive()
+        self.assertTrue(fire.start()[0])
+        self.assertEqual(fire.snapshot()["status"],"rejected_no_order")
+        self.assertEqual(fire.snapshot()["reason_code"],"historical_data_integrity_failed")
+        self.assertEqual(self.calls,[])
+        self.assertEqual(self.exchange.requests,[])
+
     def test_existing_order_consumes_market_before_model_call(self):
         self.exchange.active_orders = [{"id": 99, "product_id": 27, "size": 2}]
         fire = self.make()

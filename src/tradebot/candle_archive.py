@@ -8,6 +8,7 @@ import time
 
 from tradebot.chart_desk import epoch
 from tradebot.fire_market import SYMBOLS
+from tradebot.market_integrity import suspect_candle_times, archive_extreme_suspicious
 
 STEP = 300
 PAGE = 1500 * STEP
@@ -26,6 +27,10 @@ class CandleArchive:
                     PRIMARY KEY(symbol,t)) WITHOUT ROWID;
                 CREATE TABLE IF NOT EXISTS coverage(
                     symbol TEXT PRIMARY KEY, floor INTEGER, oldest_scan INTEGER, newest_scan INTEGER);
+                CREATE TABLE IF NOT EXISTS candle_quarantine(
+                    symbol TEXT NOT NULL, t INTEGER NOT NULL,
+                    o REAL, h REAL, l REAL, c REAL, v REAL,
+                    reason TEXT NOT NULL, PRIMARY KEY(symbol,t));
             """)
 
     def connect(self):
@@ -68,8 +73,19 @@ class CandleArchive:
                     not 0 < l <= min(o,c) <= max(o,c) <= h):
                 raise ValueError("Malformed historical candle")
             records.append((symbol,t,o,h,l,c,v))
+        # Quarantine suspicious originals: a refetch cannot release them.
+        flagged = suspect_candle_times(records)
         with closing(self.connect()) as db, db:
-            db.executemany("INSERT OR REPLACE INTO candles VALUES (?,?,?,?,?,?,?)", records)
+            db.executemany(
+                "INSERT OR IGNORE INTO candle_quarantine VALUES (?,?,?,?,?,?,?,?)",
+                [(*row, flagged[row[1]]) for row in records if row[1] in flagged])
+            db.executemany(
+                "DELETE FROM candles WHERE symbol=? AND t=?",
+                [(row[0], row[1]) for row in records if row[1] in flagged])
+            db.executemany(
+                "INSERT OR REPLACE INTO candles SELECT ?,?,?,?,?,?,? "
+                "WHERE NOT EXISTS (SELECT 1 FROM candle_quarantine WHERE symbol=? AND t=?)",
+                [(*row, row[0], row[1]) for row in records if row[1] not in flagged])
             db.execute("""INSERT INTO coverage VALUES (?,?,?,?) ON CONFLICT(symbol) DO UPDATE SET
                        oldest_scan=min(oldest_scan,excluded.oldest_scan),
                        newest_scan=max(newest_scan,excluded.newest_scan)""",(symbol,floor,start,stop))
@@ -106,8 +122,20 @@ class CandleArchive:
                     "WHERE symbol=? AND t>=? AND t<?",(symbol,start,stop)).fetchone()
                 expected = (stop-start)//STEP
                 complete = count > 0 and count == expected
-                periods[key] = {"high":hi if complete else None,"low":lo if complete else None,
-                                "bars":count,"expected":expected}
+                quarantined = db.execute(
+                    "SELECT count(*) FROM candle_quarantine WHERE symbol=? AND t>=? AND t<?",
+                    (symbol,start,stop)).fetchone()[0]
+                suspicious = complete and archive_extreme_suspicious(
+                    db, symbol, start, stop)
+                status = ("quarantined" if quarantined else
+                          "suspicious_extreme" if suspicious else
+                          "provisionally_valid" if complete else "incomplete")
+                usable = complete and not quarantined and not suspicious
+                periods[key] = {"high":hi if usable else None,
+                                "low":lo if usable else None,
+                                "bars":count,"expected":expected,
+                                "quarantined_bars":quarantined,
+                                "quality_status":status}
             bars = db.execute("SELECT t,h,l FROM candles WHERE symbol=? AND t>=? AND t<? ORDER BY t",
                               (symbol,end-7*DAY,end)).fetchall()
         return {"as_of":end,"resolution":"5m","timezone":"UTC","periods":periods,
