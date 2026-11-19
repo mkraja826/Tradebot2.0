@@ -21,6 +21,10 @@ class DemoAccount(FireMarket):
         self.posts = []
         self.parent = {}
 
+    def candles(self, *, symbol, resolution, start, end):
+        assert symbol == self.symbol
+        return []
+
     def ticker(self, symbol):
         assert symbol == "XAUTUSD"
         return {"symbol": symbol, "product_id": 82, "contract_type": "perpetual_futures",

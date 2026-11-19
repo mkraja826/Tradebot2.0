@@ -14,58 +14,7 @@ from tradebot.delta import DEMO_API
 from tradebot.fire_execution import FireDemoController
 
 
-class FakeExchange:
-    base_url = DEMO_API
-    allow_orders = True
-
-    def __init__(self):
-        self.posts = 0
-        self.position = 0
-        self.children = []
-        self.parent = None
-
-    def ticker(self, symbol):
-        return {"symbol": "BTCUSD", "product_id": 27,
-                "mark_price": "63214.25",
-                "timestamp": int(datetime.now(timezone.utc).timestamp()),
-                "quotes": {"best_bid": "63214", "best_ask": "63214.5"}}
-
-    def btc_positions(self):
-        return [{"product_id": 27, "size": str(self.position)}] if self.position else []
-
-    def open_orders(self):
-        return self.children
-
-    def _request(self, method, path, *, auth, payload):
-        self.posts += 1
-        self.position = 1
-        self.parent = {"id": 47, "product_id": 27,
-                       "client_order_id": payload["client_order_id"],
-                       "state": "closed", "unfilled_size": 0}
-        self.children = [{
-            "id": i, "product_id": 27, "side": "sell", "state": "pending",
-            "stop_order_type": typ, "bracket_order": True, "stop_price": value,
-        } for i, typ, value in [
-            (50, "stop_loss_order", payload["bracket_stop_loss_price"]),
-            (51, "take_profit_order", payload["bracket_take_profit_price"]),
-        ]]
-        return {"result": self.parent}
-
-    def order_by_client_id(self, press):
-        return self.parent
-
-
-def snapshot():
-    return {
-        "environment": "delta-india-demo",
-        "collected_at": datetime.now(timezone.utc).isoformat(),
-        "position_contracts": 0,
-        "core": {
-            "best_bid": "63214", "best_ask": "63214.5",
-            "ticker": {"product_id": 27, "symbol": "BTCUSD",
-                       "contract_type": "perpetual_futures"}
-        },
-    }
+from test_fire_execution import FakeDemo, snapshot
 
 
 class FireHttpTests(unittest.TestCase):
@@ -73,11 +22,11 @@ class FireHttpTests(unittest.TestCase):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         root = Path(tmp.name)
-        self.exchange = FakeExchange()
+        self.exchange = FakeDemo()
         self.model_calls = []
         def gpt6(routes, loader):
             self.model_calls.append(routes)
-            loader()
+            self.assertIn("indicators", loader())
             return {"results": {"fire": {"decision": {
                 "direction": "LONG", "contracts": 1,
                 "stop_loss": "62800", "take_profit": "63750",
@@ -122,7 +71,7 @@ class FireHttpTests(unittest.TestCase):
             with self.subTest(args=args), self.assertRaises(HTTPError) as error:
                 self.post(**args)
             self.assertEqual(error.exception.code, expected)
-        self.assertEqual(self.exchange.posts, 0)
+        self.assertEqual(len(self.exchange.requests), 0)
         self.assertEqual(self.model_calls, [])
 
     def test_single_authorized_click_executes_one_demo_bracket(self):
@@ -140,11 +89,11 @@ class FireHttpTests(unittest.TestCase):
             self.assertEqual(state["stop_loss"], "62800")
             self.assertEqual(state["take_profit"], "63750")
         self.assertEqual(len(self.model_calls), 1)
-        self.assertEqual(self.exchange.posts, 1)
+        self.assertEqual(len(self.exchange.requests), 1)
         with self.assertRaises(HTTPError) as duplicate:
             self.post(origin=self.origin, action="fire-execute")
         self.assertEqual(duplicate.exception.code, 409)
-        self.assertEqual(self.exchange.posts, 1)
+        self.assertEqual(len(self.exchange.requests), 1)
 
 
 if __name__ == "__main__":

@@ -21,7 +21,7 @@ def route(r):
             d['replay']=dict(trade,model_latency_ms=1250,scorecard={
                 'quote':{'best_bid':price-1,'best_ask':price+1},'moves':{'5':0.12},'exit':None})
         r.fulfill(json=d)
-    elif url.path.startswith('/api/fire'):r.fulfill(json={'execution_enabled':True,'status':'idle','max_contracts_per_fire':1})
+    elif url.path.startswith('/api/fire'):r.fulfill(json={'execution_enabled':True,'status':'idle','symbol':'XAUTUSD' if 'XAUTUSD' in url.path else 'BTCUSD','indicators':{'as_of':now,'ema_15m':{'close':100,'ema20':99,'slope':'rising'},'atr_5m':2}})
     else:r.fulfill(json={})
 with sync_playwright() as pw:
     b=pw.chromium.launch(channel='chrome')
@@ -31,6 +31,8 @@ with sync_playwright() as pw:
     page.wait_for_selector('#desk-positions button')
     page.select_option('#fire-market','XAUTUSD')
     page.wait_for_function("document.querySelector('#desk-price').textContent==='3,700'")
+    page.get_by_text('Market at last Fire · XAUTUSD', exact=False).wait_for()
+    assert 'Above · rising' in page.locator('#fire-results').inner_text()
     assert 'XAUTUSD' in page.locator('#fire-preview').inner_text()
     page.get_by_role('button',name='15m',exact=True).click()
     page.wait_for_function("document.querySelector('#desk-periods button[aria-pressed=true]').textContent==='15m'")

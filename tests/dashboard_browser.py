@@ -34,9 +34,9 @@ with sync_playwright() as p:
         page.route("**/api/overview", slow_snapshot)
         page.goto(f"http://127.0.0.1:{server.server_port}/")
         page.get_by_text("RUNNING · OBSERVING",exact=True).wait_for()
+        page.get_by_text("Bitcoin observer chart and activity", exact=True).click()
         assert page.locator("#mid").inner_text().replace("\n","")=="$101.00"
         assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
-        page.get_by_text("Bitcoin observer chart and activity", exact=True).click()
         page.locator("#trace").focus()
         page.keyboard.press("ArrowLeft")
         inspected=page.locator("#inspect-text").inner_text()
