@@ -77,3 +77,22 @@ no stop or target, and a mandatory explanatory thesis. WAIT produces a
 recorded `gpt6_wait_no_trade` receipt and does not post any exchange orders.
 Malformed WAIT payloads still fail closed. This avoids forced entries and
 preserves GPT-6 as the only FIRE decision model.
+
+## Increment 5 — Broker evidence integrity and financial-status honesty
+
+The confirmed-fill SQLite ledger now rejects an exchange fill ID if any
+economic field conflicts with an existing record or another record in the same
+batch. An entire conflicting batch rolls back transactionally; identical
+evidence remains idempotent even if extra broker metadata changes.
+
+The trade detail scorecard now explicitly reports:
+- `financial_reconciliation_status`: `awaiting_complete_broker_evidence`
+  or `provisional_order_level_only`;
+- `net_realized_pnl_usd: null` and `is_net_realized_pnl: false` until full
+  broker settlement/funding reconciliation is implemented;
+- a clearly named `provisional_pnl_after_order_fees_usd` estimate when valid
+  entry/exit order evidence exists.
+
+The legacy `pnl_after_fees_usd` estimate is retained solely for compatibility
+and MUST NOT be displayed as financially reconciled net profit. No funding
+fees, incomplete partial fills, or wallet transfers are fabricated.

@@ -42,6 +42,26 @@ class LedgerTests(unittest.TestCase):
         self.assertEqual(summary["fees_by_asset"], {"USD": "0.70"})
         self.assertFalse(summary["is_realized_pnl"])
 
+    def test_conflicting_duplicate_id_does_not_silently_overwrite(self):
+        ingest_fills(self.path, [a_fill()])
+        with self.assertRaisesRegex(LedgerError, "Conflicting"):
+            ingest_fills(self.path, [a_fill(price="93000")])
+        self.assertEqual(fill_summary(self.path)["confirmed_btc_fills"], 1)
+
+    def test_conflicting_repeated_id_aborts_entire_batch_atomically(self):
+        with self.assertRaisesRegex(LedgerError, "Conflicting"):
+            ingest_fills(self.path, [
+                a_fill(id="same", price="91000"),
+                a_fill(id="other"),
+                a_fill(id="same", price="92500"),
+            ])
+        self.assertEqual(fill_summary(self.path)["confirmed_btc_fills"], 0)
+
+    def test_metadata_change_not_economic_change_does_not_duplicate(self):
+        self.assertEqual(ingest_fills(self.path, [a_fill()])["new_fills"], 1)
+        again = a_fill(size="2.0", price="91000.00", ignored_new_field="extra")
+        self.assertEqual(ingest_fills(self.path, [again])["new_fills"], 0)
+
     def test_different_assets_not_summed_together(self):
         ingest_fills(self.path, [
             a_fill(),

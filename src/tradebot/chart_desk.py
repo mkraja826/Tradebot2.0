@@ -179,7 +179,11 @@ class ChartDesk:
                 "snapshot_at": snapshot.get("collected_at") or trade.get("snapshot_at"),
                 "return_1h_pct": tech.get("return_1h_pct"),
                 "realized_vol_1h_pct": tech.get("realized_vol_1h_pct"),
-                "moves": {}, "exit": None}
+                "moves": {}, "exit": None,
+                "financial_reconciliation_status": "awaiting_complete_broker_evidence",
+                "net_realized_pnl_usd": None,
+                "funding_reconciled": False,
+                "is_net_realized_pnl": False}
         exits = [k for k in ("stop_loss_order","take_profit_order") if k in orders]
         if len(exits) == 1:
             card["exit"] = exits[0]
@@ -199,7 +203,15 @@ class ChartDesk:
                     gross = units * qty * change * (1 if side == "LONG" else -1)
                     fees = sum(Decimal(str(o["paid_commission"])) for o in (entry, exit_fill))
                     if fees.is_finite() and gross.is_finite():
-                        card.update(fees_usd=str(fees), pnl_after_fees_usd=str(gross-fees))
+                        # The estimate may exclude funding, partial fills,
+                        # wallet adjustments and other broker postings. Keep
+                        # legacy order-level field for dashboard compatibility
+                        # but explicitly forbid treating it as net realized P&L.
+                        card.update(
+                            fees_usd=str(fees),
+                            pnl_after_fees_usd=str(gross-fees),
+                            provisional_pnl_after_order_fees_usd=str(gross-fees),
+                            financial_reconciliation_status="provisional_order_level_only")
             except (KeyError, TypeError, ValueError, ArithmeticError):
                 pass
         at = epoch(card["snapshot_at"])

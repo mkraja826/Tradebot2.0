@@ -91,23 +91,49 @@ def _setup(conn):
     """)
 
 
+def _fill_identity(row):
+    """Canonical immutable economic evidence; extra metadata may legitimately vary."""
+    return (row[0], row[1], row[2], row[3],
+            Decimal(row[4]), Decimal(row[5]), Decimal(row[6]), row[7],
+            Decimal(row[8]) if row[8] is not None else None, row[9])
+
+
 def ingest_fills(path: str, fills: list[dict]) -> dict:
-    """Atomic append and ID-based de-duplication across repeated fetches."""
+    """Atomic, immutable broker-fill ingest; conflicting IDs fail closed.
+
+    Identical repeated pages are idempotent. Any ID with different economic
+    facts aborts the entire batch, preserving the previous verified record.
+    """
     rows = [_normalize(fill) for fill in fills]
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(target) as conn:
+    received, added = len(rows), 0
+    with sqlite3.connect(target, timeout=20) as conn:
+        conn.execute("BEGIN IMMEDIATE")
         _setup(conn)
-        before = conn.total_changes
-        conn.executemany("""
-            INSERT OR IGNORE INTO fills
-                (id, at_us, symbol, side, size, price, commission,
-                 settling_asset, notional, order_id, raw_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, rows)
-        added = conn.total_changes - before
-    return {"received": len(rows), "new_fills": added,
-            "duplicate_fills": len(rows) - added}
+        seen = {}
+        for row in rows:
+            identity = _fill_identity(row)
+            if row[0] in seen and seen[row[0]] != identity:
+                raise LedgerError("Conflicting duplicate broker fill ID")
+            seen[row[0]] = identity
+            original = conn.execute(
+                "SELECT id,at_us,symbol,side,size,price,commission,"
+                "settling_asset,notional,order_id FROM fills WHERE id=?",
+                (row[0],)).fetchone()
+            if original is not None:
+                if _fill_identity(original) != identity:
+                    raise LedgerError("Conflicting duplicate broker fill ID")
+                continue
+            conn.execute("""
+                INSERT INTO fills
+                    (id, at_us, symbol, side, size, price, commission,
+                     settling_asset, notional, order_id, raw_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, row)
+            added += 1
+    return {"received": received, "new_fills": added,
+            "duplicate_fills": received - added}
 
 
 def record_equity(path: str, net_equity, *, at=None):

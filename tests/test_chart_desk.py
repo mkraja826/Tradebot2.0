@@ -58,8 +58,16 @@ class ChartDeskTests(unittest.TestCase):
                "take_profit_order":{"side":"buy","size":2,"average_fill_price":"95","paid_commission":"0.002"}}
         card=self.desk.scorecard("XAUTUSD",trade,fills)
         self.assertEqual(card["pnl_after_fees_usd"],"0.007")
+        self.assertEqual(card["provisional_pnl_after_order_fees_usd"],"0.007")
+        self.assertEqual(card["financial_reconciliation_status"],
+                         "provisional_order_level_only")
+        self.assertIsNone(card["net_realized_pnl_usd"])
+        self.assertFalse(card["is_net_realized_pnl"])
         self.assertEqual(card["moves"],{"5":-2,"30":2})
         self.assertNotIn("private",str(card))
         del fills["take_profit_order"]["paid_commission"]
-        self.assertNotIn("pnl_after_fees_usd",self.desk.scorecard("XAUTUSD",trade,fills))
+        missing = self.desk.scorecard("XAUTUSD",trade,fills)
+        self.assertNotIn("pnl_after_fees_usd",missing)
+        self.assertEqual(missing["financial_reconciliation_status"],
+                         "awaiting_complete_broker_evidence")
         self.assertIsNone(self.desk.scorecard("XAUTUSD",trade,{})["exit"])
