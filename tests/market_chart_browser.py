@@ -36,6 +36,7 @@ with sync_playwright() as pw:
     assert 'XAUTUSD' in page.locator('#fire-preview').inner_text()
     page.get_by_role('button',name='15m',exact=True).click()
     page.wait_for_function("document.querySelector('#desk-periods button[aria-pressed=true]').textContent==='15m'")
+    page.wait_for_function("document.querySelector('#desk-inspect').textContent.includes('IST')")
     page.locator('#market-canvas').focus()
     page.keyboard.press('ArrowLeft')
     assert 'IST' in page.locator('#desk-inspect').inner_text()
