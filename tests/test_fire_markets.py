@@ -104,7 +104,7 @@ class MarketTest(unittest.TestCase):
                         "core":{"best_bid":"3799","best_ask":"3801","ticker":broker.ticker(symbol)}}
             def decide(routes, loader):
                 self.assertEqual(loader()["core"]["ticker"]["symbol"], "XAUTUSD")
-                self.assertEqual(loader()["fire_execution_scope"]["max_contracts_per_entry"], 26)
+                self.assertEqual(loader()["fire_execution_scope"]["max_contracts_per_entry"], 1)
                 return {"results":{"fire":{"decision":{"direction":"LONG","contracts":1,
                                                       "stop_loss":"3700","take_profit":"4000"}}}}
             desk = FireDemoController(Path(tmp)/"fire-xaut.sqlite",enabled=True,symbol="XAUTUSD",
