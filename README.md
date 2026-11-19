@@ -18,7 +18,7 @@ repost an ambiguous order. Production Delta APIs are unsupported.
 **Manual deployment / first supervised Delta Demo test**:
 [docs/FIRE_EXECUTION_DEMO.md](docs/FIRE_EXECUTION_DEMO.md).
 
-DeepSeek V4.1 Flash remains the 24/7 read-only scanner. Kimi K3.1 Pro is
+DeepSeek V4.1 Flash now scans automatically **only during the official NYSE cash session**, including DST, market holidays, and early closes. FIRE and Kimi remain independently available. Kimi K3.1 Pro is
 a separate opt-in research watcher that cannot change orders or override GPT-6.
 Unverified Kimi lessons are never automatically fed into GPT-6.
 
@@ -121,9 +121,9 @@ Unverified Kimi lessons are never automatically fed into GPT-6.
 - During active NYSE trading, a malformed/truncated model response yields `invalid_ai_response_no_plan` with zero orders, a sanitized error and (if supplied) finish reason/token usage, instead of a traceback. It exits nonzero and never retries billable inference automatically.
 - Changes are covered by offline regression tests. **No new live paid AI preview has been requested after the fix.**
 
-### M10 — 24/7 Google Cloud VM **read-only observer** (installation prepared)
+### M10 — NYSE cash-hours DeepSeek **read-only observer** (systemd process remains online)
 
-- One-command systemd installation: `bash ops/install_observe_service.sh` from the Iowa VM's SSH session. See [24/7 deployment guide](docs/OBSERVE_24_7_VM.md).
+- One-command systemd installation: `bash ops/install_observe_service.sh` from the Iowa VM's SSH session. See [NYSE-hours deployment guide](docs/OBSERVE_24_7_VM.md).
 - Auto-start on VM boot and restart on process failure; the service continues after browser/SSH disconnects. **This has not been installed or started on the user's VM by the GitHub changes alone.**
 - Hardcoded to `--mode observe` and `ENABLE_DEMO_ORDERS=false`. Checks account BTC exposure throughout the day; model proposals occur roughly hourly during the NYSE entry window, subject to health checks, and may incur provider charges. No exchange orders are placed or closed.
 - A reboot or runner restart resets the current in-memory AI interval, so configure external Top Billing spend caps. 24/7 process supervision is not a guarantee against VM outages or Google Cloud billing pauses.
@@ -132,7 +132,7 @@ Unverified Kimi lessons are never automatically fed into GPT-6.
 ### M11 — Continuous BTC crypto opportunities (24/7, explicit opt-in)
 
 - New schedule `--schedule crypto-24x7` lets the bot analyze and (in separately gated testnet-only demo mode) consider BTC positions on weekends and outside NYSE hours. The default `nyse` schedule is unchanged for legacy runs. DeepSeek is instructed to assess the crypto market continuously and retain WAIT when conditions are poor.
-- The 24/7 observer systemd entrypoint now uses `--mode observe --schedule crypto-24x7 --ai-interval-seconds 300 --poll-seconds 60`. Model inference can run ~288 times per day and consume paid credits; the observer NEVER executes orders.
+- The deployed DeepSeek observer now uses `--mode observe --schedule nyse --nyse-cash-scan-only --ai-interval-seconds 300 --poll-seconds 60`. DeepSeek calls run only during XNYS market hours (about 78 per ordinary full trading day at most, absent retries/restarts); the observer NEVER executes orders. The separate `--schedule crypto-24x7` option remains available for other explicitly configured workflows.
 - The **unattended demo order service is intentionally NOT enabled**. A new explicit `ALLOW_CRYPTO_24X7_DEMO=true` opt-in is required in addition to existing `--demo-execute` and `ENABLE_DEMO_ORDERS=true` switches. A first pilot is limited to 4 legs and 1 contract per leg, no position stacking, a 15-minute closeout timer, and a persistent halt marker after execution faults.
 - The position-close API lifecycle, reduce-only exits, broker fills, live demo margin and independent watchdog/pager are **not yet verified**. Demo execution must be tested with supervision before running unattended. See [24/7 crypto pilot guide](docs/CRYPTO_24X7_DEMO_PILOT.md).
 
