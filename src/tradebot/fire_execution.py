@@ -24,6 +24,7 @@ from tradebot.execution import DemoExecutor
 from tradebot.fire_budget import entry_budget
 from tradebot.fire_portfolio_reservation import FirePortfolioReservation
 from tradebot.fire_risk import assess_fire_plan
+from tradebot.portfolio_equity_guard import PortfolioEquityGuard
 from tradebot.fire_indicators import decision_context
 from tradebot.fire_entry import FireEntries
 from tradebot.fire_market import FireMarket, positions_for_fire
@@ -301,6 +302,7 @@ class FireDemoController:
         self.store = FireTradeStore(path)
         self.path = Path(path)
         self.portfolio_reservation = FirePortfolioReservation(self.path.parent)
+        self.equity_guard = PortfolioEquityGuard(self.path.parent / "fire-equity-risk.sqlite")
         self.exchange_factory = exchange_factory or (lambda: FireMarket(self.symbol,
             api_key=os.environ["DELTA_DEMO_API_KEY"],
             api_secret=os.environ["DELTA_DEMO_API_SECRET"],
@@ -363,6 +365,12 @@ class FireDemoController:
             self.store.update(press, "reasoning", budget=budget)
             if budget["max_contracts_per_entry"] < 1:
                 raise FireTradeError("Insufficient margin budget for one contract")
+            stage = "portfolio_equity_limits"
+            if getattr(exchange, "base_url", None) != DEMO_API:
+                raise FireTradeError("Only signed Delta Demo equity accepted")
+            equity_precheck = self.equity_guard.require_approved(budget["equity_usd"])
+            self.store.update(press, "reasoning", risk_assessment={
+                "equity_monitor": equity_precheck})
             midpoint = (float(snapshot["core"]["best_bid"]) + float(snapshot["core"]["best_ask"])) / 2
             context = decision_context(exchange, self.store, self.symbol, collected.timestamp(), midpoint)
             if self.archive is not None:
@@ -426,9 +434,12 @@ class FireDemoController:
             self.store.update(press, "preflight", budget=current_budget)
             if plan["contracts"] > current_budget["max_contracts_per_entry"]:
                 raise FireTradeError("Live margin budget changed")
+            stage = "portfolio_equity_limits_recheck"
+            equity_recheck = self.equity_guard.require_approved(current_budget["equity_usd"])
             stage = "risk_governor"
             risk_assessment = assess_fire_plan(plan, current_budget, exchange_quote)
-            self.store.update(press, "preflight", risk_assessment=risk_assessment)
+            self.store.update(press, "preflight", risk_assessment={
+                **risk_assessment, "equity_monitor": equity_recheck})
             units = _dec(current_budget["contract_value"]) * plan["contracts"]
             estimated_entry = exchange_quote["best_ask" if plan["direction"] == "LONG" else "best_bid"]
             self.store.update(press, "submitting", sizing_estimate={

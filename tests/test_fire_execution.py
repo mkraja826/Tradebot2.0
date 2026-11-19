@@ -1,10 +1,11 @@
 """Offline GPT-6 one-tap Demo FIRE with actual mock POST and bracket verification."""
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import tempfile
 import unittest
 
 from tradebot.delta import DEMO_API, DeltaError
+from tradebot.portfolio_equity_guard import PortfolioEquityGuard
 from tradebot.fire_execution import (
     FireDemoController, FireTradeStore, protective_orders_verified,
 )
@@ -21,6 +22,18 @@ def snapshot():
                        "contract_type": "perpetual_futures", "mark_price": "63214.25"},
         },
     }
+
+
+def seed_demo_equity(path, equity):
+    """Populate actual-shaped UTC period opening observations for offline mocks."""
+    now = datetime.now(timezone.utc)
+    day = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    monday = day - timedelta(days=day.weekday())
+    guard = PortfolioEquityGuard(Path(path).parent / "fire-equity-risk.sqlite")
+    guard.observe(equity, at=monday)
+    if day != monday:
+        guard.observe(equity, at=day)
+    return guard
 
 
 PLAN = {"direction": "LONG", "contracts": 1,
@@ -116,6 +129,7 @@ class FireExecutionTests(unittest.TestCase):
         self.addCleanup(temp.cleanup)
         self.path = Path(temp.name) / "fire-ops.sqlite"
         self.exchange = FakeDemo()
+        seed_demo_equity(self.path, "173.81")
         self.calls = []
 
     def make(self, *, enabled=True, plan=None):
@@ -216,6 +230,28 @@ class FireExecutionTests(unittest.TestCase):
             self.assertEqual(fire.snapshot()["budget"]["max_contracts_per_entry"], 0)
             self.assertFalse(self.calls)
             self.assertFalse(self.exchange.requests)
+
+    def test_missing_equity_checkpoint_blocks_before_gpt_and_order(self):
+        from tradebot.portfolio_equity_guard import PortfolioEquityGuard
+        fire = self.make()
+        fire.equity_guard = PortfolioEquityGuard(
+            self.path.parent / "unseeded-risk.sqlite")
+        fire.start()
+        self.assertEqual(fire.snapshot()["status"], "rejected_no_order")
+        self.assertEqual(fire.snapshot()["reason_code"], "portfolio_equity_limits_failed")
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.exchange.requests, [])
+
+    def test_daily_equity_loss_halts_before_paid_ai(self):
+        from unittest.mock import patch
+        wallet = self.exchange.wallet_balances()
+        reduced = dict(wallet, meta={"net_equity": "169"})
+        with patch.object(self.exchange, "wallet_balances", return_value=reduced):
+            fire = self.make()
+            fire.start()
+            self.assertEqual(fire.snapshot()["reason_code"], "portfolio_equity_limits_failed")
+            self.assertEqual(self.calls, [])
+            self.assertEqual(self.exchange.requests, [])
 
     def test_quarantined_historical_levels_block_paid_ai_and_execution(self):
         class UnverifiedArchive:

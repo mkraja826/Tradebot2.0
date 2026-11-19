@@ -14,7 +14,7 @@ from tradebot.chart_desk import ChartDesk
 from tradebot.fire_execution import FireDemoController
 
 
-from test_fire_execution import FakeDemo, snapshot
+from test_fire_execution import FakeDemo, snapshot, seed_demo_equity
 
 
 class FireHttpTests(unittest.TestCase):
@@ -23,6 +23,7 @@ class FireHttpTests(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         root = Path(tmp.name)
         self.exchange = FakeDemo()
+        seed_demo_equity(root / "fire-ops.sqlite", "173.81")
         self.model_calls = []
         def gpt6(routes, loader):
             self.model_calls.append(routes)

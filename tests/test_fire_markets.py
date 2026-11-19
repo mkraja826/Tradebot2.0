@@ -9,6 +9,7 @@ from tradebot.fire_execution import FireDemoController
 from tradebot.fire_market import FireMarket
 from tradebot.fire_watchdog import watchdog_tick
 from tradebot.trade_memory import TradeMemory
+from test_fire_execution import seed_demo_equity
 
 
 class DemoAccount(FireMarket):
@@ -98,6 +99,7 @@ class MarketTest(unittest.TestCase):
     def test_gold_entry_and_emergency_closeout_leave_bitcoin_order_alone(self):
         with tempfile.TemporaryDirectory() as tmp:
             broker = DemoAccount()
+            seed_demo_equity(Path(tmp) / "fire-xaut.sqlite", "100")
             def snapshot(symbol):
                 return {"environment":"delta-india-demo","position_contracts":0,
                         "collected_at":datetime.now(timezone.utc).isoformat(),

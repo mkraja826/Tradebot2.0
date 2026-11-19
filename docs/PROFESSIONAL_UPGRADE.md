@@ -113,3 +113,27 @@ transactions or external execution services, and is **not** yet a complete
 portfolio risk governor. It does not transfer risk limits to Kimi or DeepSeek,
 does not run in the broker watchdog, and does not activate demo autonomy.
 All FIRE controllers must point to the **same data directory** on the VM.
+
+## Increment 7 — Signed demo equity decline checkpoints (UTC)
+
+A persistent `fire-equity-risk.sqlite` monitor records *only verified Delta Demo
+wallet net equity* and its observation timestamp, without raw wallet/credential
+payloads. The independent FIRE watchdog now samples equity once per minute,
+without asking any AI and without affecting its protective-order duties.
+
+The entry pipeline requires both daily and weekly opening equity checkpoints
+captured in the first five minutes after the UTC boundary. If the observation
+history is incomplete (for example, deployment in the middle of a week),
+**new FIRE orders are blocked** before GPT-6 rather than inventing baselines.
+Once the necessary history exists, a 2% daily equity decline, 5% weekly decline,
+or 8% drawdown from the *highest equity recorded since monitoring began*
+rejects entry. The gate checks again against a signed wallet reading after the
+GPT-6 decision and before the broker POST.
+
+These are **conservative equity-loss proxies including unrealized P&L**, not
+realized trade P&L. They can be affected by deposits, withdrawals, funding,
+transfers, and incomplete historical peak data. This milestone does not yet
+satisfy accurate broker-reconciled daily/weekly realized loss, total lifetime
+drawdown, or correlated portfolio risk. The guard only protects the manual
+FIRE entry pipeline; it is not yet wired to the legacy separate demo executor.
+Do not enable autonomous demo execution.

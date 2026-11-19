@@ -14,6 +14,7 @@ import time
 from tradebot.delta import DEMO_API, DeltaDemo
 from tradebot.execution import DemoExecutor
 from tradebot.fire_market import FireMarket, positions_for_fire
+from tradebot.portfolio_equity_guard import PortfolioEquityGuard
 from tradebot.fire_execution import (
     EXPOSED, FireTradeStore, active_position, protective_orders_verified
 )
@@ -136,7 +137,17 @@ def main(argv=None):
                 api_secret=os.environ.get("DELTA_DEMO_API_SECRET", ""), allow_orders=True))
                for symbol, path in (("BTCUSD", args.database),
                                     ("XAUTUSD", Path(args.database).with_name("fire-xaut.sqlite")))]
+    equity_guard = PortfolioEquityGuard(Path(args.database).parent / "fire-equity-risk.sqlite")
     while True:
+        # Read-only sampling: maintain true UTC day/week opening checkpoints
+        # even while no FIRE trade is requested. Never interrupt SL/TP protection.
+        try:
+            latest = equity_guard.latest_observed_us()
+            if latest is None or time.time()*1000000 - latest >= 60*1000000:
+                equity_guard.observe_signed_demo(markets[0][1])
+        except Exception:
+            print(json.dumps({"status": "equity_evidence_unavailable",
+                              "action": "new_fire_blocked_until_verified"}), flush=True)
         for store, exchange in markets:
             try:
                 state = watchdog_tick(exchange, store)
