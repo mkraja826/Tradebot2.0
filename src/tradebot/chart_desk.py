@@ -46,10 +46,10 @@ class ChartDesk:
             self.cache[key] = (time.monotonic() + ttl, result)
         return result
 
-    def trades(self, symbol):
+    def trades(self, symbol, page=0):
         with closing(self.stores[symbol]._connect()) as db:
             rows = db.execute("SELECT press,created_at,updated_at,status,result FROM fire_requests "
-                              "ORDER BY created_at DESC LIMIT 40").fetchall()
+                              "ORDER BY created_at DESC LIMIT 40 OFFSET ?", (40*page,)).fetchall()
         return [dict(json.loads(raw), id=key, at=epoch(at), updated=epoch(updated), status=status)
                 for key, at, updated, status, raw in rows]
 
@@ -59,7 +59,7 @@ class ChartDesk:
         rows = [raw] if isinstance(raw, dict) else raw
         positions = []
         for row in rows:
-            if str(row["product_id"]) != str(pid):
+            if str(row.get("product_id", pid) if isinstance(raw, dict) else row["product_id"]) != str(pid):
                 raise ValueError("Mismatched position")
             if Decimal(str(row["size"])):
                 positions.append({k: row.get(k) for k in ("size","entry_price","unrealized_pnl")})
@@ -78,7 +78,10 @@ class ChartDesk:
         step = PERIODS[period]
         now = int(time.time())
         summary = query.get("summary") == ["1"]
-        trades = [] if summary else self.trades(symbol)
+        page = int(query.get("page", ["0"])[0])
+        if not 0 <= page <= 1000000:
+            raise ValueError("Invalid history page")
+        trades = [] if summary else self.trades(symbol, page)
         trade_id = query.get("trade", [""])[0]
         trade = next((r for r in trades if r["id"] == trade_id), None)
         if trade_id and not trade:
@@ -131,6 +134,7 @@ class ChartDesk:
         ids = dict(trade.get("exit_order_ids") or {})
         if trade.get("broker_order_id"):
             ids["entry"] = trade["broker_order_id"]
+        verified = {}
         for kind, order_id in ids.items():
             if not str(order_id).isdigit():
                 continue
@@ -142,6 +146,71 @@ class ChartDesk:
                     continue
                 result[kind] = {"price":order["average_fill_price"], "at":epoch(order["updated_at"]),
                                 "commission":order.get("paid_commission")}
+                verified[kind] = order
             except Exception:
                 continue
+        if trade.get("id"):
+            result["scorecard"] = self.scorecard(symbol, trade, verified)
         return result
+
+    def scorecard(self, symbol, trade, orders):
+        # Expose only market context from the private snapshot, never wallet data.
+        with closing(self.stores[symbol]._connect()) as db:
+            has_inputs = db.execute("SELECT 1 FROM sqlite_master WHERE type='table' "
+                                    "AND name='fire_model_inputs'").fetchone()
+            row = db.execute("SELECT snapshot FROM fire_model_inputs WHERE press=?",
+                             (trade.get("id"),)).fetchone() if has_inputs else None
+        snapshot = json.loads(row[0]) if row else {}
+        core = snapshot.get("core", {})
+        tech = snapshot.get("technical", {})
+        card = {"quote": trade.get("decision_quote") or {
+                    "best_bid": core.get("best_bid"), "best_ask": core.get("best_ask")},
+                "snapshot_at": snapshot.get("collected_at") or trade.get("snapshot_at"),
+                "return_1h_pct": tech.get("return_1h_pct"),
+                "realized_vol_1h_pct": tech.get("realized_vol_1h_pct"),
+                "moves": {}, "exit": None}
+        exits = [k for k in ("stop_loss_order","take_profit_order") if k in orders]
+        if len(exits) == 1:
+            card["exit"] = exits[0]
+        entry = orders.get("entry")
+        exit_fill = orders.get(card["exit"])
+        if entry and exit_fill:
+            side = trade.get("direction")
+            try:
+                units = Decimal(str((trade.get("budget") or {}).get("contract_value")
+                                    or core["ticker"]["contract_value"]))
+                qty = Decimal(str(entry["size"]))
+                if (side in ("LONG","SHORT") and units.is_finite() and units > 0 and qty > 0
+                        and qty == Decimal(str(exit_fill["size"])) == trade["contracts"]
+                        and entry["side"] == ("buy" if side == "LONG" else "sell")
+                        and exit_fill["side"] != entry["side"] and exit_fill["side"] in ("buy","sell")):
+                    change = Decimal(str(exit_fill["average_fill_price"])) - Decimal(str(entry["average_fill_price"]))
+                    gross = units * qty * change * (1 if side == "LONG" else -1)
+                    fees = sum(Decimal(str(o["paid_commission"])) for o in (entry, exit_fill))
+                    if fees.is_finite() and gross.is_finite():
+                        card.update(fees_usd=str(fees), pnl_after_fees_usd=str(gross-fees))
+            except (KeyError, TypeError, ValueError, ArithmeticError):
+                pass
+        at = epoch(card["snapshot_at"])
+        quote = card["quote"]
+        if not at or not quote.get("best_bid") or not quote.get("best_ask"):
+            return card
+        midpoint = (Decimal(str(quote["best_bid"])) + Decimal(str(quote["best_ask"]))) / 2
+        if not midpoint.is_finite() or midpoint <= 0:
+            return card
+        # Use the last completed one-minute candle at each horizon (up to 59s earlier).
+        start = int(at // 60) * 60
+        now = int(time.time())
+        due = [m for m in (5, 15, 30) if at + m*60 <= now]
+        if due:
+            try:
+                candles = self.exchange.candles(symbol=symbol,resolution="1m",start=start,
+                                                end=start+max(due)*60)
+                closes = {int(c["time"]): Decimal(str(c["close"])) for c in candles}
+                for m in due:
+                    close = closes.get(start+(m-1)*60)
+                    if close and close.is_finite() and close > 0:
+                        card["moves"][str(m)] = round(float(100*(close/midpoint-1)), 4)
+            except (KeyError, TypeError, ValueError, ArithmeticError, RuntimeError, OSError):
+                pass
+        return card

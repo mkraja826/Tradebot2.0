@@ -20,12 +20,13 @@
   function remember(){try{localStorage.setItem("chart-view-"+selector.value,JSON.stringify(view()));}catch{}}
   const btn = (label,fn) => {const b=document.createElement("button");b.textContent=label;b.onclick=fn;return b;};
   let serial=0,replay=null,timer=null,playhead=0,busy=false,visible=[],levels=[],lastHistory="";
+  let historyPage=0;
   const periodBar=get("desk-periods");
   for(const p of periods) periodBar.append(btn(p,()=>{leaveReplay();view().period=p;view().anchor=view().inspected=null;
     remember();reload();}));
-  function leaveReplay(){clearInterval(timer);timer=null;replay=null;get("desk-play").textContent="Play replay";}
+  function leaveReplay(){get("desk-scorecard").hidden=true;clearInterval(timer);timer=null;replay=null;get("desk-play").textContent="Play replay";}
   function reset(){leaveReplay();view().anchor=view().inspected=null;view().fit=true;reload();}
-  selector.addEventListener("change",()=>{leaveReplay();lastHistory="";reload();});
+  selector.addEventListener("change",()=>{leaveReplay();historyPage=0;lastHistory="";reload();});
   get("desk-live").onclick=reset;
   for(const [id,factor] of [["desk-less",1.5],["desk-more",0.67]])get(id).onclick=()=>{
     view().count=Math.min(150,Math.max(12,Math.round(view().count*factor)));view().fit=false;remember();draw();
@@ -124,18 +125,40 @@
       root.append(btn(label,()=>{if(selector.disabled)return;selector.value=s;selector.dispatchEvent(new Event("change"));}));
     }
   }
+  function showScorecard(t){
+    const root=get("desk-scorecard"), c=t.scorecard;
+    root.replaceChildren();root.hidden=!c;
+    if(!c)return;
+    const title=document.createElement("h3");title.textContent=selector.value+" · FIRE scorecard";root.append(title);
+    const fmt=(n,digits=4)=>n==null?"—":Number(n).toLocaleString("en-IN",{maximumFractionDigits:digits});
+    const metric=(label,value)=>{const p=document.createElement("p");p.textContent=label+" · "+value;root.append(p);};
+    metric("Decision", [t.direction,t.contracts!=null?t.contracts+" contracts":null,t.thesis||t.reason_code||t.status].filter(Boolean).join(" · "));
+    metric("GPT-6 response",t.model_latency_ms==null?"Unavailable":fmt(t.model_latency_ms/1000,2)+" s");
+    metric("Snapshot bid / ask",fmt(c.quote.best_bid)+" / "+fmt(c.quote.best_ask));
+    metric("1h return / volatility",fmt(c.return_1h_pct)+"% / "+fmt(c.realized_vol_1h_pct)+"%");
+    metric("Stop / target",fmt(t.stop_loss)+" / "+fmt(t.take_profit));
+    metric("Entry fill",fmt(t.entry?.price));
+    const exit=t[c.exit];
+    metric("Exit",exit?(c.exit==="stop_loss_order"?"Stop-loss":"Take-profit")+" filled @ "+fmt(exit.price):"No confirmed bracket fill");
+    metric("Fees / P&L after fees (USD, excludes funding)",fmt(c.fees_usd,6)+" / "+fmt(c.pnl_after_fees_usd,6));
+    metric("Price move from snapshot midpoint", [5,15,30].map(m=>m+"m "+(c.moves[m]==null?"—":fmt(c.moves[m])+"%")).join(" · "));
+  }
+  for(const [id,delta] of [["desk-newer",-1],["desk-older",1]]){
+    get(id).onclick=()=>{leaveReplay();historyPage=Math.max(0,historyPage+delta);lastHistory="";reload();};
+  }
   function history(){
-    const rows=(data[selector.value]?.trades||[]).filter(t=>t.orders_submitted||t.broker_order_id);
-    const key=selector.value+rows.map(t=>t.id+t.status).join();
+    const rows=data[selector.value]?.trades||[];
+    get("desk-newer").hidden=historyPage===0;get("desk-older").hidden=rows.length<40;
+    const key=selector.value+historyPage+rows.map(t=>t.id+t.status).join();
     if(key===lastHistory)return;lastHistory=key;
     const root=get("desk-history");root.replaceChildren();
-    for(const t of rows)root.append(btn(clock(t.at)+" · "+(t.direction||"FIRE")+" · View replay",()=>{
+    for(const t of rows)root.append(btn(clock(t.at)+" · "+(t.direction||"FIRE")+" · "+t.status.replaceAll("_"," ")+" · View",()=>{
       leaveReplay();replay={id:t.id};view().inspected=null;reload();
     }));
-    if(!rows.length)root.textContent="No recorded FIRE trades for this market.";
+    if(!rows.length)root.textContent="No FIRE presses on this page.";
   }
   async function request(s,p,id,summary=false){
-    const params=new URLSearchParams({symbol:s,period:p});if(id)params.set("trade",id);if(summary)params.set("summary","1");
+    const params=new URLSearchParams({symbol:s,period:p,page:String(historyPage)});if(id)params.set("trade",id);if(summary)params.set("summary","1");
     const response=await fetch("/api/chart-desk?"+params,{cache:"no-store"});
     if(!response.ok)throw Error();return response.json();
   }
@@ -143,7 +166,7 @@
     const n=++serial,s=selector.value,p=view().period;
     busy=true;get("desk-outcome").textContent="";get("desk-inspect").textContent="";draw();
     try{
-      if(replay){const d=await request(s,p,replay.id);if(n!==serial)return;replay.payload=d;
+      if(replay){const d=await request(s,p,replay.id);if(n!==serial)return;replay.payload=d;showScorecard(d.replay);
         playhead=Math.max(0,d.bars.findIndex(b=>b[0]+({"1m":60,"5m":300,"15m":900,"1h":3600}[d.period])>d.replay.at));
         get("desk-scrub").max=Math.max(0,d.bars.length-1);get("desk-scrub").value=playhead;draw();
       }else await Promise.all(symbols.map(async sym=>{

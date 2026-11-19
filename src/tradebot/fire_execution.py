@@ -191,7 +191,7 @@ class FireTradeStore:
         allowed = {"model", "direction", "contracts", "stop_loss",
                    "take_profit", "broker_order_id", "order_state",
                    "protection_verified", "orders_submitted",
-                   "budget", "sizing_estimate", "reason_code", "snapshot_at", "thesis", "decision_at", "entry", "exit_order_ids", "protected_at", "decision_quote"}
+                   "model_latency_ms", "budget", "sizing_estimate", "reason_code", "snapshot_at", "thesis", "decision_at", "entry", "exit_order_ids", "protected_at", "decision_quote"}
         if set(fields) - allowed:
             raise FireTradeError("Unexpected FIRE status data")
         with closing(self._connect()) as db:
@@ -352,18 +352,19 @@ class FireDemoController:
             raw = (report.get("results") or {}).get("fire") or {}
             stage = "model_decision"
             if "decision" not in raw:
+                self.store.update(press, "reasoning", model_latency_ms=raw.get("latency_ms"))
                 raise FireTradeError("GPT-6 did not produce a valid decision")
             plan = validate(raw["decision"], snapshot["core"])
-            stage = "contract_size"
-            if not 1 <= plan["contracts"] <= budget["max_contracts_per_entry"]:
-                raise FireTradeError("Order exceeds market budget")
             self.store.update(
-                press, "preflight", direction=plan["direction"],
+                press, "preflight", direction=plan["direction"], model_latency_ms=raw.get("latency_ms"),
                 contracts=plan["contracts"], stop_loss=plan["stop_loss"],
                 take_profit=plan["take_profit"],
                 snapshot_at=snapshot["collected_at"], decision_at=_now().isoformat(),
                 decision_quote={k: snapshot["core"].get(k) for k in ("best_bid","best_ask")},
                 thesis=str(raw.get("thesis") or "")[:350])
+            stage = "contract_size"
+            if not 1 <= plan["contracts"] <= budget["max_contracts_per_entry"]:
+                raise FireTradeError("Order exceeds market budget")
             stage = "exchange_preflight"
             exchange_quote = _live_preflight(exchange, snapshot, plan)
             price = max(exchange_quote["mark"], exchange_quote["best_ask"])

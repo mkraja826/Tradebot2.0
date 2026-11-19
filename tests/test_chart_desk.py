@@ -44,3 +44,22 @@ class ChartDeskTests(unittest.TestCase):
         result=self.desk.read({"symbol":["XAUTUSD"],"summary":["1"]})
         self.assertEqual(result["quote"]["price"],"3751")
         self.assertNotIn("account",result)
+
+    def test_scorecard_uses_broker_fills_and_exact_completed_minutes(self):
+        press = self.store.reserve()
+        self.store.record_model_input(press, {"collected_at": 1700000010,
+            "core":{"best_bid":"99","best_ask":"101","ticker":{"contract_value":"0.001"}},
+            "technical":{}, "demo_funds":{"private":"hidden"}})
+        trade={"id":press, "direction":"SHORT", "contracts":2}
+        base=1700000010//60*60
+        self.exchange.candles.return_value=[{"time":base+4*60,"close":"98"},
+                                             {"time":base+29*60,"close":"102"}]
+        fills={"entry":{"side":"sell","size":2,"average_fill_price":"100","paid_commission":"0.001"},
+               "take_profit_order":{"side":"buy","size":2,"average_fill_price":"95","paid_commission":"0.002"}}
+        card=self.desk.scorecard("XAUTUSD",trade,fills)
+        self.assertEqual(card["pnl_after_fees_usd"],"0.007")
+        self.assertEqual(card["moves"],{"5":-2,"30":2})
+        self.assertNotIn("private",str(card))
+        del fills["take_profit_order"]["paid_commission"]
+        self.assertNotIn("pnl_after_fees_usd",self.desk.scorecard("XAUTUSD",trade,fills))
+        self.assertIsNone(self.desk.scorecard("XAUTUSD",trade,{})["exit"])

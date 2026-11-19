@@ -17,7 +17,9 @@ def route(r):
         d=dict(symbol=s,period=p,quote=dict(price=price,mark=price,bid=price-1,ask=price+1,time=now),
                bars=[[now-i*step,price,price+10,price-10,price+1] for i in range(90,0,-1)],trades=[trade],
                account=dict(positions=[dict(size=1,entry_price=price-12,unrealized_pnl=1)],exits=[]))
-        if 'trade' in q:d['replay']=trade
+        if 'trade' in q:
+            d['replay']=dict(trade,model_latency_ms=1250,scorecard={
+                'quote':{'best_bid':price-1,'best_ask':price+1},'moves':{'5':0.12},'exit':None})
         r.fulfill(json=d)
     elif url.path.startswith('/api/fire'):r.fulfill(json={'execution_enabled':True,'status':'idle','max_contracts_per_fire':1})
     else:r.fulfill(json={})
@@ -41,6 +43,8 @@ with sync_playwright() as pw:
     page.wait_for_function("document.querySelector('#desk-periods button[aria-pressed=true]').textContent==='15m'")
     page.locator('#desk-history button').first.click()
     page.wait_for_selector('#desk-player:visible')
+    assert '1.25 s' in page.locator('#desk-scorecard').inner_text()
+    assert '5m 0.12%' in page.locator('#desk-scorecard').inner_text()
     page.locator('#desk-play').click()
     page.wait_for_timeout(800)
     assert int(page.locator('#desk-scrub').input_value())>0
