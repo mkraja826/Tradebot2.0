@@ -10,7 +10,7 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from tradebot.dashboard import create_handler
-from tradebot.delta import DEMO_API
+from tradebot.chart_desk import ChartDesk
 from tradebot.fire_execution import FireDemoController
 
 
@@ -39,6 +39,7 @@ class FireHttpTests(unittest.TestCase):
         )
         class State:
             fire_trade = trade
+            chart_desk = ChartDesk(self.exchange, {"BTCUSD":trade.store})
             def snapshot(self):
                 return {"dashboard_mode": "read_only"}
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), create_handler(State()))
@@ -73,6 +74,23 @@ class FireHttpTests(unittest.TestCase):
             self.assertEqual(error.exception.code, expected)
         self.assertEqual(len(self.exchange.requests), 0)
         self.assertEqual(self.model_calls, [])
+
+    def test_plugin_retry_and_review_use_exact_fire(self):
+        fire_id = "1234567890abcdef" * 2
+        path = "/api/plugin/fire/BTCUSD/" + fire_id
+        for reason in ("accepted", "existing_receipt"):
+            with self.post(path, origin=self.origin, action="fire-execute") as response:
+                result = json.load(response)
+                self.assertEqual(result["reason"], reason)
+                self.assertEqual(result["receipt"]["press"], fire_id)
+                self.assertEqual(result["receipt"]["status"], "protected_active")
+        self.assertEqual(len(self.model_calls), 1)
+        self.assertEqual(len(self.exchange.requests), 1)
+        with urlopen(self.origin + "/api/plugin/review/BTCUSD/" + fire_id) as response:
+            result = json.load(response)
+            self.assertEqual(result["id"], fire_id)
+            self.assertIn("scorecard", result)
+            self.assertEqual(result["direction"], "LONG")
 
     def test_single_authorized_click_executes_one_demo_bracket(self):
         with urlopen(self.origin + "/api/fire") as result:

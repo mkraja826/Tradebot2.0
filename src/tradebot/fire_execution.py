@@ -167,13 +167,22 @@ class FireTradeStore:
                              "ORDER BY created_at DESC LIMIT 1").fetchone()
         return json.loads(row[0]) if row else None
 
-    def reserve(self, *, when=None):
+    def receipt(self, press):
+        with closing(self._connect()) as db:
+            row = db.execute("SELECT created_at,updated_at,status,result FROM fire_requests WHERE press=?",
+                             (press,)).fetchone()
+        if row:
+            return dict(press=press, created_at=row[0], updated_at=row[1], status=row[2], **json.loads(row[3]))
+
+    def reserve(self, *, when=None, press=None):
         when = when or _now()
         if when.tzinfo is None:
             raise FireTradeError("Timezone-aware clock required")
-        press = uuid4().hex
+        press = press or uuid4().hex
         with closing(self._connect()) as db:
             db.execute("BEGIN IMMEDIATE")
+            if db.execute("SELECT 1 FROM fire_requests WHERE press=?", (press,)).fetchone():
+                return None
             old = db.execute(
                 "SELECT status,created_at FROM fire_requests "
                 "ORDER BY created_at DESC LIMIT 1"
@@ -310,13 +319,15 @@ class FireDemoController:
                 "protection_verified": result.get("protection_verified") is True,
                 "orders_submitted": result.get("orders_submitted") is True}
 
-    def start(self):
+    def start(self, *, press=None):
         if not self.enabled:
             return False, "execution_disabled"
         try:
-            press = self.store.reserve()
+            press = self.store.reserve(press=press)
         except FireTradeError:
             return False, "existing_trade_or_cooldown"
+        if press is None:
+            return True, "existing_receipt"
         self.spawn(lambda: self._run(press))
         return True, "accepted"
 

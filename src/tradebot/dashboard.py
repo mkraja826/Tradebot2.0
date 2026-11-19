@@ -11,6 +11,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib.resources import files
 import json
 import os
+import re
 from pathlib import Path
 import sqlite3
 from threading import Event, Lock, Thread
@@ -411,6 +412,16 @@ def create_handler(state, *, allowed_hosts=None):
                     return
                 data = json.dumps(controller.snapshot(), separators=(",", ":")).encode()
                 mime = "application/json; charset=utf-8"
+            elif match := re.fullmatch(r"/api/plugin/review/(BTCUSD|XAUTUSD)/([a-f0-9]{32})", path):
+                symbol, press = match.groups()
+                controller = state.fire_trade if symbol == "BTCUSD" else state.gold_trade
+                receipt = controller.store.receipt(press)
+                if receipt is None:
+                    self._headers(0, "application/json", 404)
+                    return
+                trade = dict(receipt, id=press)
+                data = json.dumps(state.chart_desk.replay(symbol, trade), allow_nan=False).encode()
+                mime = "application/json"
             elif path == "/api/chart-desk":
                 try:
                     data = json.dumps(state.chart_desk.read(parse_qs(urlsplit(self.path).query)),
@@ -463,6 +474,10 @@ def create_handler(state, *, allowed_hosts=None):
             origin = urlsplit(self.headers.get("Origin") or "")
             expected_scheme = "http" if authority in ("127.0.0.1", "localhost") else "https"
             path = urlsplit(self.path).path
+            plugin = re.fullmatch(r"/api/plugin/fire/(BTCUSD|XAUTUSD)/([a-f0-9]{32})", path)
+            if plugin:
+                symbol, press = plugin.groups()
+                path = "/api/fire" if symbol == "BTCUSD" else "/api/fire/XAUTUSD"
             if path not in FIRE_ENDPOINTS:
                 data = b"Unsupported route"
                 self._headers(len(data), "text/plain", 405)
@@ -482,8 +497,13 @@ def create_handler(state, *, allowed_hosts=None):
             if controller is None:
                 self._headers(0, "application/json", 503)
                 return
-            allowed, reason = controller.start()
-            result = controller.snapshot()
+            if plugin:
+                allowed, reason = controller.start(press=press)
+                result = {"symbol":symbol, "press":press, "mode":"delta_india_demo_execution",
+                          "receipt":controller.store.receipt(press), "reason":reason}
+            else:
+                allowed, reason = controller.start()
+                result = controller.snapshot()
             if not allowed:
                 result["reason"] = reason
             data = json.dumps(result, separators=(",", ":")).encode()
