@@ -28,6 +28,18 @@ class FireProbeTest(unittest.TestCase):
         self.assertEqual(list(report["results"]), ["fire"])
         self.assertEqual(report["results"]["fire"]["decision"]["contracts"], 2)
 
+    def test_wait_is_valid_only_with_zero_contracts_and_no_exit_orders(self):
+        no_trade = {"direction":"WAIT","contracts":0,
+                    "stop_loss":None,"take_profit":None,
+                    "thesis":"No verified entry with adequate net reward-to-risk."}
+        self.assertEqual(validate(no_trade,CORE)["direction"],"WAIT")
+        with self.assertRaises(PlanError):
+            validate(no_trade | {"contracts":1},CORE)
+        with self.assertRaises(PlanError):
+            validate(no_trade | {"thesis":""},CORE)
+        with self.assertRaises(PlanError):
+            validate(no_trade | {"take_profit":"111"},CORE)
+
     def test_single_fenced_object_still_requires_valid_finished_decision(self):
         choice = {"message": {"content": "```json\n" + json.dumps(PLAN) + "\n```"}, "finish_reason":"stop"}
         self.assertEqual(validate(decision_payload(choice), CORE)["contracts"], 2)

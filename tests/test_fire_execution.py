@@ -169,6 +169,17 @@ class FireExecutionTests(unittest.TestCase):
         self.assertEqual(fire.snapshot()["reason_code"], "risk_governor_failed")
         self.assertEqual(self.exchange.requests, [])
 
+    def test_gpt6_wait_is_explicit_no_trade_with_zero_orders(self):
+        no_trade = {"direction":"WAIT","contracts":0,
+                    "stop_loss":None,"take_profit":None,
+                    "thesis":"No price setup with sufficient edge."}
+        fire = self.make(plan=no_trade)
+        self.assertTrue(fire.start()[0])
+        self.assertEqual(fire.snapshot()["status"],"rejected_no_order")
+        self.assertEqual(fire.snapshot()["reason_code"],"gpt6_wait_no_trade")
+        self.assertEqual(len(self.calls),1)
+        self.assertEqual(self.exchange.requests,[])
+
     def test_unsafe_broker_leverage_blocks_paid_ai_and_order(self):
         self.exchange.leverage = 100
         fire = self.make()

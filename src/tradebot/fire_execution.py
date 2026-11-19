@@ -396,6 +396,13 @@ class FireDemoController:
                                   orders_submitted=False, protection_verified=False)
                 return
             plan = validate(raw["decision"], snapshot["core"])
+            if plan["direction"] == "WAIT":
+                self.store.update(
+                    press, "rejected_no_order", model_latency_ms=raw.get("latency_ms"),
+                    reason_code="gpt6_wait_no_trade",
+                    thesis=str(raw.get("thesis") or raw["decision"].get("thesis") or "")[:350],
+                    orders_submitted=False, protection_verified=False)
+                return
             self.store.update(
                 press, "preflight", direction=plan["direction"], model_latency_ms=raw.get("latency_ms"),
                 contracts=plan["contracts"], stop_loss=plan["stop_loss"],

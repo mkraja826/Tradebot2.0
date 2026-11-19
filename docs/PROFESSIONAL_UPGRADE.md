@@ -69,3 +69,11 @@ failure prevents the AI call rather than allowing unmetered spending.
 This is a request-count budget, not a measured dollar cost. Broker monitoring
 and separate FIRE/Kimi remain independent. Configure provider-side monetary
 spend limits as well.
+
+## Increment 4 — GPT-6 may explicitly WAIT
+
+FIRE GPT-6 now has a valid structured `WAIT` decision with zero contracts,
+no stop or target, and a mandatory explanatory thesis. WAIT produces a
+recorded `gpt6_wait_no_trade` receipt and does not post any exchange orders.
+Malformed WAIT payloads still fail closed. This avoids forced entries and
+preserves GPT-6 as the only FIRE decision model.

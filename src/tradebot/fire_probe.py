@@ -12,8 +12,11 @@ from tradebot.delta import DeltaDemo
 
 ROLES = {"fire": "tb-gpt-6"}
 INSTRUCTION = (
-    "Choose a perpetual futures position for the exact symbol in core.ticker.symbol for this Delta India demo snapshot. "
-    "Return only a JSON object with direction (LONG or SHORT), contracts (positive "
+    "Decide whether an actual perpetual futures trade is justified for the exact symbol in core.ticker.symbol. "
+    "WAIT is a correct decision whenever evidence, cost, risk or entry quality is inadequate. "
+    "For WAIT return direction WAIT, contracts 0, stop_loss null, take_profit null, "
+    "and a concise thesis explaining why no trade is justified. Never force an entry. "
+    "Otherwise return only a JSON object with direction (LONG or SHORT), contracts (positive "
     "integer absolute target position size), stop_loss and take_profit (prices). "
     "Use these exact top-level keys: direction, contracts, stop_loss, take_profit, thesis. "
     "Use uppercase LONG or SHORT and an unquoted whole number for contracts. "
@@ -38,6 +41,15 @@ def validate(decision, core):
         raise PlanError("Expected an object")
     side = decision.get("direction")
     size = decision.get("contracts")
+    if side == "WAIT":
+        reason = decision.get("thesis")
+        if (type(size) is not int or size != 0
+                or decision.get("stop_loss") is not None
+                or decision.get("take_profit") is not None
+                or not isinstance(reason, str) or not reason.strip()):
+            raise PlanError("Malformed WAIT decision")
+        return dict(direction="WAIT", contracts=0,
+                    stop_loss=None, take_profit=None)
     if side not in ("LONG", "SHORT") or type(size) is not int or size < 1:
         raise PlanError("Invalid direction or contract count")
     try:
@@ -68,6 +80,7 @@ def decision_failure_code(error):
         "Malformed completion": "model_invalid_json",
         "Expected an object": "model_invalid_object",
         "Invalid direction or contract count": "model_invalid_direction_or_quantity",
+        "Malformed WAIT decision": "model_invalid_wait",
         "Missing or malformed price": "model_invalid_price",
         "Invalid price": "model_invalid_price",
         "Exit prices must bracket the quote in the chosen direction": "model_invalid_exit_levels",
