@@ -157,7 +157,7 @@ def _runtime(path: Path):
     action = raw.get("action") if isinstance(raw.get("action"), str) else "unknown"
     mode = raw.get("mode") if raw.get("mode") in ("observe", "demo") else "unknown"
     schedule = raw.get("schedule") if raw.get("schedule") in (
-        "nyse", "crypto-24x7") else "unknown"
+        "nyse", "nyse-cash-observe", "crypto-24x7") else "unknown"
     status = "stopped" if action == "stopped" else (
         "running" if age is not None and age <= 180 else "stale"
     )
