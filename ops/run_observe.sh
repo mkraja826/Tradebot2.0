@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Dedicated 24/7 Delta India DEMO read-only observer.
+# Dedicated NYSE cash-session-only DeepSeek read-only observer.
 # Deliberately has NO parameter to enable order execution.
 set -euo pipefail
 set +x
@@ -29,10 +29,12 @@ export ENABLE_DEMO_ORDERS=false
 export TRADEBOT_JOURNAL="$PROJECT/data/trades.jsonl"
 export PYTHONUNBUFFERED=1
 
-# 60 s polling; target one DeepSeek proposal attempt every 5 minutes
-# around the clock (up to about 288/day without restarts). No orders.
+# 60 s polling; target one DeepSeek research attempt every 5 minutes ONLY
+# between NYSE cash open and close (including early closes). No orders.
+# Remain idle outside cash hours; FIRE and Kimi are separate processes.
 exec "$PROJECT/.venv/bin/tradebot" run --mode observe \
-  --schedule crypto-24x7 \
+  --schedule nyse \
+  --nyse-cash-scan-only \
   --poll-seconds 60 \
   --ai-interval-seconds 300 \
   --max-options 32
