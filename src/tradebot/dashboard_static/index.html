@@ -8,6 +8,7 @@
   <title>Tradebot 2.0 · Command Center</title>
   <link rel="stylesheet" href="/styles.css"/>
   <script defer src="/app.js"></script>
+  <script defer src="/charts.js"></script>
 </head>
 <body>
   <div class="shell">
@@ -35,14 +36,32 @@
       <div class="content">
         <section class="intro" id="overview">
           <div><div class="eyebrow">DELTA INDIA / TESTNET</div>
-            <h1>Bitcoin <span>terminal.</span></h1>
+            <h1>Trading <span>terminal.</span></h1>
           </div>
           <div class="runtime-pill" id="runtime-pill"><span class="status-light"></span><span id="runtime-status">Awaiting heartbeat</span></div>
         </section>
         <div class="notice" id="halt-banner" hidden>◈ &nbsp;PERSISTENT EXECUTION HALT DETECTED — inspect exchange positions and orders before restarting.</div>
         <div id="priority" hidden role="status"></div>
+        <section class="panel market-terminal" id="market-chart">
+          <div class="chart-top"><div><div class="eyebrow">DELTA INDIA DEMO</div><h2 id="market-title">Bitcoin perpetual</h2></div>
+            <div class="market-actions">            <label for="fire-market">Market</label>
+            <select id="fire-market"><option value="BTCUSD">BTCUSD · Bitcoin</option><option value="XAUTUSD">XAUTUSD · Tether Gold</option></select>
+            <button disabled id="fire-preview" type="button">FIRE · Analyze only</button>
+</div></div>
+          <div class="quote-line"><strong id="desk-price">—</strong><span id="desk-age">Waiting for quote</span></div>
+          <div class="desk-tools"><div id="desk-periods" role="group" aria-label="Candle timeframe"></div>
+            <button id="desk-less" aria-label="Zoom out">−</button><button id="desk-more" aria-label="Zoom in">+</button>
+            <button id="desk-fit">Fit trade</button><button id="desk-live">Live</button></div>
+          <canvas id="market-canvas" tabindex="0" role="img" aria-label="Market candles. Use arrow keys to inspect."></canvas>
+          <div id="desk-inspect" role="status"></div><div id="desk-levels"></div>
+          <section id="desk-player" hidden><button id="desk-play">Play replay</button>
+            <input type="range" id="desk-scrub" aria-label="Replay candle" min="0" value="0"/></section>
+          <p id="desk-thesis"></p><p id="desk-outcome"></p>
+          <h3>Open positions</h3><div id="desk-positions"></div>
+          <h3>Trade replay</h3><div id="desk-history"></div>
+        </section>
         <div class="desk">
-          <section class="panel tape" aria-label="BTC price chart">
+          <details class="panel tape"><summary>Bitcoin observer chart and activity</summary>
             <div class="chart-top"><div><div class="eyebrow">BTCUSD PERPETUAL</div><h2>Bitcoin <small>/ USD</small></h2></div>
             <button id="go-live" type="button">Live</button></div>
             <strong id="mid">—</strong><span class="instrument-label"> bid / ask midpoint</span>
@@ -51,7 +70,7 @@
             <div class="chart-footer"><span id="sample-info">Waiting for exchange candles</span><span>UTC</span></div>
             <div class="legend">◇ Decision　▲ Entry　■ Exit　● Other fill</div>
             <section id="inspection" hidden aria-label="Selected chart record"><strong id="inspect-title"></strong><p id="inspect-text"></p><ol id="sequence"></ol><button id="dismiss-record">Close</button> <button id="context-chat">Ask about selection</button></section>
-          </section>
+          </details>
           <section class="panel chat" id="chat"><div class="chart-top"><div><div class="eyebrow">MARKET DESK</div><h2>Ask BTC</h2></div><button id="chat-close">Close</button></div>
             <div id="messages" role="log" aria-label="BTC chat messages"><p>Ask about the BTC quote, spread, open positions, or the latest bot decision.</p></div>
             <div id="prompts"><button type="button">BTC price</button><button type="button">Latest decision</button><button type="button">Positions</button></div>
@@ -72,9 +91,6 @@
           </div>
           <p class="fire-description" id="fire-description">GPT-6 decides the selected market’s direction, contract size, stop-loss and take-profit from a fresh Delta India Demo snapshot. Kimi does not make trading decisions.</p>
           <div class="fire-controls">
-            <label for="fire-market">Market</label>
-            <select id="fire-market"><option value="BTCUSD">BTCUSD · Bitcoin</option><option value="XAUTUSD">XAUTUSD · Tether Gold</option></select>
-            <button disabled id="fire-preview" type="button">FIRE · Analyze only</button>
             <div class="fire-disclosure" id="fire-disclosure">One paid GPT-6 Top Billing completion may be made per press. Demo order execution is disabled until explicitly activated.</div>
           </div>
           <p id="fire-status" role="status" aria-live="polite">Ready for a manually requested GPT-6 analysis.</p>

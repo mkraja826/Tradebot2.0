@@ -36,6 +36,7 @@ with sync_playwright() as p:
         page.get_by_text("RUNNING · OBSERVING",exact=True).wait_for()
         assert page.locator("#mid").inner_text().replace("\n","")=="$101.00"
         assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+        page.get_by_text("Bitcoin observer chart and activity", exact=True).click()
         page.locator("#trace").focus()
         page.keyboard.press("ArrowLeft")
         inspected=page.locator("#inspect-text").inner_text()

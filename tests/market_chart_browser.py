@@ -1,0 +1,51 @@
+from playwright.sync_api import sync_playwright
+from pathlib import Path
+import time,json
+root=Path(__file__).resolve().parents[1]/"src/tradebot/dashboard_static"
+now=int(time.time())
+def route(r):
+    from urllib.parse import urlsplit,parse_qs
+    url=urlsplit(r.request.url)
+    if not url.path.startswith('/api/'):
+        name=url.path[1:] or 'index.html'
+        if (root/name).is_file():r.fulfill(path=root/name)
+        else:r.fulfill(status=404)
+    elif url.path=='/api/chart-desk':
+        q=parse_qs(url.query);s=q['symbol'][0];p=q['period'][0];price=3700 if s=='XAUTUSD' else 64000
+        step={'5m':300,'1m':60,'15m':900,'1h':3600}[p]
+        trade=dict(id='abc',at=now-step*10,orders_submitted=True,direction='LONG',status='flat_verified',decision_at=now-step*9,thesis='Test thesis')
+        d=dict(symbol=s,period=p,quote=dict(price=price,mark=price,bid=price-1,ask=price+1,time=now),
+               bars=[[now-i*step,price,price+10,price-10,price+1] for i in range(90,0,-1)],trades=[trade],
+               account=dict(positions=[dict(size=1,entry_price=price-12,unrealized_pnl=1)],exits=[]))
+        if 'trade' in q:d['replay']=trade
+        r.fulfill(json=d)
+    elif url.path.startswith('/api/fire'):r.fulfill(json={'execution_enabled':True,'status':'idle','max_contracts_per_fire':1})
+    else:r.fulfill(json={})
+with sync_playwright() as pw:
+    b=pw.chromium.launch(channel='chrome')
+    page=b.new_page(viewport={'width':390,'height':844},has_touch=True)
+    page.route('**/*',route)
+    page.goto('http://desk.local/')
+    page.wait_for_selector('#desk-positions button')
+    page.select_option('#fire-market','XAUTUSD')
+    page.wait_for_function("document.querySelector('#desk-price').textContent==='3,700'")
+    assert 'XAUTUSD' in page.locator('#fire-preview').inner_text()
+    page.get_by_role('button',name='15m',exact=True).click()
+    page.wait_for_function("document.querySelector('#desk-periods button[aria-pressed=true]').textContent==='15m'")
+    page.locator('#market-canvas').focus()
+    page.keyboard.press('ArrowLeft')
+    assert 'IST' in page.locator('#desk-inspect').inner_text()
+    page.locator('#desk-positions button').first.click()
+    page.wait_for_function("document.querySelector('#market-title').textContent.includes('Bitcoin')")
+    page.locator('#desk-positions button').last.click()
+    page.wait_for_function("document.querySelector('#desk-periods button[aria-pressed=true]').textContent==='15m'")
+    page.locator('#desk-history button').first.click()
+    page.wait_for_selector('#desk-player:visible')
+    page.locator('#desk-play').click()
+    page.wait_for_timeout(800)
+    assert int(page.locator('#desk-scrub').input_value())>0
+    page.locator('#desk-live').click()
+    page.wait_for_selector('#desk-player',state='hidden')
+    assert page.evaluate('document.documentElement.scrollWidth<=window.innerWidth')
+    print('Mobile chart, market selection, timeframe recall, keyboard inspection and replay passed')
+    b.close()

@@ -17,6 +17,7 @@ from threading import Lock, Thread
 import time
 from urllib.parse import parse_qs, quote, urlsplit
 
+from tradebot.chart_desk import ChartDesk
 from tradebot.delta import DeltaDemo
 from tradebot.fire_dashboard import FirePreviewController
 from tradebot.fire_execution import FireDemoController
@@ -34,6 +35,7 @@ SAFE_EVENT_FIELDS = frozenset({
 ASSET_TYPES = {
     "/": ("index.html", "text/html; charset=utf-8"),
     "/styles.css": ("styles.css", "text/css; charset=utf-8"),
+    "/charts.js": ("charts.js", "text/javascript; charset=utf-8"),
     "/app.js": ("app.js", "text/javascript; charset=utf-8"),
 }
 
@@ -208,6 +210,7 @@ class DashboardData:
             api_secret=os.getenv("DELTA_DEMO_API_SECRET", ""),
             allow_orders=False,
         )
+        self.chart_desk = ChartDesk(self.exchange, {"BTCUSD": self.fire_trade.store, "XAUTUSD": self.gold_trade.store})
         self.refresh_seconds = max(10, int(refresh_seconds))
         self._lock = Lock()
         self._history_lock = Lock()
@@ -408,6 +411,17 @@ def create_handler(state, *, allowed_hosts=None):
                     return
                 data = json.dumps(controller.snapshot(), separators=(",", ":")).encode()
                 mime = "application/json; charset=utf-8"
+            elif path == "/api/chart-desk":
+                try:
+                    data = json.dumps(state.chart_desk.read(parse_qs(urlsplit(self.path).query)),
+                                      allow_nan=False).encode()
+                except ValueError:
+                    self._headers(0, "application/json", 400)
+                    return
+                except Exception:
+                    self._headers(0, "application/json", 503)
+                    return
+                mime = "application/json"
             elif path == "/api/candles":
                 try:
                     at = int(parse_qs(urlsplit(self.path).query).get("at", [""])[0])

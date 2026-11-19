@@ -76,7 +76,7 @@ def active_position(exchange, product_id):
     return active[0]
 
 
-def protective_orders_verified(orders, *, product_id, plan):
+def _protective_ids(orders, *, product_id, plan):
     """Both distinct child stop orders must be present and active.
 
     The intended tick-precision SL/TP must appear as broker triggers.
@@ -106,8 +106,14 @@ def protective_orders_verified(orders, *, product_id, plan):
             matched = False
         if matched:
             found.setdefault(category, set()).add(str(order["id"]))
+    return found
+
+
+def protective_orders_verified(orders, *, product_id, plan):
+    found = _protective_ids(orders, product_id=product_id, plan=plan)
     return bool(found.get("stop_loss_order") and found.get("take_profit_order")
                 and found["stop_loss_order"].isdisjoint(found["take_profit_order"]))
+
 
 
 class FireTradeStore:
@@ -127,6 +133,16 @@ class FireTradeStore:
                 press TEXT PRIMARY KEY, created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL, status TEXT NOT NULL,
                 result TEXT NOT NULL)""")
+            db.commit()
+
+    def record_model_input(self, press, snapshot):
+        # Keep exact FIRE inputs in the private operations DB, outside the
+        # public browser projection which only exposes the decision quote.
+        with closing(self._connect()) as db:
+            db.execute("CREATE TABLE IF NOT EXISTS fire_model_inputs "
+                       "(press TEXT PRIMARY KEY, snapshot TEXT NOT NULL)")
+            db.execute("INSERT INTO fire_model_inputs VALUES (?,?)",
+                       (press, json.dumps(snapshot, allow_nan=False, separators=(",", ":"))))
             db.commit()
 
     def _connect(self):
@@ -174,7 +190,7 @@ class FireTradeStore:
         allowed = {"model", "direction", "contracts", "stop_loss",
                    "take_profit", "broker_order_id", "order_state",
                    "protection_verified", "orders_submitted",
-                   "reason_code", "snapshot_at"}
+                   "reason_code", "snapshot_at", "thesis", "decision_at", "entry", "exit_order_ids", "protected_at", "decision_quote"}
         if set(fields) - allowed:
             raise FireTradeError("Unexpected FIRE status data")
         with closing(self._connect()) as db:
@@ -244,6 +260,10 @@ def _protection_check(exchange, receipt, *, pause=sleep, attempts=6):
             if int(size) != direction * plan["contracts"]:
                 raise FireTradeError("Exchange position does not match entry fill")
             if protective_orders_verified(orders, product_id=product_id, plan=plan):
+                found = _protective_ids(orders, product_id=product_id, plan=plan)
+                receipt["exit_order_ids"] = {kind: next(iter(ids)) for kind, ids in found.items()
+                                             if len(ids) == 1}
+                receipt["protected_at"] = _now().isoformat()
                 return "protected_active"
         if attempt < attempts - 1:
             pause(1)
@@ -315,6 +335,7 @@ class FireDemoController:
                 "attached_stop_loss_and_take_profit_required": True,
                 "separate_learning_model_has_no_trade_authority": True,
             }}
+            self.store.record_model_input(press, model_snapshot)
             report = self.probe(dict(ROLES), lambda: model_snapshot)
             raw = (report.get("results") or {}).get("fire") or {}
             if "decision" not in raw:
@@ -326,7 +347,9 @@ class FireDemoController:
                 press, "preflight", direction=plan["direction"],
                 contracts=plan["contracts"], stop_loss=plan["stop_loss"],
                 take_profit=plan["take_profit"],
-                snapshot_at=snapshot["collected_at"])
+                snapshot_at=snapshot["collected_at"], decision_at=_now().isoformat(),
+                decision_quote={k: snapshot["core"].get(k) for k in ("best_bid","best_ask")},
+                thesis=str(raw.get("thesis") or "")[:350])
             exchange = self.exchange_factory()
             _live_preflight(exchange, snapshot, plan)
             self.store.update(press, "submitting")
@@ -356,11 +379,13 @@ class FireDemoController:
                 raise FireTradeError("Entry fill not confirmed by signed order lookup")
             self.store.update(
                 press, "verifying_protection", broker_order_id=str(
-                    receipt.get("order_id") or "")[:64], order_state="filled",
+                    receipt.get("order_id") or "")[:64], order_state="filled", entry={"price": broker_order.get("average_fill_price"),
+                                                "at": broker_order.get("updated_at")},
                 orders_submitted=True)
             state = _protection_check(exchange, receipt, pause=self.pause)
             self.store.update(
                 press, state, protection_verified=state == "protected_active",
+                exit_order_ids=receipt.get("exit_order_ids", {}), protected_at=receipt.get("protected_at"),
                 orders_submitted=True)
         except Exception:
             # No raw provider/broker error is logged or returned to browser.

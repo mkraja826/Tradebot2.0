@@ -402,7 +402,7 @@ function renderFireExecution(data) {
     cancelled_flat_verified:"Entry cancelled and demo account flat."
   };
   button.disabled=!["idle","flat_verified","rejected_no_order","aborted_flat","cancelled_flat_verified"].includes(data.status);
-  button.textContent=button.disabled?"FIRE · "+(data.status||"processing").replaceAll("_"," ").toUpperCase():"FIRE · EXECUTE DEMO";
+  button.textContent=button.disabled?"FIRE · "+(data.status||"processing").replaceAll("_"," ").toUpperCase():"FIRE · "+fireMarket.value+" · EXECUTE DEMO";
   const active=data.status==="protected_active";
   status.textContent=stages[data.status]||"Unknown FIRE execution state; inspect account before pressing again.";
   container.replaceChildren();
@@ -435,7 +435,7 @@ function renderFire(data) {
   const remaining=Number(data.cooldown_seconds||0);
   button.disabled=data.status==="running"||remaining>0;
   button.textContent=data.status==="running"?"Analyzing GPT-6…":
-    remaining>0?"FIRE · Retry in "+Math.ceil(remaining/60)+"m":"FIRE · Analyze only";
+    remaining>0?"FIRE · Retry in "+Math.ceil(remaining/60)+"m":"FIRE · "+fireMarket.value+" · Analyze only";
   const messages={
     idle:"Ready. Pressing FIRE requests GPT-6 analysis; it never submits an order.",
     running:"Contacting GPT-6. One paid request may be in progress.",

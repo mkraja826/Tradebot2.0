@@ -14,6 +14,7 @@ INSTRUCTION = (
     "Choose a perpetual futures position for the exact symbol in core.ticker.symbol for this Delta India demo snapshot. "
     "Return only a JSON object with direction (LONG or SHORT), contracts (positive "
     "integer absolute target position size), stop_loss and take_profit (prices). "
+    "Include a thesis string giving one concise sentence of reasoning. "
     "Use available margin, contract value, current position and spread. "
     "If the supplied snapshot contains fire_execution_scope, strictly respect "
     "its max_contracts_per_entry pilot limit and attached stop/target requirement. "
@@ -62,8 +63,11 @@ def run_probe(routes, snapshot_loader, client_factory=TopBillingClient):
                 "model": model, "messages": [{"role": "system", "content": INSTRUCTION},
                                              {"role": "user", "content": content}]}, timeout=60)
             answer = reply["choices"][0]["message"]["content"]
-            decision = validate(json.loads(answer), snapshot["core"])
+            parsed = json.loads(answer)
+            decision = validate(parsed, snapshot["core"])
             result = {"decision": decision, "usage": reply.get("usage"), "request_id": client.last_request_id}
+            if isinstance(parsed.get("thesis"), str):
+                result["thesis"] = parsed["thesis"][:350]
         except PlanError as exc:
             result = {"error": str(exc)}
         except (KeyError, IndexError, TypeError, ValueError):

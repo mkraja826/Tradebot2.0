@@ -157,3 +157,18 @@ body{background:var(--bg)}.eyebrow{color:#ddb982}.panel,.metric.card{border-colo
 @media(max-width:750px){.learning-stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
 
 #fire-market { min-height: 44px; padding: .5rem; color: inherit; background: #152230; border: 1px solid #496171; border-radius: .4rem; font: inherit; }
+
+.market-terminal { padding:clamp(12px,2vw,24px); margin-bottom:16px }
+.market-actions,.desk-tools,#desk-periods,#desk-levels,#desk-history {display:flex; flex-wrap:wrap; align-items:center; gap:6px}
+.market-terminal button {min-height:36px; padding:5px 10px; border:1px solid #455361; background:#202830; color:#e8eef3; border-radius:5px; cursor:pointer}
+.market-terminal button[aria-pressed=true],.market-actions #fire-preview {color:#102322; background:#81d4bc}
+.market-actions #fire-preview:disabled {opacity:.55}
+.quote-line {display:flex;gap:12px;align-items:baseline;margin:12px 0}
+#desk-price {font-size:1.65rem;font-variant-numeric:tabular-nums}
+#desk-age,#desk-inspect,#desk-thesis,#desk-outcome {color:#b8c3cc;font-size:.88rem}
+#market-canvas {width:100%;height:clamp(240px,38vh,440px);display:block;touch-action:pan-y;margin:8px 0;background:#14191f}
+#desk-positions {display:grid;gap:6px}
+#desk-positions button {text-align:left}
+.market-terminal h3 {font-size:1rem;margin:14px 0 8px}
+#desk-player:not([hidden]) {display:flex;gap:12px} #desk-scrub {flex:1}
+@media(max-width:650px){.market-terminal>.chart-top{align-items:flex-start;flex-direction:column}.market-actions label{position:absolute;clip-path:inset(50%)}.desk-tools button,.market-actions button{min-height:42px}}
