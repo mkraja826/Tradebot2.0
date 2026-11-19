@@ -1,5 +1,5 @@
 """DeepSeek-only official US stock cash-hours schedule; broker/fire stays separate."""
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import tempfile
 import unittest
@@ -96,6 +96,17 @@ class DeepSeekCashOnlyTests(unittest.TestCase):
         self.assertEqual(self.exchange.trades, [])
         context = self.planner.propose.call_args.args[0]
         self.assertEqual(context["trading_schedule"], "nyse")
+
+    def test_quota_blocks_ninth_paid_request_even_after_restart(self):
+        bot = self.runner()
+        for index in range(8):
+            self.instant = utc(2026, 11, 19, 14, 30) + timedelta(minutes=5*index)
+            self.assertEqual(bot.tick()["action"], "preview")
+        self.assertEqual(self.planner.propose.call_count, 8)
+        self.instant = utc(2026, 11, 19, 15, 10)
+        self.assertEqual(self.runner().tick()["action"], "ai_budget_exhausted_no_ai")
+        self.assertEqual(self.planner.propose.call_count, 8)
+        self.assertEqual(self.exchange.trades, [])
 
     def test_final_fifteen_minutes_are_research_only(self):
         bot = self.runner()

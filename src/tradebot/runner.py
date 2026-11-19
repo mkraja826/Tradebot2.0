@@ -17,6 +17,7 @@ import signal
 from threading import Event
 
 from tradebot.ai import PlanError
+from tradebot.ai_call_budget import AICallQuota
 from tradebot.decision import build_ai_context
 from tradebot.delta import DEMO_API
 from tradebot.execution import CloseoutError, DemoExecutor, _position_size
@@ -116,6 +117,10 @@ class BotRunner:
         self.halted_session = None
         self.active_since = None
         self.halt_file = Path(self.config.journal_path + ".crypto24x7-halt")
+        # DeepSeek-only observer quota. Separate FIRE, Kimi and watchdog remain unchanged.
+        self.research_quota = (
+            AICallQuota(Path(self.config.journal_path).parent / "ai-call-budget.sqlite")
+            if self.config.nyse_cash_scan_only else None)
         if self.config.mode == "demo":
             if getattr(exchange, "base_url", None) != DEMO_API:
                 raise RunnerError("Demo mode forbids any non-testnet exchange host")
@@ -242,6 +247,10 @@ class BotRunner:
         context["open_orders_count"] = 0
         context["trading_schedule"] = self.config.schedule
         context["max_hold_seconds"] = self.config.max_hold_seconds if self.config.schedule == "crypto-24x7" else None
+        if self.research_quota is not None and not self.research_quota.claim(
+            "tb-deepseek-v4-1-flash", instant, uuid4().hex
+        ):
+            return {"phase": phase.value, "action": "ai_budget_exhausted_no_ai"}
         self.last_ai_utc = instant
         try:
             plan = self.planner.propose(

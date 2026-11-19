@@ -57,3 +57,15 @@ DeepSeek proposal cadence is reduced from 5 minutes to 1 hour. This is a
 low-cost interim throttle, not a complete event-triggered scanner. It does
 not modify GPT-6 FIRE, Kimi, or the independent protective-order watchdog.
 A persistent provider-call quota is planned as a separate hardening layer.
+
+## Increment 3C — Durable DeepSeek request budget
+
+The NYSE-only DeepSeek research runner reserves permission from a private
+SQLite quota ledger before making a paid model request. Its default quota is
+8 requests per America/New_York day, 160 per month, persisted across process
+restarts and shared across runner instances using the same data directory.
+A duplicate reservation ID never authorizes another inference. Any database
+failure prevents the AI call rather than allowing unmetered spending.
+This is a request-count budget, not a measured dollar cost. Broker monitoring
+and separate FIRE/Kimi remain independent. Configure provider-side monetary
+spend limits as well.
