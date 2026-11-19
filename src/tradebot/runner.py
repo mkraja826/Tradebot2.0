@@ -342,7 +342,13 @@ class BotRunner:
                 "mode": self.config.mode,
                 "schedule": "nyse-cash-observe" if self.config.nyse_cash_scan_only else self.config.schedule,
                 "action": str(action)[:80],
-                "next_scan": (self.last_ai_utc + timedelta(seconds=self.config.ai_interval_seconds)).isoformat() if self.last_ai_utc else None,
+                "next_scan": (
+                    (self.last_ai_utc + timedelta(
+                        seconds=self.config.ai_interval_seconds)).isoformat()
+                    if self.last_ai_utc and (
+                        not self.config.nyse_cash_scan_only
+                        or nyse_cash_is_open(datetime.now(timezone.utc)))
+                    else None),
                 "exit_due": (self.active_since + timedelta(seconds=self.config.max_hold_seconds)).isoformat() if self.active_since and self.config.schedule == "crypto-24x7" else None,
                 "pid": os.getpid(),
                 "environment": "delta-india-demo",
