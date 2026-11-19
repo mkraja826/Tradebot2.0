@@ -34,6 +34,8 @@ def main() -> None:
                         help="Explicit permission for demo orders; requires env opt-in too")
     parser.add_argument("--poll-seconds", type=int, default=15)
     parser.add_argument("--ai-interval-seconds", type=int, default=300)
+    parser.add_argument("--nyse-cash-scan-only", action="store_true",
+                        help="Read-only DeepSeek scans only while NYSE cash market is open, including early closes")
     parser.add_argument("--lookback-hours", type=int, default=24,
                         help="1-168 hours of exchange fills to reconcile")
     parser.add_argument("--ledger-path", default="data/confirmed-fills.sqlite",
@@ -45,6 +47,9 @@ def main() -> None:
         parser.error("--max-hold-minutes must be 1..60")
     if args.demo_execute and (args.command != "run" or args.mode != "demo"):
         parser.error("--demo-execute is only valid with: run --mode demo")
+    if args.nyse_cash_scan_only and (
+            args.command != "run" or args.mode != "observe" or args.schedule != "nyse"):
+        parser.error("--nyse-cash-scan-only requires: run --mode observe --schedule nyse")
     if args.command == "run" and args.mode == "demo":
         if not args.demo_execute or os.getenv("ENABLE_DEMO_ORDERS") != "true":
             parser.error(
@@ -138,12 +143,13 @@ def main() -> None:
                                 poll_seconds=args.poll_seconds,
                                 max_options=args.max_options,
                                 schedule=args.schedule,
+                                nyse_cash_scan_only=args.nyse_cash_scan_only,
                                 max_hold_seconds=args.max_hold_minutes * 60),
         )
         print(json.dumps({
             "environment": exchange.base_url,
             "mode": args.mode,
-            "schedule": args.schedule,
+            "schedule": "nyse-cash-observe" if args.nyse_cash_scan_only else args.schedule,
             "orders": "DEMO ENABLED" if args.mode == "demo"
                       else "READ ONLY",
             "message": "Stop with Ctrl+C. Use process supervision for emergencies.",
