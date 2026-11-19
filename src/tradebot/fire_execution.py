@@ -21,6 +21,7 @@ from uuid import uuid4
 
 from tradebot.delta import DEMO_API, DeltaDemo, DeltaError
 from tradebot.execution import DemoExecutor
+from tradebot.fire_budget import entry_budget
 from tradebot.fire_entry import FireEntries
 from tradebot.fire_market import FireMarket, positions_for_fire
 from tradebot.fire_probe import ROLES, load_snapshot, run_probe, validate
@@ -190,7 +191,7 @@ class FireTradeStore:
         allowed = {"model", "direction", "contracts", "stop_loss",
                    "take_profit", "broker_order_id", "order_state",
                    "protection_verified", "orders_submitted",
-                   "reason_code", "snapshot_at", "thesis", "decision_at", "entry", "exit_order_ids", "protected_at", "decision_quote"}
+                   "budget", "sizing_estimate", "reason_code", "snapshot_at", "thesis", "decision_at", "entry", "exit_order_ids", "protected_at", "decision_quote"}
         if set(fields) - allowed:
             raise FireTradeError("Unexpected FIRE status data")
         with closing(self._connect()) as db:
@@ -242,6 +243,7 @@ def _live_preflight(exchange, snapshot, plan):
         raise FireTradeError("Existing exchange orders require reconciliation")
     if active_position(exchange, snapshot["core"]["ticker"]["product_id"]):
         raise FireTradeError("An existing position must be closed first")
+    return {"mark": mark, "best_bid": bid, "best_ask": ask}
 
 
 def _protection_check(exchange, receipt, *, pause=sleep, attempts=6):
@@ -275,7 +277,7 @@ class FireDemoController:
 
     def __init__(self, path, *, enabled=False, exchange_factory=None,
                  snapshot_loader=load_snapshot, probe=run_probe,
-                 max_contracts=1, pause=sleep, spawn=None, symbol="BTCUSD"):
+                 pause=sleep, spawn=None, symbol="BTCUSD"):
         self.symbol = symbol
         self.enabled = bool(enabled)
         self.store = FireTradeStore(path)
@@ -287,7 +289,6 @@ class FireDemoController:
         ))
         self.snapshot_loader = snapshot_loader
         self.probe = probe
-        self.max_contracts = max_contracts
         self.pause = pause
         self.spawn = spawn or (lambda f: Thread(target=f, daemon=True).start())
 
@@ -297,7 +298,7 @@ class FireDemoController:
                 "mode": "delta_india_demo_execution" if self.enabled else "disabled",
                 "execution_enabled": self.enabled, "model": "tb-gpt-6",
                 "account": "Delta India Demo only",
-                "max_contracts_per_fire": self.max_contracts,
+                "market_margin_percent": 20,
                 "protection_verified": result.get("protection_verified") is True,
                 "orders_submitted": result.get("orders_submitted") is True}
 
@@ -326,13 +327,21 @@ class FireDemoController:
             if (collected.tzinfo is None or
                     (_now() - collected).total_seconds() > 60):
                 raise FireTradeError("Stale market snapshot")
-            # Give GPT-6 the pilot's mechanical exchange constraint as
-            # market context, rather than silently reducing its chosen size
-            # after the decision. GPT-6 is still the sole strategist.
+            exchange = self.exchange_factory()
+            product_id = snapshot["core"]["ticker"]["product_id"]
+            stage = "market_availability"
+            if snapshot["position_contracts"] or active_position(exchange, product_id) or exchange.open_orders():
+                raise FireTradeError("Selected market already has a position or pending order")
+            stage = "margin_budget"
+            price = max(_dec(snapshot["core"]["best_ask"]), _dec(snapshot["core"]["ticker"]["mark_price"]))
+            budget = entry_budget(exchange, self.symbol, product_id, price)
+            self.store.update(press, "reasoning", budget=budget)
+            if budget["max_contracts_per_entry"] < 1:
+                raise FireTradeError("Insufficient margin budget for one contract")
             model_snapshot = {**snapshot, "fire_execution_scope": {
                 "environment": "delta-india-demo",
                 "instrument": self.symbol + " perpetual futures",
-                "max_contracts_per_entry": self.max_contracts,
+                **budget,
                 "attached_stop_loss_and_take_profit_required": True,
                 "separate_learning_model_has_no_trade_authority": True,
             }}
@@ -346,8 +355,8 @@ class FireDemoController:
                 raise FireTradeError("GPT-6 did not produce a valid decision")
             plan = validate(raw["decision"], snapshot["core"])
             stage = "contract_size"
-            if not 1 <= plan["contracts"] <= self.max_contracts:
-                raise FireTradeError("Pilot order size exceeds configured contract limit")
+            if not 1 <= plan["contracts"] <= budget["max_contracts_per_entry"]:
+                raise FireTradeError("Order exceeds market budget")
             self.store.update(
                 press, "preflight", direction=plan["direction"],
                 contracts=plan["contracts"], stop_loss=plan["stop_loss"],
@@ -356,9 +365,19 @@ class FireDemoController:
                 decision_quote={k: snapshot["core"].get(k) for k in ("best_bid","best_ask")},
                 thesis=str(raw.get("thesis") or "")[:350])
             stage = "exchange_preflight"
-            exchange = self.exchange_factory()
-            _live_preflight(exchange, snapshot, plan)
-            self.store.update(press, "submitting")
+            exchange_quote = _live_preflight(exchange, snapshot, plan)
+            price = max(exchange_quote["mark"], exchange_quote["best_ask"])
+            stage = "margin_budget_recheck"
+            current_budget = entry_budget(exchange, self.symbol, product_id, price)
+            self.store.update(press, "preflight", budget=current_budget)
+            if plan["contracts"] > current_budget["max_contracts_per_entry"]:
+                raise FireTradeError("Live margin budget changed")
+            units = _dec(current_budget["contract_value"]) * plan["contracts"]
+            estimated_entry = exchange_quote["best_ask" if plan["direction"] == "LONG" else "best_bid"]
+            self.store.update(press, "submitting", sizing_estimate={
+                "notional_usd": str(units * estimated_entry),
+                "loss_at_stop_usd": str(units * abs(estimated_entry - _dec(plan["stop_loss"]))),
+            })
             submitted = True  # Exchange outcome could become uncertain after call.
             entries = FireEntries(self.path, exchange)
             receipt = entries.submit_first_entry(press, snapshot, plan)

@@ -28,6 +28,15 @@ class DemoAccount(FireMarket):
                 "quotes": {"best_bid":"3799", "best_ask":"3801"}}
 
     def _request(self, method, path, *, params=None, payload=None, auth=False):
+        if method == "GET" and path == "/v2/products/XAUTUSD":
+            return {"result": {"symbol": self.symbol, "id": 82, "contract_type": "perpetual_futures",
+                               "settling_asset": {"symbol": "USD"}, "notional_type": "vanilla",
+                               "initial_margin": "0.5", "contract_value": "0.001", "taker_commission_rate": "0.0005"}}
+        if method == "GET" and path == "/v2/products/82/orders/leverage":
+            return {"result": {"leverage": 50, "product_id": 82}}
+        if method == "GET" and path == "/v2/wallet/balances":
+            return {"result": [{"asset_symbol": "USD", "available_balance": "100"}],
+                    "meta": {"net_equity": "100"}}
         if method == "GET" and path == "/v2/positions":
             assert params == {"product_id":82}
             return {"result":{"entry_price":"3800","size": self.gold_size}}
@@ -91,7 +100,8 @@ class MarketTest(unittest.TestCase):
                         "core":{"best_bid":"3799","best_ask":"3801","ticker":broker.ticker(symbol)}}
             def decide(routes, loader):
                 self.assertEqual(loader()["core"]["ticker"]["symbol"], "XAUTUSD")
-                return {"results":{"fire":{"decision":{"direction":"LONG","contracts":1,
+                self.assertEqual(loader()["fire_execution_scope"]["max_contracts_per_entry"], 263)
+                return {"results":{"fire":{"decision":{"direction":"LONG","contracts":24,
                                                       "stop_loss":"3700","take_profit":"3900"}}}}
             desk = FireDemoController(Path(tmp)/"fire-xaut.sqlite",enabled=True,symbol="XAUTUSD",
                                       exchange_factory=lambda:broker,snapshot_loader=snapshot,probe=decide,

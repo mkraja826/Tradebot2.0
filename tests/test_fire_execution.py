@@ -18,7 +18,7 @@ def snapshot():
         "core": {
             "best_bid": "63214.0", "best_ask": "63214.5",
             "ticker": {"product_id": 27, "symbol": "BTCUSD",
-                       "contract_type": "perpetual_futures"},
+                       "contract_type": "perpetual_futures", "mark_price": "63214.25"},
         },
     }
 
@@ -54,7 +54,18 @@ class FakeDemo:
     def open_orders(self):
         return list(self.active_orders)
 
-    def _request(self, method, path, *, auth, payload):
+    def wallet_balances(self):
+        return {"meta": {"net_equity": "173.81"},
+                "balances": [{"asset_symbol": "USD", "available_balance": "173.81"}]}
+
+    def _request(self, method, path, *, auth=False, payload=None):
+        if method == "GET" and path.endswith("/orders/leverage"):
+            return {"result": {"leverage": 100, "product_id": 27}}
+        if method == "GET" and path == "/v2/products/BTCUSD":
+            return {"result": {"id": 27, "symbol": "BTCUSD", "contract_type": "perpetual_futures",
+                               "settling_asset": {"symbol": "USD"}, "notional_type": "vanilla",
+                               "initial_margin": "0.5", "contract_value": "0.001", "taker_commission_rate": "0.0005"}}
+
         self.requests.append((method, path, payload))
         if self.submit_timeout:
             raise TimeoutError("response lost, possible fill")
@@ -118,7 +129,6 @@ class FireExecutionTests(unittest.TestCase):
             snapshot_loader=snapshot,
             probe=model, spawn=lambda callback: callback(),
             pause=lambda seconds: None,
-            max_contracts=1,
         )
 
     def test_one_click_posts_one_order_and_verifies_both_protective_stops(self):
@@ -143,6 +153,42 @@ class FireExecutionTests(unittest.TestCase):
         self.assertEqual(len(self.exchange.requests), 1)
         self.assertFalse(self.make().start()[0])  # persistent across restart
 
+    def test_gpt_can_choose_less_than_maximum_across_multiple_contracts(self):
+        fire = self.make(plan=PLAN | {"contracts": 8})
+        fire.start()
+        self.assertEqual(fire.snapshot()["status"], "protected_active")
+        self.assertEqual(fire.snapshot()["budget"]["max_contracts_per_entry"], 54)
+        self.assertEqual(self.exchange.requests[0][2]["size"], 8)
+
+    def test_equity_drop_before_submission_recomputes_budget(self):
+        from unittest.mock import patch
+        full = self.exchange.wallet_balances()
+        reduced = dict(full, meta={"net_equity": "3"})
+        with patch.object(self.exchange, "wallet_balances", side_effect=[full, reduced]):
+            fire = self.make()
+            fire.start()
+            self.assertEqual(fire.snapshot()["reason_code"], "margin_budget_recheck_failed")
+            self.assertEqual(self.exchange.requests, [])
+
+    def test_free_usd_and_reserved_fees_can_lower_contract_limit(self):
+        from unittest.mock import patch
+        funds = self.exchange.wallet_balances()
+        funds["balances"][0]["available_balance"] = "0.65"
+        with patch.object(self.exchange, "wallet_balances", return_value=funds):
+            fire = self.make()
+            fire.start()
+            self.assertEqual(fire.snapshot()["budget"]["max_contracts_per_entry"], 0)
+            self.assertFalse(self.calls)
+            self.assertFalse(self.exchange.requests)
+
+    def test_existing_order_consumes_market_before_model_call(self):
+        self.exchange.active_orders = [{"id": 99, "product_id": 27, "size": 2}]
+        fire = self.make()
+        fire.start()
+        self.assertEqual(fire.snapshot()["reason_code"], "market_availability_failed")
+        self.assertFalse(self.calls)
+        self.assertFalse(self.exchange.requests)
+
     def test_unverified_protection_forces_emergency_closeout(self):
         self.exchange.with_brackets = False
         fire = self.make()
@@ -161,7 +207,7 @@ class FireExecutionTests(unittest.TestCase):
 
             def open_orders(self):
                 self.read_count += 1
-                if self.read_count == 1:
+                if self.read_count <= 2:
                     return []
                 return [{"id": 42, "product_id": 27,
                          "product_symbol": "BTCUSD", "state": "open"}]
@@ -191,8 +237,8 @@ class FireExecutionTests(unittest.TestCase):
         self.assertEqual(self.calls, [])
         self.assertEqual(self.exchange.requests, [])
 
-    def test_pilot_cap_rejects_unbounded_ai_plan_before_order(self):
-        fire = self.make(plan=PLAN | {"contracts": 8})
+    def test_market_budget_rejects_oversize_ai_plan_before_order(self):
+        fire = self.make(plan=PLAN | {"contracts": 56})
         self.assertTrue(fire.start()[0])
         self.assertEqual(fire.snapshot()["status"], "rejected_no_order")
         self.assertEqual(fire.snapshot()["orders_submitted"], False)

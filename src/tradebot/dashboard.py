@@ -198,12 +198,11 @@ class DashboardData:
         self.fire_trade = FireDemoController(
             self.root / "fire-ops.sqlite",
             enabled=os.getenv("TRADEBOT_FIRE_DEMO_EXECUTION", "false") == "true",
-            max_contracts=int(os.getenv("TRADEBOT_FIRE_MAX_CONTRACTS", "1")),
         )
         self.gold_preview = FirePreviewController(snapshot_loader=lambda: load_snapshot("XAUTUSD"))
         self.gold_trade = FireDemoController(
             self.root / "fire-xaut.sqlite", symbol="XAUTUSD",
-            enabled=self.fire_trade.enabled, max_contracts=self.fire_trade.max_contracts,
+            enabled=self.fire_trade.enabled,
         )
         self.exchange = exchange or DeltaDemo(
             api_key=os.getenv("DELTA_DEMO_API_KEY", ""),

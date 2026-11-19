@@ -385,7 +385,7 @@ function renderFireExecution(data) {
   fireTradingEnabled=true;
   text("fire-mode-label","DELTA INDIA DEMO · ORDER EXECUTION");
   text("fire-description","One tap asks GPT-6 to decide "+fireMarket.value+" direction, contract size, stop-loss and take-profit. The demo broker must verify an entry fill and BOTH protective orders. Kimi cannot trade.");
-  text("fire-disclosure","REAL DELTA DEMO ORDERS — no real funds. One paid GPT-6 completion per press. Uncertain exchange outcomes block additional FIRE requests. Contract pilot cap: "+data.max_contracts_per_fire+".");
+  text("fire-disclosure","REAL DELTA DEMO ORDERS — no real funds. One paid GPT-6 completion per press. Uncertain exchange outcomes block additional FIRE requests. Margin budget per market: 20% of demo equity.");
   const stages={
     idle:"Ready for a manual GPT-6 Demo trade.",
     requested:"FIRE accepted. Starting GPT-6…",
@@ -408,6 +408,11 @@ function renderFireExecution(data) {
   if(data.status==="rejected_no_order" && data.reason_code)
     status.textContent+=" · "+String(data.reason_code).replaceAll("_"," ");
   container.replaceChildren();
+  if(data.budget){
+    const b=data.budget;
+    container.append(node("p","fire-proof","Budget at last check: $"+Number(b.margin_budget_usd).toFixed(2)+
+      " · "+Number(b.leverage)+"× · up to "+b.max_contracts_per_entry+" contracts"));
+  }
   if(data.direction){
     const tile=node("div","fire-result");
     tile.append(node("div","fire-result-title","GPT-6 · "+fireMarket.value+" · DELTA DEMO"));
@@ -419,6 +424,11 @@ function renderFireExecution(data) {
       grid.append(metric);
     }
     tile.append(grid);
+    if(data.sizing_estimate){
+      const estimate=data.sizing_estimate;
+      tile.append(node("p","fire-proof","At submission · estimated exposure $"+Number(estimate.notional_usd).toFixed(2)+
+        " · estimated loss at stop $"+Number(estimate.loss_at_stop_usd).toFixed(2)+" before fees and slippage"));
+    }
     tile.append(node("p","fire-proof",
       active?"BROKER CONFIRMED: entry and two protective orders.":
       data.status==="flat_verified"?"EXCHANGE FLAT: no live position or orders.":

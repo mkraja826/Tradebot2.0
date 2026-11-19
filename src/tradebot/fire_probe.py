@@ -17,7 +17,7 @@ INSTRUCTION = (
     "Include a thesis string giving one concise sentence of reasoning. "
     "Use available margin, contract value, current position and spread. "
     "If the supplied snapshot contains fire_execution_scope, strictly respect "
-    "its max_contracts_per_entry pilot limit and attached stop/target requirement. "
+    "its max_contracts_per_entry and attached stop/target requirement. Choose the quantity within that ceiling based on your thesis, stop distance and estimated dollar loss at the stop; the ceiling is optional capacity. "
     "Do not invent leverage, margin or available contract balance."
 )
 
