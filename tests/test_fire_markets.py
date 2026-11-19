@@ -1,7 +1,8 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from tradebot.fire_execution import FireDemoController
 from tradebot.fire_market import FireMarket
@@ -51,6 +52,27 @@ class DemoAccount(FireMarket):
 
 
 class MarketTest(unittest.TestCase):
+    def test_gold_book_is_checked_at_receipt_and_ticker_is_read_once(self):
+        market = FireMarket("XAUTUSD")
+        start = datetime.now(timezone.utc)
+        received = start + timedelta(seconds=15)
+        ticker = {"product_id": 82, "symbol": "XAUTUSD", "contract_type": "perpetual_futures",
+                  "product_trading_status": "operational", "timestamp": start.timestamp()}
+        book = {"symbol": "XAUTUSD", "last_updated_at": received.timestamp(),
+                "buy": [{"price": "3799"}], "sell": [{"price": "3801"}]}
+        candles = [dict(time=int(start.timestamp()) - i * 300, open=3800, high=3800,
+                        low=3800, close=3800, volume=1) for i in range(13)]
+        with (patch("tradebot.fire_market.datetime") as clock,
+              patch.object(market, "ticker", return_value=ticker) as fetch,
+              patch.object(market, "_request", return_value={"result": book}),
+              patch.object(market, "candles", return_value=candles),
+              patch.object(market, "wallet_balances", return_value={"balances": [], "meta": {}}),
+              patch.object(market, "positions", return_value=[])):
+            clock.now.side_effect = [start, received]
+            self.assertEqual(market.snapshot()["core"]["symbol"], "XAUTUSD")
+            self.assertEqual(market.product_id, 82)
+            fetch.assert_called_once_with("XAUTUSD")
+
     def test_gold_entry_and_emergency_closeout_leave_bitcoin_order_alone(self):
         with tempfile.TemporaryDirectory() as tmp:
             broker = DemoAccount()

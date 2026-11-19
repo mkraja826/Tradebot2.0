@@ -20,11 +20,15 @@ class FireMarket(DeltaDemo):
     def product_id(self):
         if self._product_id is None:
             ticker = self.ticker(self.symbol)
-            if (ticker.get("symbol") != self.symbol or ticker.get("contract_type") != "perpetual_futures"
-                    or type(ticker.get("product_id")) is not int or ticker["product_id"] <= 0):
-                raise DeltaError("Cannot identify selected perpetual")
-            self._product_id = ticker["product_id"]
+            self._identify(ticker)
         return self._product_id
+
+    def _identify(self, ticker):
+        pid = ticker.get("product_id")
+        if (ticker.get("symbol") != self.symbol or ticker.get("contract_type") != "perpetual_futures"
+                or type(pid) is not int or pid <= 0 or self._product_id not in (None, pid)):
+            raise DeltaError("Cannot identify selected perpetual")
+        self._product_id = pid
 
     def positions(self):
         rows = self._request("GET", "/v2/positions", params={"product_id": self.product_id}, auth=True)["result"]
@@ -59,14 +63,14 @@ class FireMarket(DeltaDemo):
 
     def snapshot(self):
         from tradebot.market import _age_seconds, _balances, _candles, _prices
-        now = datetime.now(timezone.utc)
         ticker = self.ticker(self.symbol)
-        if (ticker.get("product_id") != self.product_id or ticker.get("symbol") != self.symbol
-                or ticker.get("product_trading_status") != "operational"
+        now = datetime.now(timezone.utc)
+        self._identify(ticker)
+        if (ticker.get("product_trading_status") != "operational"
                 or _age_seconds(ticker["timestamp"], now) > 60):
             raise DeltaError("Selected market unavailable")
         book = self._request("GET", "/v2/l2orderbook/" + self.symbol, params={"depth": 20})["result"]
-        if _age_seconds(book["last_updated_at"], now) > 60:
+        if _age_seconds(book["last_updated_at"], datetime.now(timezone.utc)) > 60:
             raise DeltaError("Stale order book")
         bid, ask = _prices(book, self.symbol)
         end = int(now.timestamp())

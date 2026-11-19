@@ -312,6 +312,7 @@ class FireDemoController:
         return True, "accepted"
 
     def _run(self, press):
+        stage = "market_snapshot"
         submitted = False
         exchange = None
         try:
@@ -335,12 +336,16 @@ class FireDemoController:
                 "attached_stop_loss_and_take_profit_required": True,
                 "separate_learning_model_has_no_trade_authority": True,
             }}
+            stage = "save_model_input"
             self.store.record_model_input(press, model_snapshot)
+            stage = "model_request"
             report = self.probe(dict(ROLES), lambda: model_snapshot)
             raw = (report.get("results") or {}).get("fire") or {}
+            stage = "model_decision"
             if "decision" not in raw:
                 raise FireTradeError("GPT-6 did not produce a valid decision")
             plan = validate(raw["decision"], snapshot["core"])
+            stage = "contract_size"
             if not 1 <= plan["contracts"] <= self.max_contracts:
                 raise FireTradeError("Pilot order size exceeds configured contract limit")
             self.store.update(
@@ -350,6 +355,7 @@ class FireDemoController:
                 snapshot_at=snapshot["collected_at"], decision_at=_now().isoformat(),
                 decision_quote={k: snapshot["core"].get(k) for k in ("best_bid","best_ask")},
                 thesis=str(raw.get("thesis") or "")[:350])
+            stage = "exchange_preflight"
             exchange = self.exchange_factory()
             _live_preflight(exchange, snapshot, plan)
             self.store.update(press, "submitting")
@@ -391,7 +397,7 @@ class FireDemoController:
             # No raw provider/broker error is logged or returned to browser.
             if not submitted:
                 self.store.update(press, "rejected_no_order",
-                                  reason_code="pretrade_failed",
+                                  reason_code=stage + "_failed",
                                   protection_verified=False,
                                   orders_submitted=False)
                 return

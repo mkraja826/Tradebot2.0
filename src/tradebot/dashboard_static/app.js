@@ -405,6 +405,8 @@ function renderFireExecution(data) {
   button.textContent=button.disabled?"FIRE · "+(data.status||"processing").replaceAll("_"," ").toUpperCase():"FIRE · "+fireMarket.value+" · EXECUTE DEMO";
   const active=data.status==="protected_active";
   status.textContent=stages[data.status]||"Unknown FIRE execution state; inspect account before pressing again.";
+  if(data.status==="rejected_no_order" && data.reason_code)
+    status.textContent+=" · "+String(data.reason_code).replaceAll("_"," ");
   container.replaceChildren();
   if(data.direction){
     const tile=node("div","fire-result");
