@@ -55,7 +55,9 @@ class FirePortfolioReservation:
                 row = db.execute(
                     "SELECT press,status FROM fire_requests WHERE press=?",
                     (press,)).fetchone()
-        return row
+        # An initialized but unused second-market receipt store is safe.
+        # A missing owner-specific receipt is NOT safe to release.
+        return ("", "empty") if press is None and row is None else row
 
     def claim(self, symbol, press, current_store):
         if symbol not in MARKETS:
@@ -92,7 +94,7 @@ class FirePortfolioReservation:
                     if store_path.exists():
                         return False
                     continue
-                if latest[1] not in TERMINAL_SAFE and not (
+                if latest[1] not in TERMINAL_SAFE | {"empty"} and not (
                     name == symbol and latest[0] == press
                 ):
                     return False
