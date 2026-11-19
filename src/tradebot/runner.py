@@ -23,7 +23,7 @@ from tradebot.execution import CloseoutError, DemoExecutor, _position_size
 from tradebot.journal import record, recent
 from tradebot.market import collect_market_snapshot
 from tradebot.preflight import check_entry, PreflightError
-from tradebot.session import SessionPhase, entry_phase
+from tradebot.session import SessionPhase, entry_phase, nyse_cash_is_open, session_phase
 
 
 class RunnerError(RuntimeError):
@@ -42,6 +42,7 @@ class RunnerConfig:
     max_options: int = 128
     journal_path: str = "data/trades.jsonl"
     schedule: str = "nyse"
+    nyse_cash_scan_only: bool = False
     max_hold_seconds: int = 900
     max_order_legs: int = 4
     max_contracts_per_leg: int = 1
@@ -57,6 +58,10 @@ class RunnerConfig:
             raise ValueError("max_options must be 8..512")
         if self.schedule not in ("nyse", "crypto-24x7"):
             raise ValueError("Schedule must be nyse or crypto-24x7")
+        if type(self.nyse_cash_scan_only) is not bool:
+            raise ValueError("nyse_cash_scan_only must be a boolean")
+        if self.nyse_cash_scan_only and (self.mode != "observe" or self.schedule != "nyse"):
+            raise ValueError("NYSE cash-only scanner cannot enable demo execution")
         if not 60 <= self.max_hold_seconds <= 3600:
             raise ValueError("max_hold_seconds must be 60..3600")
         if not 1 <= self.max_order_legs <= 4:
@@ -136,7 +141,18 @@ class BotRunner:
         if instant.tzinfo is None or instant.utcoffset() is None:
             raise RunnerError("Timezone-aware clock required")
         instant = instant.astimezone(timezone.utc)
-        phase = entry_phase(instant, schedule=self.config.schedule)
+        # DeepSeek's NYSE cash-hours research gate. No paid AI calls, snapshots,
+        # broker API polls, or exposure alerts outside cash hours. FIRE and
+        # Kimi use independent processes and are NOT constrained by this gate.
+        # During the last 15 minutes of the exchange session, research still
+        # runs; the execution-entry policy separately calls that FLATTEN.
+        if self.config.nyse_cash_scan_only:
+            if not nyse_cash_is_open(instant):
+                return {"phase": session_phase(instant).value,
+                        "action": "nyse_cash_closed_no_ai"}
+            phase = SessionPhase.TRADING
+        else:
+            phase = entry_phase(instant, schedule=self.config.schedule)
         if phase != SessionPhase.TRADING:
             if self.config.mode == "demo":
                 self.executor.closeout()
@@ -206,6 +222,13 @@ class BotRunner:
 
         positions = self.exchange.btc_positions()
         snapshot = self.snapshot_fn(self.exchange, now=instant, include_balances=True)
+        if self.config.nyse_cash_scan_only:
+            # Full NYSE cash-session research, including last 15 minutes,
+            # is not equivalent to permission for placing new demo orders.
+            snapshot = dict(snapshot)
+            snapshot["nyse_entry_phase"] = snapshot.get("session_phase")
+            snapshot["session_phase"] = "trading"
+            snapshot["trading_schedule"] = "nyse"
         if self.config.schedule == "crypto-24x7":
             # The BTC market is continuous regardless of NYSE phase. Retain
             # the NYSE status separately for diagnostics and AI consistency.
@@ -317,7 +340,7 @@ class BotRunner:
             state = {
                 "updated_at": datetime.now(timezone.utc).isoformat(),
                 "mode": self.config.mode,
-                "schedule": self.config.schedule,
+                "schedule": "nyse-cash-observe" if self.config.nyse_cash_scan_only else self.config.schedule,
                 "action": str(action)[:80],
                 "next_scan": (self.last_ai_utc + timedelta(seconds=self.config.ai_interval_seconds)).isoformat() if self.last_ai_utc else None,
                 "exit_due": (self.active_since + timedelta(seconds=self.config.max_hold_seconds)).isoformat() if self.active_since and self.config.schedule == "crypto-24x7" else None,
