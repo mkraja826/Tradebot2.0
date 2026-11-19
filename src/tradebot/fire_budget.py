@@ -53,6 +53,8 @@ def entry_budget(exchange, symbol, product_id, price):
     if product.get("position_notional_limit"):
         high = min(high, int(number(product["position_notional_limit"]) / per_contract))
     high = min(high, int(equity * MAX_EFFECTIVE_LEVERAGE / per_contract))
+    # One-contract supervised FIRE pilot; backend hard limit, not just UI.
+    high = min(high, 1)
     low = 0
     while low < high:
         mid = (low + high + 1) // 2

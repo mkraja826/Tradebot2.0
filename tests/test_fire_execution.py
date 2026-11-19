@@ -154,12 +154,19 @@ class FireExecutionTests(unittest.TestCase):
         self.assertEqual(len(self.exchange.requests), 1)
         self.assertFalse(self.make().start()[0])  # persistent across restart
 
-    def test_multiple_contracts_exceed_verified_risk_despite_margin_capacity(self):
+    def test_multiple_contracts_rejected_by_backend_pilot_cap(self):
         fire = self.make(plan=PLAN | {"contracts": 2})
         fire.start()
         self.assertEqual(fire.snapshot()["status"], "rejected_no_order")
+        self.assertEqual(fire.snapshot()["reason_code"], "contract_size_failed")
+        self.assertEqual(fire.snapshot()["budget"]["max_contracts_per_entry"], 1)
+        self.assertEqual(self.exchange.requests, [])
+
+    def test_one_contract_can_still_exceed_equity_at_risk(self):
+        fire = self.make(plan=PLAN | {"stop_loss": "62800"})
+        fire.start()
+        self.assertEqual(fire.snapshot()["status"], "rejected_no_order")
         self.assertEqual(fire.snapshot()["reason_code"], "risk_governor_failed")
-        self.assertEqual(fire.snapshot()["budget"]["max_contracts_per_entry"], 2)
         self.assertEqual(self.exchange.requests, [])
 
     def test_unsafe_broker_leverage_blocks_paid_ai_and_order(self):

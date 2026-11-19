@@ -49,6 +49,8 @@ def assess_fire_plan(plan, budget, quote, *, limits=None):
     side, contracts = plan.get("direction"), plan.get("contracts")
     if side not in ("LONG", "SHORT") or type(contracts) is not int or contracts < 1:
         raise RiskRejected("Invalid proposal size or direction")
+    if contracts > 1:
+        raise RiskRejected("Supervised demo FIRE pilot permits only one contract")
     if contracts > budget.get("max_contracts_per_entry", -1):
         raise RiskRejected("Above verified margin limit")
     equity = _amount(budget.get("equity_usd"), positive=True)

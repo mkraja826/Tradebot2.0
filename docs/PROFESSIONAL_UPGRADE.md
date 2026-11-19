@@ -41,3 +41,11 @@ demo execution. A 5x leverage setting is required at the exchange; no
 automatic leverage-setting API call was added. Existing VM processes remain
 unchanged until the operator deploys the repository and reruns supervised
 demo tests.
+
+## Increment 3A — Hard one-contract supervised pilot limit
+
+The original systemd installer advertised `TRADEBOT_FIRE_MAX_CONTRACTS=1`,
+but FIRE's backend sizing could still authorize more than one contract.
+Backend now caps its verified quantity budget at one contract and the
+separate risk gate also rejects any proposal above one contract.
+No existing order is modified; deploying code alone does not restart the VM.
