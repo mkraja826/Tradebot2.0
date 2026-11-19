@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from tradebot.delta import DeltaError
 from tradebot.fire_execution import FireDemoController
 from tradebot.fire_market import FireMarket
 from tradebot.fire_watchdog import watchdog_tick
@@ -29,7 +30,7 @@ class DemoAccount(FireMarket):
     def _request(self, method, path, *, params=None, payload=None, auth=False):
         if method == "GET" and path == "/v2/positions":
             assert params == {"product_id":82}
-            return {"result":{"product_id":82,"size": self.gold_size}}
+            return {"result":{"entry_price":"3800","size": self.gold_size}}
         if method == "GET" and path == "/v2/orders":
             return {"result":self.orders[:]}
         if method == "GET" and path.startswith("/v2/orders/client_order_id/"):
@@ -52,6 +53,14 @@ class DemoAccount(FireMarket):
 
 
 class MarketTest(unittest.TestCase):
+    def test_product_scoped_positions_preserve_short_and_reject_conflicting_id(self):
+        market = DemoAccount()
+        market.gold_size = -2
+        self.assertEqual(market.positions(), [{"product_id": 82, "size": -2, "entry_price": "3800"}])
+        with patch.object(market, "_request", return_value={"result": {"product_id": 27, "size": 1}}):
+            with self.assertRaises(DeltaError):
+                market.positions()
+
     def test_gold_book_is_checked_at_receipt_and_ticker_is_read_once(self):
         market = FireMarket("XAUTUSD")
         start = datetime.now(timezone.utc)

@@ -33,7 +33,10 @@ class FireMarket(DeltaDemo):
     def positions(self):
         rows = self._request("GET", "/v2/positions", params={"product_id": self.product_id}, auth=True)["result"]
         if isinstance(rows, dict):
-            rows = [rows]
+            # Delta's single-product result may contain only size and entry_price.
+            if "size" not in rows:
+                raise DeltaError("Missing position size for selected market")
+            rows = [{"product_id": self.product_id, **rows}]
         if not isinstance(rows, list) or any(not isinstance(row, dict) or
                 str(row.get("product_id")) != str(self.product_id) for row in rows):
             raise DeltaError("Unexpected position for selected market")
