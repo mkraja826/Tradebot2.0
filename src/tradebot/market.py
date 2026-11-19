@@ -43,8 +43,8 @@ def _age_seconds(timestamp, instant: datetime):
     return max(0.0, age)
 
 
-def _prices(book: dict):
-    if book.get("symbol") != "BTCUSD":
+def _prices(book: dict, symbol="BTCUSD"):
+    if book.get("symbol") != symbol:
         raise MarketDataError("Unexpected orderbook market")
     if not isinstance(book.get("buy"), list) or not isinstance(book.get("sell"), list):
         raise MarketDataError("Invalid BTC order book depth")

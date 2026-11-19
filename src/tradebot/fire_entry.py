@@ -7,6 +7,7 @@ from uuid import UUID
 
 from tradebot.delta import DeltaError
 from tradebot.fire_probe import validate
+from tradebot.fire_market import FireMarket, positions_for_fire
 
 
 class FireEntries:
@@ -39,14 +40,16 @@ class FireEntries:
                 raise DeltaError("Previous entry requires exchange reconciliation")
             core = snapshot["core"]
             ticker = core["ticker"]
-            if (snapshot["environment"] != "delta-india-demo" or ticker["symbol"] != "BTCUSD"
+            if (snapshot["environment"] != "delta-india-demo" or ticker["symbol"] != (self.exchange.symbol if isinstance(self.exchange, FireMarket) else "BTCUSD")
                     or ticker["contract_type"] != "perpetual_futures"):
                 raise DeltaError("Expected Delta India demo BTCUSD perpetual")
             plan = validate(decision, core)
             product_id = ticker["product_id"]
             if type(product_id) is not int or product_id <= 0:
                 raise DeltaError("Invalid BTCUSD product ID")
-            positions = self.exchange.btc_positions()
+            if isinstance(self.exchange, FireMarket) and self.exchange.product_id != product_id:
+                raise DeltaError("Mismatched market identity")
+            positions = positions_for_fire(self.exchange)
             if (not isinstance(positions, list) or snapshot["position_contracts"]
                     or any(int(p["size"]) != 0 for p in positions)):
                 raise DeltaError("First entry requires zero BTC positions")
@@ -54,7 +57,7 @@ class FireEntries:
             # pre-existing order or stop order on this dedicated demo account.
             if self.exchange.open_orders():
                 raise DeltaError("First entry requires zero existing open orders")
-            receipt = dict(press=press, product_id=product_id, plan=plan, status="submitting")
+            receipt = dict(press=press, product_id=product_id, symbol=ticker["symbol"], plan=plan, status="submitting")
             self._save(db, receipt)
             try:
                 result = self.exchange._request("POST", "/v2/orders", auth=True, payload={

@@ -183,8 +183,8 @@ class DeltaDemo:
     def candles(self, *, symbol: str = "BTCUSD", resolution: str = "5m",
                 start: int, end: int) -> list[dict]:
         """Return <=2000 time-ordered BTC OHLCV candles. Times are epoch seconds."""
-        if symbol != "BTCUSD":
-            raise ValueError("Initial candle feed is BTCUSD only")
+        if symbol not in {"BTCUSD", "XAUTUSD"}:
+            raise ValueError("Unsupported candle symbol")
         if resolution not in {"1m", "3m", "5m", "15m", "30m",
                               "1h", "2h", "4h", "6h", "1d", "1w"}:
             raise ValueError("Unsupported Delta candle resolution")

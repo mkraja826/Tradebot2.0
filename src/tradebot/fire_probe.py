@@ -11,7 +11,7 @@ from tradebot.delta import DeltaDemo
 
 ROLES = {"fire": "tb-gpt-6"}
 INSTRUCTION = (
-    "Choose a BTCUSD perpetual futures position for this Delta India demo snapshot. "
+    "Choose a perpetual futures position for the exact symbol in core.ticker.symbol for this Delta India demo snapshot. "
     "Return only a JSON object with direction (LONG or SHORT), contracts (positive "
     "integer absolute target position size), stop_loss and take_profit (prices). "
     "Use available margin, contract value, current position and spread. "
@@ -77,7 +77,11 @@ def run_probe(routes, snapshot_loader, client_factory=TopBillingClient):
             "results": {"fire": fire_result}}
 
 
-def load_snapshot():
+def load_snapshot(symbol="BTCUSD"):
+    if symbol != "BTCUSD":
+        from tradebot.fire_market import FireMarket
+        return FireMarket(symbol, api_key=os.environ["DELTA_DEMO_API_KEY"],
+                          api_secret=os.environ["DELTA_DEMO_API_SECRET"]).snapshot()
     from tradebot.market import collect_market_snapshot
 
     exchange = DeltaDemo(api_key=os.environ["DELTA_DEMO_API_KEY"],

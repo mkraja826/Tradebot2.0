@@ -155,3 +155,5 @@ body{background:var(--bg)}.eyebrow{color:#ddb982}.panel,.metric.card{border-colo
 @media(max-width:650px){.learning-stats{gap:6px}.learning-stats>div{padding:10px}.learning-stats small{font-size:8px}.learning-stats strong{font-size:18px}.learning-hypotheses{grid-template-columns:1fr}}
 
 @media(max-width:750px){.learning-stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+#fire-market { min-height: 44px; padding: .5rem; color: inherit; background: #152230; border: 1px solid #496171; border-radius: .4rem; font: inherit; }

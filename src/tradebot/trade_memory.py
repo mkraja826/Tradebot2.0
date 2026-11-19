@@ -133,6 +133,14 @@ class TradeMemory:
                     last_size TEXT, last_mark TEXT, last_observed TEXT,
                     last_review_mark TEXT, last_review_at TEXT
                 );
+                CREATE TABLE IF NOT EXISTS market_position_state (
+                    symbol TEXT PRIMARY KEY, trade_id TEXT, active INTEGER NOT NULL,
+                    last_size TEXT, last_mark TEXT, last_observed TEXT,
+                    last_review_mark TEXT, last_review_at TEXT
+                );
+                INSERT OR IGNORE INTO market_position_state
+                    SELECT 'BTCUSD',trade_id,active,last_size,last_mark,last_observed,
+                           last_review_mark,last_review_at FROM position_state;
                 CREATE TRIGGER IF NOT EXISTS learning_events_immutable_update
                     BEFORE UPDATE ON events BEGIN
                     SELECT RAISE(ABORT, 'Evidence cannot be edited');
@@ -351,19 +359,19 @@ class TradeMemory:
             )} for item in self.lessons(status="validated", limit=limit)
         ]
 
-    def watch_state(self):
+    def watch_state(self, symbol="BTCUSD"):
         with self._db() as db:
-            row = db.execute("SELECT * FROM position_state WHERE singleton=1").fetchone()
+            row = db.execute("SELECT * FROM market_position_state WHERE symbol=?", (symbol,)).fetchone()
         return dict(row) if row else None
 
     def save_watch_state(self, *, trade_id, active, size, mark,
-                         observed_at, review_mark=None, review_at=None):
+                         observed_at, review_mark=None, review_at=None, symbol="BTCUSD"):
         if trade_id is not None:
             _safe_name(trade_id, "trade ID")
         with self._db() as db:
             db.execute(
-                "INSERT OR REPLACE INTO position_state VALUES (1,?,?,?,?,?,?,?)",
-                (trade_id, int(bool(active)), str(size) if size is not None else None,
+                "INSERT OR REPLACE INTO market_position_state VALUES (?,?,?,?,?,?,?,?)",
+                (symbol, trade_id, int(bool(active)), str(size) if size is not None else None,
                  str(mark) if mark is not None else None, observed_at,
                  str(review_mark) if review_mark is not None else None, review_at)
             )
@@ -411,6 +419,8 @@ def public_learning_summary(path):
             active = db.execute(
                 "SELECT active, last_observed FROM position_state WHERE singleton=1"
             ).fetchone()
+            if db.execute("SELECT 1 FROM sqlite_master WHERE name='market_position_state'").fetchone():
+                active = db.execute("SELECT MAX(active),MAX(last_observed) FROM market_position_state").fetchone()
             events = db.execute("SELECT COUNT(*) FROM events").fetchone()[0]
             candidates = db.execute(
                 "SELECT COUNT(*) FROM lessons WHERE status='candidate'").fetchone()[0]

@@ -13,6 +13,7 @@ import time
 
 from tradebot.delta import DEMO_API, DeltaDemo
 from tradebot.execution import DemoExecutor
+from tradebot.fire_market import FireMarket, positions_for_fire
 from tradebot.fire_execution import (
     EXPOSED, FireTradeStore, active_position, protective_orders_verified
 )
@@ -54,7 +55,7 @@ def watchdog_tick(exchange, store, *, pause=None):
         # sending a POST. Without such a receipt, signed flatness evidence is
         # required to mark the stale request aborted. Never close a position
         # of unknown ownership merely because a browser worker disappeared.
-        positions = exchange.btc_positions()
+        positions = positions_for_fire(exchange)
         orders = exchange.open_orders()
         if (isinstance(positions, list) and isinstance(orders, list) and
                 not orders and all(
@@ -69,6 +70,8 @@ def watchdog_tick(exchange, store, *, pause=None):
         return {"status": "manual_reconciliation_required"}
 
     product_id = receipt["product_id"]
+    if isinstance(exchange, FireMarket) and exchange.product_id != product_id:
+        raise ValueError("Watchdog receipt market mismatch")
     position = active_position(exchange, product_id)
     orders = exchange.open_orders()
     if position is None and not orders:
@@ -106,11 +109,12 @@ def watchdog_tick(exchange, store, *, pause=None):
     store.update(press, "exposure_unknown", protection_verified=False,
                  reason_code="bracket_missing_or_position_changed")
     try:
-        DemoExecutor(
-            exchange, schedule="crypto-24x7",
-            journal_path=str(Path(store.path).parent / "trades.jsonl"),
-            pause=pause or time.sleep,
-        ).closeout(max_attempts=3)
+        if isinstance(exchange, FireMarket):
+            exchange.close_exposure(pause or time.sleep)
+        else:
+            DemoExecutor(exchange, schedule="crypto-24x7",
+                         journal_path=str(Path(store.path).parent / "trades.jsonl"),
+                         pause=pause or time.sleep).closeout(max_attempts=3)
         store.update(press, "flat_verified",
                      protection_verified=False,
                      reason_code="watchdog_emergency_flat_verified")
@@ -127,20 +131,19 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if not 5 <= args.interval <= 60:
         parser.error("interval must be 5..60 seconds")
-    store = FireTradeStore(args.database)
-    exchange = DeltaDemo(
-        api_key=os.environ.get("DELTA_DEMO_API_KEY", ""),
-        api_secret=os.environ.get("DELTA_DEMO_API_SECRET", ""),
-        allow_orders=True,
-    )
+    markets = [(FireTradeStore(path), FireMarket(symbol,
+                api_key=os.environ.get("DELTA_DEMO_API_KEY", ""),
+                api_secret=os.environ.get("DELTA_DEMO_API_SECRET", ""), allow_orders=True))
+               for symbol, path in (("BTCUSD", args.database),
+                                    ("XAUTUSD", Path(args.database).with_name("fire-xaut.sqlite")))]
     while True:
-        try:
-            state = watchdog_tick(exchange, store)
-        except Exception:
-            state = {"status": "broker_reconciliation_unavailable",
-                     "action": "human_attention_required"}
-        # Never print raw exchange responses or secrets.
-        print(json.dumps(state, separators=(",", ":")), flush=True)
+        for store, exchange in markets:
+            try:
+                state = watchdog_tick(exchange, store)
+            except Exception:
+                state = {"status": "broker_reconciliation_unavailable",
+                         "action": "human_attention_required"}
+            print(json.dumps({"symbol": exchange.symbol, **state}), flush=True)
         time.sleep(args.interval)
 
 

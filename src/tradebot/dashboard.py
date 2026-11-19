@@ -20,6 +20,7 @@ from urllib.parse import parse_qs, quote, urlsplit
 from tradebot.delta import DeltaDemo
 from tradebot.fire_dashboard import FirePreviewController
 from tradebot.fire_execution import FireDemoController
+from tradebot.fire_probe import load_snapshot
 from tradebot.trade_memory import public_learning_summary
 from tradebot.market import _age_seconds, _candles, MarketDataError
 
@@ -197,6 +198,11 @@ class DashboardData:
             enabled=os.getenv("TRADEBOT_FIRE_DEMO_EXECUTION", "false") == "true",
             max_contracts=int(os.getenv("TRADEBOT_FIRE_MAX_CONTRACTS", "1")),
         )
+        self.gold_preview = FirePreviewController(snapshot_loader=lambda: load_snapshot("XAUTUSD"))
+        self.gold_trade = FireDemoController(
+            self.root / "fire-xaut.sqlite", symbol="XAUTUSD",
+            enabled=self.fire_trade.enabled, max_contracts=self.fire_trade.max_contracts,
+        )
         self.exchange = exchange or DeltaDemo(
             api_key=os.getenv("DELTA_DEMO_API_KEY", ""),
             api_secret=os.getenv("DELTA_DEMO_API_SECRET", ""),
@@ -349,6 +355,10 @@ class DashboardData:
         }
 
 
+FIRE_ENDPOINTS = {"/api/fire": "fire_trade", "/api/fire-preview": "fire_preview",
+                  "/api/fire/XAUTUSD": "gold_trade", "/api/fire-preview/XAUTUSD": "gold_preview"}
+
+
 def create_handler(state, *, allowed_hosts=None):
     hosts = {"127.0.0.1", "localhost", "[::1]"}
     if allowed_hosts:
@@ -391,14 +401,12 @@ def create_handler(state, *, allowed_hosts=None):
                     separators=(",", ":")
                 ).encode()
                 mime = "application/json; charset=utf-8"
-            elif path == "/api/fire-preview":
-                data = json.dumps(state.fire_preview.snapshot(), separators=(",", ":")).encode()
-                mime = "application/json; charset=utf-8"
-            elif path == "/api/fire":
-                if not hasattr(state, "fire_trade"):
+            elif path in FIRE_ENDPOINTS:
+                controller = getattr(state, FIRE_ENDPOINTS[path], None)
+                if controller is None:
                     self._headers(0, "application/json", 503)
                     return
-                data = json.dumps(state.fire_trade.snapshot(), separators=(",", ":")).encode()
+                data = json.dumps(controller.snapshot(), separators=(",", ":")).encode()
                 mime = "application/json; charset=utf-8"
             elif path == "/api/candles":
                 try:
@@ -441,7 +449,7 @@ def create_handler(state, *, allowed_hosts=None):
             origin = urlsplit(self.headers.get("Origin") or "")
             expected_scheme = "http" if authority in ("127.0.0.1", "localhost") else "https"
             path = urlsplit(self.path).path
-            if path not in ("/api/fire-preview", "/api/fire"):
+            if path not in FIRE_ENDPOINTS:
                 data = b"Unsupported route"
                 self._headers(len(data), "text/plain", 405)
                 self.wfile.write(data)
@@ -449,16 +457,14 @@ def create_handler(state, *, allowed_hosts=None):
             if (authority not in hosts or origin.scheme != expected_scheme or
                     origin.netloc.lower() != host_header.lower() or
                     self.headers.get("X-Tradebot-Action") != (
-                        "fire-execute" if path == "/api/fire" else "fire-preview") or
+                        "fire-execute" if FIRE_ENDPOINTS[path].endswith("_trade") else "fire-preview") or
                     self.headers.get("Sec-Fetch-Site", "same-origin") != "same-origin" or
                     self.headers.get("Content-Length", "0") != "0"):
                 data = b"Forbidden"
                 self._headers(len(data), "text/plain", 403)
                 self.wfile.write(data)
                 return
-            controller = (
-                getattr(state, "fire_trade", None) if path == "/api/fire"
-                else getattr(state, "fire_preview", None))
+            controller = getattr(state, FIRE_ENDPOINTS[path], None)
             if controller is None:
                 self._headers(0, "application/json", 503)
                 return

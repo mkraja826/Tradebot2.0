@@ -67,12 +67,14 @@
           </section></div>
         <section class="panel fire-panel" id="fire">
           <div class="panel-header">
-            <div><div class="eyebrow">MANUAL DECISION LAB · BTCUSD PERPETUAL</div><h2>FIRE <span class="fire-accent">GPT-6</span></h2></div>
+            <div><div class="eyebrow">MANUAL DECISION LAB · PERPETUAL FUTURES</div><h2>FIRE <span class="fire-accent">GPT-6</span></h2></div>
             <span class="tiny-label" id="fire-mode-label">READ-ONLY PROBE</span>
           </div>
-          <p class="fire-description" id="fire-description">GPT-6 decides BTC direction, contract size, stop-loss and take-profit from a fresh Delta India Demo snapshot. Kimi does not make trading decisions.</p>
+          <p class="fire-description" id="fire-description">GPT-6 decides the selected market’s direction, contract size, stop-loss and take-profit from a fresh Delta India Demo snapshot. Kimi does not make trading decisions.</p>
           <div class="fire-controls">
-            <button id="fire-preview" type="button">FIRE · Analyze only</button>
+            <label for="fire-market">Market</label>
+            <select id="fire-market"><option value="BTCUSD">BTCUSD · Bitcoin</option><option value="XAUTUSD">XAUTUSD · Tether Gold</option></select>
+            <button disabled id="fire-preview" type="button">FIRE · Analyze only</button>
             <div class="fire-disclosure" id="fire-disclosure">One paid GPT-6 Top Billing completion may be made per press. Demo order execution is disabled until explicitly activated.</div>
           </div>
           <p id="fire-status" role="status" aria-live="polite">Ready for a manually requested GPT-6 analysis.</p>
@@ -83,7 +85,7 @@
             <div><div class="eyebrow">TRADE INTELLIGENCE · READ-ONLY RESEARCH</div><h2>Kimi <span class="fire-accent">Learning Lab</span></h2></div>
             <span class="tiny-label">DOES NOT CONTROL GPT-6</span>
           </div>
-          <p class="fire-description">Kimi observes verified BTC Demo position evidence and develops testable hypotheses. Every suggestion is unverified until independently evaluated. None are automatically fed into GPT-6 or used to place orders.</p>
+          <p class="fire-description">Kimi observes BTCUSD and XAUTUSD demo position evidence and develops testable hypotheses. Every suggestion is unverified until independently evaluated. None are automatically fed into GPT-6 or used to place orders.</p>
           <div class="learning-stats" aria-label="Learning evidence counters">
             <div><small>EVIDENCE RECORDS</small><strong id="learning-events">—</strong></div>
             <div><small>CANDIDATE LESSONS</small><strong id="learning-candidates">—</strong></div>

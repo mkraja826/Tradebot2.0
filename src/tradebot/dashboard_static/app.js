@@ -374,20 +374,24 @@ function renderDesk(data){
 byId("dismiss-record").onclick=resumeLive;
 update();
 
+const fireMarket = byId("fire-market");
+const marketPath = (base, symbol) => symbol === "XAUTUSD" ? base + "/XAUTUSD" : base;
+let fireRevision = 0;
+let postingFire = false;
 let fireTradingEnabled = false;
 function renderFireExecution(data) {
   const button=byId("fire-preview"), container=byId("fire-results"), status=byId("fire-status");
   if(!button || !container || !status)return;
   fireTradingEnabled=true;
   text("fire-mode-label","DELTA INDIA DEMO · ORDER EXECUTION");
-  text("fire-description","One tap asks GPT-6 to decide BTCUSD direction, contract size, stop-loss and take-profit. The demo broker must verify an entry fill and BOTH protective orders. Kimi cannot trade.");
+  text("fire-description","One tap asks GPT-6 to decide "+fireMarket.value+" direction, contract size, stop-loss and take-profit. The demo broker must verify an entry fill and BOTH protective orders. Kimi cannot trade.");
   text("fire-disclosure","REAL DELTA DEMO ORDERS — no real funds. One paid GPT-6 completion per press. Uncertain exchange outcomes block additional FIRE requests. Contract pilot cap: "+data.max_contracts_per_fire+".");
   const stages={
     idle:"Ready for a manual GPT-6 Demo trade.",
     requested:"FIRE accepted. Starting GPT-6…",
     reasoning:"GPT-6 is deciding the trade…",
-    preflight:"Checking fresh BTC quote, account orders, and margin eligibility…",
-    submitting:"Submitting the BTCUSD market entry with attached SL/TP…",
+    preflight:"Checking fresh "+fireMarket.value+" quote, account orders, and margin eligibility…",
+    submitting:"Submitting the "+fireMarket.value+" market entry with attached SL/TP…",
     reconciling:"Checking the entry against Delta Demo. Never resubmitting on timeout…",
     verifying_protection:"Checking the fill and BOTH broker protective orders…",
     protected_active:"Entry filled; STOP-LOSS and TAKE-PROFIT are verified on Delta Demo.",
@@ -404,7 +408,7 @@ function renderFireExecution(data) {
   container.replaceChildren();
   if(data.direction){
     const tile=node("div","fire-result");
-    tile.append(node("div","fire-result-title","GPT-6 · DELTA DEMO"));
+    tile.append(node("div","fire-result-title","GPT-6 · "+fireMarket.value+" · DELTA DEMO"));
     tile.append(node("strong","fire-direction",data.direction+" · "+data.contracts+" contract(s)"));
     const grid=node("div","fire-points");
     for(const [label,value] of [["STOP LOSS",data.stop_loss],["TAKE PROFIT",data.take_profit]]){
@@ -421,7 +425,7 @@ function renderFireExecution(data) {
   }
   if(data.status==="exposure_unknown") {
     container.append(node("p","fire-error",
-      "Manual broker verification required. Do not fire again until all BTC Demo positions and pending orders are reconciled."));
+      "Manual broker verification required. Do not fire again until selected-market demo positions and pending orders are reconciled."));
   }
 }
 
@@ -468,11 +472,13 @@ function renderFire(data) {
 }
 async function refreshFire() {
   const button=byId("fire-preview");
-  if(!button)return;
+  if(!button || postingFire)return;
+  const revision = ++fireRevision, symbol = fireMarket.value;
   try {
-    const modeResponse=await fetch("/api/fire",{credentials:"same-origin",cache:"no-store"});
+    const modeResponse=await fetch(marketPath("/api/fire",symbol),{credentials:"same-origin",cache:"no-store"});
     if(!modeResponse.ok)throw new Error("FIRE mode unavailable");
     const mode=await modeResponse.json();
+    if(revision !== fireRevision)return;
     if(mode.execution_enabled===true){
       renderFireExecution(mode);
       return;
@@ -480,25 +486,30 @@ async function refreshFire() {
     fireTradingEnabled=false;
     text("fire-mode-label","READ-ONLY PROBE");
     text("fire-disclosure","Read-only research. One paid GPT-6 completion may be made. No demo orders are submitted.");
-    const response=await fetch("/api/fire-preview",{credentials:"same-origin",cache:"no-store"});
+    const response=await fetch(marketPath("/api/fire-preview",symbol),{credentials:"same-origin",cache:"no-store"});
     if(!response.ok)throw new Error("Fire status unavailable");
-    renderFire(await response.json());
+    const result=await response.json();
+    if(revision === fireRevision)renderFire(result);
   } catch(err) {
+    if(revision !== fireRevision)return;
     text("fire-status","GPT-6 analysis unavailable. No trading order can be placed from this panel.");
     button.disabled=true;
   }
 }
 const fireButton=byId("fire-preview");
 if(fireButton)fireButton.addEventListener("click",async()=>{
-  if(fireButton.disabled)return;
+  if(fireButton.disabled || postingFire)return;
   if(!fireTradingEnabled &&
       !window.confirm("Run a read-only GPT-6 analysis? This may use one paid Top Billing completion. It will NOT place orders."))return;
+  ++fireRevision;
+  postingFire=true;
+  fireMarket.disabled=true;
   fireButton.disabled=true;
   text("fire-status",fireTradingEnabled?
     "Executing one GPT-6 Delta DEMO trade request…":"Requesting a read-only GPT-6 analysis…");
   try {
     const path=fireTradingEnabled?"/api/fire":"/api/fire-preview";
-    const response=await fetch(path,{
+    const response=await fetch(marketPath(path,fireMarket.value),{
       method:"POST", credentials:"same-origin",cache:"no-store",
       headers:{"X-Tradebot-Action":fireTradingEnabled?"fire-execute":"fire-preview"}
     });
@@ -513,8 +524,17 @@ if(fireButton)fireButton.addEventListener("click",async()=>{
     text("fire-status",fireTradingEnabled?
       "FIRE request status uncertain. Check Delta Demo positions and refresh; do not press again.":
       "Unable to start GPT-6 preview. No orders placed.");
-    fireButton.disabled=false;
+    fireButton.disabled=true;
+  } finally {
+    postingFire=false;
+    fireMarket.disabled=false;
   }
+});
+fireMarket.addEventListener("change", () => {
+  fireButton.disabled = true;
+  byId("fire-results").replaceChildren();
+  text("fire-status", "Loading " + fireMarket.value + "…");
+  refreshFire();
 });
 refreshFire();setInterval(refreshFire,6000);
 
@@ -538,11 +558,11 @@ async function refreshLearning() {
       "Watcher active · paid Kimi reviews enabled when a position is observed.":
       "Watcher active · recording only; paid Kimi reviews disabled.";
     text("learning-status",(data.status==="available"?
-      (data.active_position?"BTC Demo position observed. ":"No active BTC position observed. "):
+      (data.active_position?"demo position observed. ":"No active demo position observed. "):
       "Learning database not initialized. ")+monitoring+freshness);
     container.replaceChildren();
     if(!Array.isArray(data.recent_hypotheses)||!data.recent_hypotheses.length) {
-      container.append(node("p","empty","No Kimi hypotheses yet. Research starts after a BTC Demo position is observed."));
+      container.append(node("p","empty","No Kimi hypotheses yet. Research starts after a demo position is observed."));
     } else {
       for(const item of data.recent_hypotheses.slice(0,3)) {
         const entry=node("article","learning-hypothesis");

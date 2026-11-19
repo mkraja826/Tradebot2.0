@@ -13,7 +13,8 @@ from pathlib import Path
 import time
 from uuid import uuid4
 
-from tradebot.delta import DEMO_API, DeltaDemo
+from tradebot.delta import DEMO_API
+from tradebot.fire_market import FireMarket, SYMBOLS, positions_for_fire
 from tradebot.kimi_learning import KimiLearningReviewer
 from tradebot.market import _age_seconds
 from tradebot.trade_memory import TradeMemory
@@ -50,6 +51,7 @@ class LearningWatcher:
         if (getattr(exchange, "base_url", None) != DEMO_API or
                 getattr(exchange, "allow_orders", None) is not False):
             raise LearningWatchError("Learning watcher must use read-only Delta India DEMO")
+        self.symbol = exchange.symbol if isinstance(exchange, FireMarket) else "BTCUSD"
         self.exchange = exchange
         self.memory = memory
         self.on_review = on_review
@@ -63,10 +65,10 @@ class LearningWatcher:
 
         # Signed GET only. Incomplete reads throw; NEVER convert an outage to
         # an empty position, because that would fabricate a trade exit.
-        ticker = self.exchange.ticker("BTCUSD")
-        positions = self.exchange.btc_positions()
+        ticker = self.exchange.ticker(self.symbol)
+        positions = positions_for_fire(self.exchange)
         orders = self.exchange.open_orders()
-        if (not isinstance(ticker, dict) or ticker.get("symbol") != "BTCUSD" or
+        if (not isinstance(ticker, dict) or ticker.get("symbol") != self.symbol or
                 not isinstance(positions, list) or not isinstance(orders, list)):
             raise LearningWatchError("Incomplete Delta Demo account evidence")
         if _age_seconds(ticker.get("timestamp"), now) > 60:
@@ -96,7 +98,7 @@ class LearningWatcher:
         position = matching[0] if matching else None
         size = _position_size(position) if position is not None else 0
 
-        previous = self.memory.watch_state()
+        previous = self.memory.watch_state(self.symbol)
         previous_active = bool(previous and previous["active"])
         prior_id = previous["trade_id"] if previous_active else None
         if size == 0:
@@ -106,16 +108,16 @@ class LearningWatcher:
             if previous_active:
                 self.memory.append_event(
                     prior_id, "position_closed_observed", {
-                        "symbol": "BTCUSD", "product_id": product_id,
+                        "symbol": self.symbol, "product_id": product_id,
                         "prior_size": previous["last_size"], "mark_price": str(mark),
                         "bid": str(bid), "ask": str(ask),
                         "observed_at": timestamp, "realized_pnl_verified": False,
                     })
-                self.memory.save_watch_state(
+                self.memory.save_watch_state(symbol=self.symbol,
                     trade_id=None, active=False, size=0, mark=mark, observed_at=timestamp)
                 self._notify(prior_id, "exit", "exit-" + prior_id)
                 return {"status": "flat_observed_not_pnl_verified", "trade_id": prior_id}
-            self.memory.save_watch_state(
+            self.memory.save_watch_state(symbol=self.symbol,
                 trade_id=None, active=False, size=0, mark=mark, observed_at=timestamp)
             return {"status": "flat_idle", "orders": len(orders)}
 
@@ -128,15 +130,15 @@ class LearningWatcher:
             })
             previous_active = False
 
-        trade_id = prior_id if previous_active else "btc-" + uuid4().hex
+        trade_id = prior_id if previous_active else self.symbol[:-3].lower() + "-" + uuid4().hex
         if not previous_active:
             self.memory.append_event(trade_id, "position_first_observed", {
-                "symbol": "BTCUSD", "product_id": product_id,
+                "symbol": self.symbol, "product_id": product_id,
                 "size": str(size), "entry_price": str(position.get("entry_price") or ""),
                 "mark_price": str(mark), "bid": str(bid), "ask": str(ask),
                 "observed_at": timestamp,
             })
-            self.memory.save_watch_state(
+            self.memory.save_watch_state(symbol=self.symbol,
                 trade_id=trade_id, active=True, size=size, mark=mark, observed_at=timestamp,
                 review_mark=mark, review_at=timestamp)
             self._notify(trade_id, "entry", "entry-" + trade_id)
@@ -154,12 +156,12 @@ class LearningWatcher:
         due_review = (delta >= Decimal("0.006") or elapsed >= 1800)
         if due_review or changed_size:
             self.memory.append_event(trade_id, "position_observed", {
-                "symbol": "BTCUSD", "product_id": product_id,
+                "symbol": self.symbol, "product_id": product_id,
                 "size": str(size), "entry_price": str(position.get("entry_price") or ""),
                 "mark_price": str(mark), "bid": str(bid), "ask": str(ask),
                 "observed_at": timestamp,
             })
-        self.memory.save_watch_state(
+        self.memory.save_watch_state(symbol=self.symbol,
             trade_id=trade_id, active=True, size=size, mark=mark, observed_at=timestamp,
             review_mark=mark if due_review else previous["last_review_mark"],
             review_at=timestamp if due_review else previous["last_review_at"])
@@ -187,9 +189,6 @@ def main(argv=None):
     if args.interval < 10 or args.interval > 300:
         parser.error("--interval must be 10..300 seconds")
 
-    exchange = DeltaDemo(api_key=os.environ.get("DELTA_DEMO_API_KEY", ""),
-                         api_secret=os.environ.get("DELTA_DEMO_API_SECRET", ""),
-                         allow_orders=False)
     memory = TradeMemory(args.database)
     reviewer = KimiLearningReviewer(memory)
     # The single worker keeps read-only broker polling independent of paid AI
@@ -200,14 +199,21 @@ def main(argv=None):
                 reviewer.review, trade_id, phase, key))
             if args.paid_kimi else None
         )
-        watcher = LearningWatcher(exchange, memory, on_review=callback)
+        watchers = [LearningWatcher(FireMarket(symbol,
+                        api_key=os.environ.get("DELTA_DEMO_API_KEY", ""),
+                        api_secret=os.environ.get("DELTA_DEMO_API_SECRET", "")),
+                        memory, on_review=callback) for symbol in SYMBOLS]
         while True:
-            try:
-                output = watcher.poll()
-            except Exception as exc:
-                # Do not display upstream broker contents or auth details.
-                output = {"status": "broker_evidence_unavailable",
-                          "error_type": type(exc).__name__, "orders_submitted": False}
+            statuses = {}
+            for watcher in watchers:
+                try:
+                    statuses[watcher.symbol] = watcher.poll()
+                except Exception as exc:
+                    statuses[watcher.symbol] = {"status": "broker_evidence_unavailable",
+                                                "error_type": type(exc).__name__}
+            output = {"status": "broker_evidence_unavailable" if any(
+                item["status"] == "broker_evidence_unavailable" for item in statuses.values())
+                else "observing", "markets": statuses, "orders_submitted": False}
             output["kimi_paid_enabled"] = args.paid_kimi
             # Non-secret atomic heartbeat for dashboard visibility. A stale
             # heartbeat cannot be presented as evidence that Kimi is running.

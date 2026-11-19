@@ -22,6 +22,7 @@ from uuid import uuid4
 from tradebot.delta import DEMO_API, DeltaDemo, DeltaError
 from tradebot.execution import DemoExecutor
 from tradebot.fire_entry import FireEntries
+from tradebot.fire_market import FireMarket, positions_for_fire
 from tradebot.fire_probe import ROLES, load_snapshot, run_probe, validate
 from tradebot.market import _age_seconds
 
@@ -56,7 +57,7 @@ def _dec(raw):
 
 
 def active_position(exchange, product_id):
-    rows = exchange.btc_positions()
+    rows = positions_for_fire(exchange)
     if not isinstance(rows, list):
         raise FireTradeError("Invalid broker position list")
     active = []
@@ -199,9 +200,10 @@ class FireTradeStore:
 def _live_preflight(exchange, snapshot, plan):
     if getattr(exchange, "base_url", None) != DEMO_API or not exchange.allow_orders:
         raise FireTradeError("Demo-only trading API required")
-    ticker = exchange.ticker("BTCUSD")
-    if not isinstance(ticker, dict) or ticker.get("symbol") != "BTCUSD":
-        raise FireTradeError("Invalid BTCUSD ticker")
+    symbol = snapshot["core"]["ticker"]["symbol"]
+    ticker = exchange.ticker(symbol)
+    if not isinstance(ticker, dict) or (ticker.get("symbol"), ticker.get("product_id")) != (symbol, snapshot["core"]["ticker"]["product_id"]):
+        raise FireTradeError("Selected market ticker mismatch")
     if _age_seconds(ticker.get("timestamp"), _now()) > 30:
         raise FireTradeError("Stale broker quote")
     q = ticker.get("quotes") or {}
@@ -219,7 +221,7 @@ def _live_preflight(exchange, snapshot, plan):
                _dec(snapshot["core"]["best_ask"])) / 2
     current = (bid + ask) / 2
     if abs(current / earlier - 1) > Decimal("0.005"):
-        raise FireTradeError("BTC moved after GPT-6 analysis")
+        raise FireTradeError("Market moved after GPT-6 analysis")
     if exchange.open_orders():
         raise FireTradeError("Existing exchange orders require reconciliation")
     if active_position(exchange, snapshot["core"]["ticker"]["product_id"]):
@@ -253,11 +255,12 @@ class FireDemoController:
 
     def __init__(self, path, *, enabled=False, exchange_factory=None,
                  snapshot_loader=load_snapshot, probe=run_probe,
-                 max_contracts=1, pause=sleep, spawn=None):
+                 max_contracts=1, pause=sleep, spawn=None, symbol="BTCUSD"):
+        self.symbol = symbol
         self.enabled = bool(enabled)
         self.store = FireTradeStore(path)
         self.path = Path(path)
-        self.exchange_factory = exchange_factory or (lambda: DeltaDemo(
+        self.exchange_factory = exchange_factory or (lambda: FireMarket(self.symbol,
             api_key=os.environ["DELTA_DEMO_API_KEY"],
             api_secret=os.environ["DELTA_DEMO_API_SECRET"],
             allow_orders=True,
@@ -270,7 +273,7 @@ class FireDemoController:
 
     def snapshot(self):
         result = self.store.latest()
-        return {**result,
+        return {**result, "symbol": self.symbol,
                 "mode": "delta_india_demo_execution" if self.enabled else "disabled",
                 "execution_enabled": self.enabled, "model": "tb-gpt-6",
                 "account": "Delta India Demo only",
@@ -295,7 +298,9 @@ class FireDemoController:
             self.store.update(press, "reasoning", model="tb-gpt-6",
                               orders_submitted=False, protection_verified=False)
             # One fresh snapshot is used by both GPT-6 and this execution.
-            snapshot = self.snapshot_loader()
+            snapshot = self.snapshot_loader() if self.symbol == "BTCUSD" else self.snapshot_loader(self.symbol)
+            if snapshot["core"]["ticker"]["symbol"] != self.symbol:
+                raise FireTradeError("Snapshot market mismatch")
             collected = datetime.fromisoformat(snapshot["collected_at"])
             if (collected.tzinfo is None or
                     (_now() - collected).total_seconds() > 60):
@@ -305,7 +310,7 @@ class FireDemoController:
             # after the decision. GPT-6 is still the sole strategist.
             model_snapshot = {**snapshot, "fire_execution_scope": {
                 "environment": "delta-india-demo",
-                "instrument": "BTCUSD perpetual futures",
+                "instrument": self.symbol + " perpetual futures",
                 "max_contracts_per_entry": self.max_contracts,
                 "attached_stop_loss_and_take_profit_required": True,
                 "separate_learning_model_has_no_trade_authority": True,
@@ -394,10 +399,11 @@ class FireDemoController:
                               orders_submitted=True, protection_verified=False)
             try:
                 exchange = exchange or self.exchange_factory()
-                DemoExecutor(
-                    exchange, schedule="crypto-24x7", pause=self.pause,
-                    journal_path=str(self.path.parent / "trades.jsonl")
-                ).closeout(max_attempts=3)
+                if isinstance(exchange, FireMarket):
+                    exchange.close_exposure(self.pause)
+                else:
+                    DemoExecutor(exchange, schedule="crypto-24x7", pause=self.pause,
+                                 journal_path=str(self.path.parent / "trades.jsonl")).closeout(max_attempts=3)
                 self.store.update(
                     press, "flat_verified", orders_submitted=True,
                     protection_verified=False, reason_code="emergency_flat_verified")
