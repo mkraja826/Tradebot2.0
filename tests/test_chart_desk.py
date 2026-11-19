@@ -45,6 +45,13 @@ class ChartDeskTests(unittest.TestCase):
         self.assertEqual(result["quote"]["price"],"3751")
         self.assertNotIn("account",result)
 
+    def test_scorecard_ui_never_labels_provisional_value_as_net_profit(self):
+        script = (Path(__file__).resolve().parents[1] /
+                  "src/tradebot/dashboard_static/charts.js").read_text()
+        self.assertIn("Provisional P&L", script)
+        self.assertIn("NOT net realized P&L", script)
+        self.assertIn("provisional_pnl_after_order_fees_usd", script)
+
     def test_scorecard_uses_broker_fills_and_exact_completed_minutes(self):
         press = self.store.reserve()
         self.store.record_model_input(press, {"collected_at": 1700000010,
