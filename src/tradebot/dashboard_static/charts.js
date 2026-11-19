@@ -170,7 +170,7 @@
     metric("Entry fill",fmt(t.entry?.price));
     const exit=t[c.exit];
     metric("Exit",exit?(c.exit==="stop_loss_order"?"Stop-loss":"Take-profit")+" filled @ "+fmt(exit.price):"No confirmed bracket fill");
-    metric("Fees / P&L after fees (USD, excludes funding)",fmt(c.fees_usd,6)+" / "+fmt(c.pnl_after_fees_usd,6));
+    metric("Fees / Provisional P&L (USD, excludes funding; NOT net realized P&L)",fmt(c.fees_usd,6)+" / "+fmt(c.provisional_pnl_after_order_fees_usd,6));
     metric("Price move from snapshot midpoint", [5,15,30].map(m=>m+"m "+(c.moves[m]==null?"—":fmt(c.moves[m])+"%")).join(" · "));
   }
   for(const [id,delta] of [["desk-newer",-1],["desk-older",1]]){
