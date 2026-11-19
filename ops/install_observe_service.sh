@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install, enable and start a read-only Tradebot 2.0 Linux systemd service.
+# Install, enable and start an NYSE-hours DeepSeek observer systemd service.
 # Run as the normal SSH user: bash ops/install_observe_service.sh
 # Does not copy/print keys or enable demo trading.
 set -euo pipefail
@@ -45,7 +45,7 @@ trap 'rm -f "$tmp_unit"' EXIT
 
 cat > "$tmp_unit" <<EOF
 [Unit]
-Description=Tradebot 2.0 - 24x7 read-only Delta India DEMO opportunity scanner
+Description=Tradebot 2.0 - NYSE cash-hours DeepSeek Delta Demo read-only scanner
 After=network-online.target
 Wants=network-online.target
 StartLimitIntervalSec=0
@@ -77,7 +77,7 @@ SyslogIdentifier=tradebot2-observe
 WantedBy=multi-user.target
 EOF
 
-echo "Installing a 24/7 READ-ONLY service; demo order execution stays OFF."
+echo "Installing read-only DeepSeek NYSE cash-session scanner; Demo order execution stays OFF."
 sudo install -m 0644 "$tmp_unit" "/etc/systemd/system/$UNIT_NAME"
 sudo systemctl daemon-reload
 sudo systemctl enable "$UNIT_NAME"
@@ -86,8 +86,8 @@ sudo systemctl restart "$UNIT_NAME"
 
 echo
 echo "Service configured to auto-start on VM boot and restart after a crash."
-echo "Observer mode: Delta India DEMO, NO order submission."
-echo "Polling: 60 seconds. Model proposals: around every 5 minutes, 24x7 (paid Top Billing calls)."
+echo "Observer mode: Delta India DEMO, NO order submission. FIRE and Kimi are unaffected."
+echo "Polling: 60 seconds. DeepSeek paid research: around every 5 minutes while NYSE cash market is OPEN only."
 echo "Check: sudo systemctl status tradebot2-observe --no-pager"
 echo "Logs: sudo journalctl -u tradebot2-observe -n 20 --no-pager"
 echo "Stop: sudo systemctl stop tradebot2-observe"
