@@ -23,7 +23,7 @@ class PortfolioReservationError(ValueError):
 
 class FirePortfolioReservation:
     def __init__(self, root):
-        root = Path(root)
+        root = Path(root).resolve()
         root.mkdir(parents=True, exist_ok=True)
         self.path = root / "fire-portfolio.sqlite"
         if self.path.is_symlink():
