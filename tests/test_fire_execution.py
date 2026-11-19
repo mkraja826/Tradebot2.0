@@ -233,6 +233,18 @@ class FireExecutionTests(unittest.TestCase):
         self.assertEqual(self.calls,[])
         self.assertEqual(self.exchange.requests,[])
 
+    def test_other_market_unresolved_fire_blocks_new_gpt_decision(self):
+        from tradebot.fire_execution import FireTradeStore
+        sibling = FireTradeStore(self.path.parent / "fire-xaut.sqlite")
+        first = sibling.reserve()
+        sibling.update(first, "protected_active")
+        fire = self.make()
+        fire.start()
+        self.assertEqual(fire.snapshot()["status"], "rejected_no_order")
+        self.assertEqual(fire.snapshot()["reason_code"], "portfolio_entry_reservation_failed")
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.exchange.requests, [])
+
     def test_existing_order_consumes_market_before_model_call(self):
         self.exchange.active_orders = [{"id": 99, "product_id": 27, "size": 2}]
         fire = self.make()

@@ -96,3 +96,20 @@ The trade detail scorecard now explicitly reports:
 The legacy `pnl_after_fees_usd` estimate is retained solely for compatibility
 and MUST NOT be displayed as financially reconciled net profit. No funding
 fees, incomplete partial fills, or wallet transfers are fabricated.
+
+## Increment 6 — Cross-FIRE portfolio entry reservation
+
+A shared, private `fire-portfolio.sqlite` file serializes BTCUSD and XAUTUSD
+FIRE entry ownership on a single VM. Each worker claims the account with an
+immediate SQLite transaction before requesting GPT-6. A second FIRE is
+rejected while its owner is pending, protected, reconciling, or unknown.
+Admission can move to another FIRE only after a terminal state with
+documented no-entry or broker-confirmed flatness evidence. A missing or
+unreadable owner receipt fails closed. This also checks legacy outstanding
+receipts when the feature is first deployed.
+
+The reservation does **not** inspect all manual/third-party positions,
+transactions or external execution services, and is **not** yet a complete
+portfolio risk governor. It does not transfer risk limits to Kimi or DeepSeek,
+does not run in the broker watchdog, and does not activate demo autonomy.
+All FIRE controllers must point to the **same data directory** on the VM.

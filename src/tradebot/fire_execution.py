@@ -22,6 +22,7 @@ from uuid import uuid4
 from tradebot.delta import DEMO_API, DeltaDemo, DeltaError
 from tradebot.execution import DemoExecutor
 from tradebot.fire_budget import entry_budget
+from tradebot.fire_portfolio_reservation import FirePortfolioReservation
 from tradebot.fire_risk import assess_fire_plan
 from tradebot.fire_indicators import decision_context
 from tradebot.fire_entry import FireEntries
@@ -299,6 +300,7 @@ class FireDemoController:
         self.enabled = bool(enabled)
         self.store = FireTradeStore(path)
         self.path = Path(path)
+        self.portfolio_reservation = FirePortfolioReservation(self.path.parent)
         self.exchange_factory = exchange_factory or (lambda: FireMarket(self.symbol,
             api_key=os.environ["DELTA_DEMO_API_KEY"],
             api_secret=os.environ["DELTA_DEMO_API_SECRET"],
@@ -339,6 +341,9 @@ class FireDemoController:
         try:
             self.store.update(press, "reasoning", model="tb-gpt-6",
                               orders_submitted=False, protection_verified=False)
+            stage = "portfolio_entry_reservation"
+            if not self.portfolio_reservation.claim(self.symbol, press, self.path):
+                raise FireTradeError("Another unresolved FIRE reserves this account")
             # One fresh snapshot is used by both GPT-6 and this execution.
             snapshot = self.snapshot_loader() if self.symbol == "BTCUSD" else self.snapshot_loader(self.symbol)
             if snapshot["core"]["ticker"]["symbol"] != self.symbol:
