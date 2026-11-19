@@ -11,7 +11,9 @@ if [[ ! -r "$KEY_FILE" || ! -x "$PROJECT/.venv/bin/python" ]]; then
   exit 1
 fi
 # shellcheck disable=SC1090
+set -a
 source "$KEY_FILE"
+set +a
 export ENABLE_DEMO_ORDERS=false
 export PYTHONUNBUFFERED=1
 exec "$PROJECT/.venv/bin/python" -m tradebot.fire_watchdog \
