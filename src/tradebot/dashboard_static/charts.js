@@ -136,6 +136,12 @@
     metric("GPT-6 response",t.model_latency_ms==null?"Unavailable":fmt(t.model_latency_ms/1000,2)+" s");
     metric("Snapshot bid / ask",fmt(c.quote.best_bid)+" / "+fmt(c.quote.best_ask));
     metric("1h return / volatility",fmt(c.return_1h_pct)+"% / "+fmt(c.realized_vol_1h_pct)+"%");
+    if(t.indicators){
+      const i=t.indicators;
+      metric("At decision · 15m / 1h EMA slope", (i.ema_15m?.slope??"—")+" / "+(i.ema_1h?.slope??"—"));
+      metric("Session VWAP / 5m ATR",fmt(i.session_vwap)+" / "+fmt(i.atr_5m));
+      if(i.since_exit)metric("Move since broker exit (ATR)",fmt(i.since_exit.move_atr));
+    }
     metric("Stop / target",fmt(t.stop_loss)+" / "+fmt(t.take_profit));
     metric("Entry fill",fmt(t.entry?.price));
     const exit=t[c.exit];

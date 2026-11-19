@@ -18,7 +18,7 @@ def route(r):
                bars=[[now-i*step,price,price+10,price-10,price+1] for i in range(90,0,-1)],trades=[trade],
                account=dict(positions=[dict(size=1,entry_price=price-12,unrealized_pnl=1)],exits=[]))
         if 'trade' in q:
-            d['replay']=dict(trade,model_latency_ms=1250,scorecard={
+            d['replay']=dict(trade,model_latency_ms=1250,indicators={"session_vwap":3700,"atr_5m":2},scorecard={
                 'quote':{'best_bid':price-1,'best_ask':price+1},'moves':{'5':0.12},'exit':None})
         r.fulfill(json=d)
     elif url.path.startswith('/api/fire'):r.fulfill(json={'execution_enabled':True,'status':'idle','symbol':'XAUTUSD' if 'XAUTUSD' in url.path else 'BTCUSD','indicators':{'as_of':now,'ema_15m':{'close':100,'ema20':99,'slope':'rising'},'atr_5m':2}})
@@ -45,7 +45,8 @@ with sync_playwright() as pw:
     page.wait_for_function("document.querySelector('#desk-periods button[aria-pressed=true]').textContent==='15m'")
     page.locator('#desk-history button').first.click()
     page.wait_for_selector('#desk-player:visible')
-    assert '1.25 s' in page.locator('#desk-scorecard').inner_text()
+    page.get_by_text('GPT-6 response · 1.25 s', exact=True).wait_for()
+    assert 'Session VWAP / 5m ATR' in page.locator('#desk-scorecard').inner_text()
     assert '5m 0.12%' in page.locator('#desk-scorecard').inner_text()
     page.locator('#desk-play').click()
     page.wait_for_timeout(800)
