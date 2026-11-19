@@ -38,6 +38,23 @@ def session_phase(instant: datetime) -> SessionPhase:
 
 
 
+def nyse_cash_is_open(instant: datetime) -> bool:
+    """NYSE cash market open -> official close, including the final 15 min.
+
+    Unlike session_phase's entry/flatten policy, this is a research scanning
+    window and never orders trades. XNYS handles NY holidays, DST and early
+    closes without fixed offsets or hand-maintained holiday dates.
+    """
+    if instant.tzinfo is None or instant.utcoffset() is None:
+        raise ValueError("A timezone-aware datetime is required")
+    utc = instant.astimezone(timezone.utc)
+    ny_date = utc.astimezone(NEW_YORK).date()
+    if not NYSE.is_session(ny_date):
+        return False
+    return (NYSE.session_open(ny_date).to_pydatetime() <= utc
+            < NYSE.session_close(ny_date).to_pydatetime())
+
+
 SUPPORTED_SCHEDULES = frozenset({"nyse", "crypto-24x7"})
 
 
