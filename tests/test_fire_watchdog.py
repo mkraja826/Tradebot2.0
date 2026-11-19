@@ -98,13 +98,15 @@ class WatchdogTests(unittest.TestCase):
         self.assertEqual(self.store.latest()["status"], "flat_verified")
         self.assertFalse(self.store.latest()["protection_verified"])
 
-    def test_stop_triggered_and_position_closed_records_flat(self):
-        self.seed()
+    def test_verified_bracket_exit_allows_immediate_next_manual_press(self):
+        previous = self.seed()
         self.broker.size = 0
         self.broker.orders = []
         outcome = watchdog_tick(self.broker, self.store)
         self.assertEqual(outcome["status"], "flat_verified")
         self.assertEqual(self.broker.closeouts, 0)
+
+        self.assertNotEqual(self.store.reserve(), previous)
 
     def test_stale_pretrade_work_is_aborted_without_broker_post(self):
         press = self.store.reserve()

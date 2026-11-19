@@ -175,7 +175,7 @@ class FireTradeStore:
                 if old[0] not in TERMINAL:
                     raise FireTradeError("Previous FIRE needs broker reconciliation")
                 age = (when - datetime.fromisoformat(old[1])).total_seconds()
-                if age < 300:
+                if old[0] != "flat_verified" and age < 300:
                     raise FireTradeError("FIRE cooldown active")
             stamp = when.isoformat()
             db.execute("INSERT INTO fire_requests VALUES (?,?,?,?,?)",

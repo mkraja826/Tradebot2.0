@@ -395,7 +395,7 @@ function renderFireExecution(data) {
     reconciling:"Checking the entry against Delta Demo. Never resubmitting on timeout…",
     verifying_protection:"Checking the fill and BOTH broker protective orders…",
     protected_active:"Entry filled; STOP-LOSS and TAKE-PROFIT are verified on Delta Demo.",
-    flat_verified:"Delta Demo has been verified flat; no active FIRE exposure recorded.",
+    flat_verified:"Position closed. FIRE is ready for the next demo trade.",
     rejected_no_order:"No valid trade was submitted. Review GPT-6 response and demo account.",
     exposure_unknown:"ALERT: Exposure/protection uncertain! Check Delta Demo account immediately.",
     aborted_flat:"Previous FIRE was abandoned before submission; exchange flat.",
