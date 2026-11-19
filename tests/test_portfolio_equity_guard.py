@@ -49,7 +49,7 @@ class PortfolioEquityGuardTests(unittest.TestCase):
             self.guard.require_approved("999",at=dt(19,14))
 
     def test_eight_percent_peak_drawdown_blocks_even_if_weekly_open_is_low(self):
-        self.guard.observe("1300",at=dt(16,0,1))
+        self.guard.observe("1320",at=dt(16,0,1))
         # Friday week starts at 1300; drawdown already exceeds 8%
         self.guard.observe("1200",at=dt(19,0,1))
         result = self.guard.observe("1200",at=dt(19,14))
