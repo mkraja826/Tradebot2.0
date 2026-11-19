@@ -3,6 +3,8 @@ from decimal import Decimal
 
 
 MARGIN_SHARE = Decimal("0.20")
+MAX_BROKER_LEVERAGE = Decimal("5")
+MAX_EFFECTIVE_LEVERAGE = Decimal("5")
 
 
 def number(value):
@@ -23,6 +25,8 @@ def entry_budget(exchange, symbol, product_id, price):
     if str(settings.get("product_id", product_id)) != str(product_id):
         raise ValueError("Unexpected leverage product")
     leverage = number(settings["leverage"])
+    if not 0 < leverage <= MAX_BROKER_LEVERAGE:
+        raise ValueError("Configured broker leverage exceeds demo safety policy")
     wallet = exchange.wallet_balances()
     equity = number(wallet["meta"]["net_equity"])
     usd, = (r for r in wallet["balances"] if r["asset_symbol"] == "USD")
@@ -48,6 +52,7 @@ def entry_budget(exchange, symbol, product_id, price):
         high = min(high, int(number(product["position_size_limit"])))
     if product.get("position_notional_limit"):
         high = min(high, int(number(product["position_notional_limit"]) / per_contract))
+    high = min(high, int(equity * MAX_EFFECTIVE_LEVERAGE / per_contract))
     low = 0
     while low < high:
         mid = (low + high + 1) // 2
@@ -57,5 +62,7 @@ def entry_budget(exchange, symbol, product_id, price):
         else:
             high = mid - 1
     return {"margin_budget_usd": str(ceiling), "leverage": str(leverage),
+            "equity_usd": str(equity), "taker_commission_rate": str(fee),
+            "risk_policy": "fire-demo-risk-v1",
             "contract_value": str(multiplier), "max_contracts_per_entry": low,
             "notional_per_contract_usd": str(per_contract), "max_margin_usd": str(margin(low))}

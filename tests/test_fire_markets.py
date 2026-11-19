@@ -37,7 +37,7 @@ class DemoAccount(FireMarket):
                                "settling_asset": {"symbol": "USD"}, "notional_type": "vanilla",
                                "initial_margin": "0.5", "contract_value": "0.001", "taker_commission_rate": "0.0005"}}
         if method == "GET" and path == "/v2/products/82/orders/leverage":
-            return {"result": {"leverage": 50, "product_id": 82}}
+            return {"result": {"leverage": 5, "product_id": 82}}
         if method == "GET" and path == "/v2/wallet/balances":
             return {"result": [{"asset_symbol": "USD", "available_balance": "100"}],
                     "meta": {"net_equity": "100"}}
@@ -61,7 +61,7 @@ class DemoAccount(FireMarket):
             self.parent = dict(payload,id=3,state="closed",unfilled_size=0)
             self.orders.extend({"id":i, "product_id":82, "side":"sell", "state":"pending",
                                 "bracket_order":True, "stop_order_type":kind, "stop_price":price}
-                               for i,kind,price in [(4,"stop_loss_order","3700"),(5,"take_profit_order","3900")])
+                               for i,kind,price in [(4,"stop_loss_order","3700"),(5,"take_profit_order","4000")])
         return {"result":self.parent}
 
 
@@ -104,9 +104,9 @@ class MarketTest(unittest.TestCase):
                         "core":{"best_bid":"3799","best_ask":"3801","ticker":broker.ticker(symbol)}}
             def decide(routes, loader):
                 self.assertEqual(loader()["core"]["ticker"]["symbol"], "XAUTUSD")
-                self.assertEqual(loader()["fire_execution_scope"]["max_contracts_per_entry"], 263)
-                return {"results":{"fire":{"decision":{"direction":"LONG","contracts":24,
-                                                      "stop_loss":"3700","take_profit":"3900"}}}}
+                self.assertEqual(loader()["fire_execution_scope"]["max_contracts_per_entry"], 26)
+                return {"results":{"fire":{"decision":{"direction":"LONG","contracts":1,
+                                                      "stop_loss":"3700","take_profit":"4000"}}}}
             desk = FireDemoController(Path(tmp)/"fire-xaut.sqlite",enabled=True,symbol="XAUTUSD",
                                       exchange_factory=lambda:broker,snapshot_loader=snapshot,probe=decide,
                                       spawn=lambda job:job(),pause=lambda _:None)

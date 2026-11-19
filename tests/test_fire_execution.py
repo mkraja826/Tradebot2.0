@@ -24,7 +24,7 @@ def snapshot():
 
 
 PLAN = {"direction": "LONG", "contracts": 1,
-        "stop_loss": "62800", "take_profit": "63750"}
+        "stop_loss": "62950", "take_profit": "63950"}
 
 
 class FakeDemo:
@@ -38,6 +38,7 @@ class FakeDemo:
         self.submit_timeout = False
         self.active_orders = []
         self.order = None
+        self.leverage = 5
 
     def ticker(self, symbol):
         return {
@@ -60,7 +61,7 @@ class FakeDemo:
 
     def _request(self, method, path, *, auth=False, payload=None):
         if method == "GET" and path.endswith("/orders/leverage"):
-            return {"result": {"leverage": 100, "product_id": 27}}
+            return {"result": {"leverage": self.leverage, "product_id": 27}}
         if method == "GET" and path == "/v2/products/BTCUSD":
             return {"result": {"id": 27, "symbol": "BTCUSD", "contract_type": "perpetual_futures",
                                "settling_asset": {"symbol": "USD"}, "notional_type": "vanilla",
@@ -145,20 +146,37 @@ class FireExecutionTests(unittest.TestCase):
         method, path, payload = self.exchange.requests[0]
         self.assertEqual((method, path), ("POST", "/v2/orders"))
         self.assertEqual(payload["bracket_stop_trigger_method"], "mark_price")
-        self.assertEqual(payload["bracket_stop_loss_price"], "62800")
-        self.assertEqual(payload["bracket_take_profit_price"], "63750")
+        self.assertEqual(payload["bracket_stop_loss_price"], "62950")
+        self.assertEqual(payload["bracket_take_profit_price"], "63950")
         self.assertEqual(payload["size"], 1)
         self.assertEqual(payload["side"], "buy")
         self.assertFalse(fire.start()[0])
         self.assertEqual(len(self.exchange.requests), 1)
         self.assertFalse(self.make().start()[0])  # persistent across restart
 
-    def test_gpt_can_choose_less_than_maximum_across_multiple_contracts(self):
-        fire = self.make(plan=PLAN | {"contracts": 8})
+    def test_multiple_contracts_exceed_verified_risk_despite_margin_capacity(self):
+        fire = self.make(plan=PLAN | {"contracts": 2})
         fire.start()
-        self.assertEqual(fire.snapshot()["status"], "protected_active")
-        self.assertEqual(fire.snapshot()["budget"]["max_contracts_per_entry"], 54)
-        self.assertEqual(self.exchange.requests[0][2]["size"], 8)
+        self.assertEqual(fire.snapshot()["status"], "rejected_no_order")
+        self.assertEqual(fire.snapshot()["reason_code"], "risk_governor_failed")
+        self.assertEqual(fire.snapshot()["budget"]["max_contracts_per_entry"], 2)
+        self.assertEqual(self.exchange.requests, [])
+
+    def test_unsafe_broker_leverage_blocks_paid_ai_and_order(self):
+        self.exchange.leverage = 100
+        fire = self.make()
+        fire.start()
+        self.assertEqual(fire.snapshot()["status"], "rejected_no_order")
+        self.assertEqual(fire.snapshot()["reason_code"], "margin_budget_failed")
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.exchange.requests, [])
+
+    def test_insufficient_reward_to_risk_fails_closed(self):
+        fire = self.make(plan=PLAN | {"take_profit": "63250"})
+        fire.start()
+        self.assertEqual(fire.snapshot()["status"], "rejected_no_order")
+        self.assertEqual(fire.snapshot()["reason_code"], "risk_governor_failed")
+        self.assertEqual(self.exchange.requests, [])
 
     def test_equity_drop_before_submission_recomputes_budget(self):
         from unittest.mock import patch
@@ -265,10 +283,10 @@ class FireExecutionTests(unittest.TestCase):
         self.exchange.active_orders = [
             {"id": 11, "product_id": 27, "bracket_order": True,
              "stop_order_type": "stop_loss_order", "state": "pending",
-             "side": "sell", "stop_price": "62800"},
+             "side": "sell", "stop_price": "62950"},
             {"id": 12, "product_id": 27, "bracket_order": True,
              "stop_order_type": "take_profit_order", "state": "pending",
-             "side": "sell", "stop_price": "63750"},
+             "side": "sell", "stop_price": "63950"},
         ]
         self.assertTrue(protective_orders_verified(self.exchange.active_orders,
                        product_id=27, plan=PLAN))

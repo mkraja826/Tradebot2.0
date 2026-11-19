@@ -21,3 +21,23 @@ deduplication across pages, an authenticated release workflow, and finer
 instrument-specific thresholds. No autonomous demo execution is enabled.
 
 Next: enforce a separate equity-at-risk governor and add AI cost accounting.
+
+## Increment 2 — Deterministic per-trade risk (code change)
+
+The broker's configured per-product leverage must now be at most **5x**;
+higher settings block FIRE before any paid GPT-6 request. The pre-AI sizing
+budget also caps total notional at five times verified equity. After the
+model decides, a separate backend risk gate computes loss at the actual
+buy/sell quote, including assumed two-way taker commission and a 0.05%
+slippage reserve on each side. Default maximum loss is **0.25% of verified
+equity** and expected net reward-to-risk must be at least **1.5**.
+Compliant fractional contracts are not invented to force execution.
+
+**This does not yet satisfy the portfolio-risk milestone.** Daily and weekly
+realized loss, pending risk reservations, funding, multi-symbol exposure and
+maximum drawdown require a broker-reconciled accounting ledger and additional
+cross-process gates. The current feature is NOT authority to enable unattended
+demo execution. A 5x leverage setting is required at the exchange; no
+automatic leverage-setting API call was added. Existing VM processes remain
+unchanged until the operator deploys the repository and reruns supervised
+demo tests.

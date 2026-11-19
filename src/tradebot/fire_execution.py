@@ -22,6 +22,7 @@ from uuid import uuid4
 from tradebot.delta import DEMO_API, DeltaDemo, DeltaError
 from tradebot.execution import DemoExecutor
 from tradebot.fire_budget import entry_budget
+from tradebot.fire_risk import assess_fire_plan
 from tradebot.fire_indicators import decision_context
 from tradebot.fire_entry import FireEntries
 from tradebot.fire_market import FireMarket, positions_for_fire
@@ -207,7 +208,7 @@ class FireTradeStore:
         allowed = {"model", "direction", "contracts", "stop_loss",
                    "take_profit", "broker_order_id", "order_state",
                    "protection_verified", "orders_submitted",
-                   "model_latency_ms", "budget", "sizing_estimate", "reason_code", "snapshot_at", "thesis", "decision_at", "entry", "exit_order_ids", "protected_at", "decision_quote", "indicators"}
+                   "model_latency_ms", "budget", "sizing_estimate", "risk_assessment", "reason_code", "snapshot_at", "thesis", "decision_at", "entry", "exit_order_ids", "protected_at", "decision_quote", "indicators"}
         if set(fields) - allowed:
             raise FireTradeError("Unexpected FIRE status data")
         with closing(self._connect()) as db:
@@ -413,6 +414,9 @@ class FireDemoController:
             self.store.update(press, "preflight", budget=current_budget)
             if plan["contracts"] > current_budget["max_contracts_per_entry"]:
                 raise FireTradeError("Live margin budget changed")
+            stage = "risk_governor"
+            risk_assessment = assess_fire_plan(plan, current_budget, exchange_quote)
+            self.store.update(press, "preflight", risk_assessment=risk_assessment)
             units = _dec(current_budget["contract_value"]) * plan["contracts"]
             estimated_entry = exchange_quote["best_ask" if plan["direction"] == "LONG" else "best_bid"]
             self.store.update(press, "submitting", sizing_estimate={

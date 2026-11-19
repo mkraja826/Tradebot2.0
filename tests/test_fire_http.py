@@ -29,7 +29,7 @@ class FireHttpTests(unittest.TestCase):
             self.assertIn("indicators", loader())
             return {"results": {"fire": {"decision": {
                 "direction": "LONG", "contracts": 1,
-                "stop_loss": "62800", "take_profit": "63750",
+                "stop_loss": "62950", "take_profit": "63950",
             }}}}
         trade = FireDemoController(
             root / "fire-ops.sqlite", enabled=True,
@@ -104,8 +104,8 @@ class FireHttpTests(unittest.TestCase):
             self.assertEqual(state["status"], "protected_active")
             self.assertTrue(state["protection_verified"])
             self.assertEqual(state["direction"], "LONG")
-            self.assertEqual(state["stop_loss"], "62800")
-            self.assertEqual(state["take_profit"], "63750")
+            self.assertEqual(state["stop_loss"], "62950")
+            self.assertEqual(state["take_profit"], "63950")
         self.assertEqual(len(self.model_calls), 1)
         self.assertEqual(len(self.exchange.requests), 1)
         with self.assertRaises(HTTPError) as duplicate:
