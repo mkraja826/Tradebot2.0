@@ -4,6 +4,7 @@ from decimal import Decimal, InvalidOperation
 import hashlib
 import json
 import os
+import re
 from time import monotonic
 
 from tradebot.ai import PlanError, TOPBILLING_CHAT_URL, TOPBILLING_MODELS_URL, TopBillingClient
@@ -14,6 +15,9 @@ INSTRUCTION = (
     "Choose a perpetual futures position for the exact symbol in core.ticker.symbol for this Delta India demo snapshot. "
     "Return only a JSON object with direction (LONG or SHORT), contracts (positive "
     "integer absolute target position size), stop_loss and take_profit (prices). "
+    "Use these exact top-level keys: direction, contracts, stop_loss, take_profit, thesis. "
+    "Use uppercase LONG or SHORT and an unquoted whole number for contracts. "
+    "For LONG put stop_loss below best_bid and take_profit above best_ask; reverse these levels for SHORT. "
     "Include a thesis string giving one concise sentence of reasoning. "
     "Use available margin, contract value, current position and spread. "
     "If the supplied snapshot contains fire_execution_scope, strictly respect "
@@ -42,6 +46,40 @@ def validate(decision, core):
     return dict(direction=side, contracts=size, stop_loss=str(stop), take_profit=str(target))
 
 
+def decision_failure_code(error):
+    # Only known local errors and HTTP status numbers may enter public receipts.
+    http = re.fullmatch(r"Top Billing API HTTP ([1-5][0-9]{2})", str(error))
+    if http:
+        return "provider_http_" + http[1]
+    return {
+        "Top Billing API network error": "provider_network_error",
+        "Invalid Top Billing API JSON response": "provider_invalid_json",
+        "Malformed Top Billing response": "provider_invalid_response",
+        "Missing model content": "model_empty_response",
+        "Truncated completion": "model_truncated_response",
+        "Incomplete completion": "model_incomplete_response",
+        "Malformed completion": "model_invalid_json",
+        "Expected an object": "model_invalid_object",
+        "Invalid direction or contract count": "model_invalid_direction_or_quantity",
+        "Missing or malformed price": "model_invalid_price",
+        "Invalid price": "model_invalid_price",
+        "Exit prices must bracket the quote in the chosen direction": "model_invalid_exit_levels",
+    }.get(str(error), "model_decision_failed")
+
+
+def decision_payload(choice):
+    if choice.get("finish_reason") == "length":
+        raise PlanError("Truncated completion")
+    if choice.get("finish_reason") not in (None, "stop"):
+        raise PlanError("Incomplete completion")
+    answer = choice["message"]["content"]
+    if not isinstance(answer, str) or not answer.strip():
+        raise PlanError("Missing model content")
+    answer = answer.strip()
+    wrapped = re.fullmatch(r"```(?:json)?[ \t]*\r?\n(.*?)\r?\n```", answer, re.S | re.I)
+    return json.loads(wrapped[1] if wrapped else answer)
+
+
 def run_probe(routes, snapshot_loader, client_factory=TopBillingClient):
     # Only this exact route may spend AI credits for FIRE.
     # Do not accept stale environment overrides or a second model route.
@@ -62,8 +100,10 @@ def run_probe(routes, snapshot_loader, client_factory=TopBillingClient):
             reply = client._call(TOPBILLING_CHAT_URL, body={
                 "model": model, "messages": [{"role": "system", "content": INSTRUCTION},
                                              {"role": "user", "content": content}]}, timeout=60)
-            answer = reply["choices"][0]["message"]["content"]
-            parsed = json.loads(answer)
+            choice = reply["choices"][0]
+            if not isinstance(choice, dict):
+                raise PlanError("Malformed Top Billing response")
+            parsed = decision_payload(choice)
             decision = validate(parsed, snapshot["core"])
             result = {"decision": decision, "usage": reply.get("usage"), "request_id": client.last_request_id}
             if isinstance(parsed.get("thesis"), str):

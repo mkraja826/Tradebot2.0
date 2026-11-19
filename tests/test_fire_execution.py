@@ -262,6 +262,16 @@ class FireExecutionTests(unittest.TestCase):
         invalid[1] = dict(invalid[1], stop_price="63800")
         self.assertFalse(protective_orders_verified(invalid, product_id=27, plan=PLAN))
 
+    def test_provider_rejection_is_visible_on_receipt_without_order(self):
+        fire = self.make()
+        fire.probe = lambda *_: {"results": {"fire": {"error": "Top Billing API HTTP 429", "latency_ms": 225}}}
+        fire.start()
+        state = fire.snapshot()
+        self.assertEqual(state["reason_code"], "provider_http_429")
+        self.assertEqual(state["model_latency_ms"], 225)
+        self.assertFalse(state["orders_submitted"])
+        self.assertFalse(self.exchange.requests)
+
     def test_read_failed_model_never_posts_to_exchange(self):
         fire = self.make(plan=PLAN | {"stop_loss": "64000"})
         self.assertTrue(fire.start()[0])

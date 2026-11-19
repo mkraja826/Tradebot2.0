@@ -3,7 +3,7 @@ import unittest
 from unittest.mock import Mock
 
 from tradebot.ai import AIPlanner, PlanError, PRIMARY_MODEL
-from tradebot.fire_probe import ROLES, run_probe, validate
+from tradebot.fire_probe import ROLES, decision_failure_code, decision_payload, run_probe, validate
 
 CORE = {"best_bid": "100", "best_ask": "101"}
 PLAN = dict(direction="LONG", contracts=2, stop_loss=95, take_profit=109)
@@ -27,6 +27,18 @@ class FireProbeTest(unittest.TestCase):
         self.assertEqual(calls, ["tb-gpt-6"])
         self.assertEqual(list(report["results"]), ["fire"])
         self.assertEqual(report["results"]["fire"]["decision"]["contracts"], 2)
+
+    def test_single_fenced_object_still_requires_valid_finished_decision(self):
+        choice = {"message": {"content": "```json\n" + json.dumps(PLAN) + "\n```"}, "finish_reason":"stop"}
+        self.assertEqual(validate(decision_payload(choice), CORE)["contracts"], 2)
+        with self.assertRaises(PlanError):
+            decision_payload(dict(choice, finish_reason="length"))
+        with self.assertRaises(ValueError):
+            decision_payload({"message":{"content":"extra prose " + choice["message"]["content"]}})
+
+    def test_public_error_codes_exclude_arbitrary_provider_text(self):
+        self.assertEqual(decision_failure_code("Top Billing API HTTP 402"), "provider_http_402")
+        self.assertEqual(decision_failure_code("sensitive upstream body"), "model_decision_failed")
 
     def test_kimi_or_second_route_is_refused_before_any_model_call(self):
         client = Mock()

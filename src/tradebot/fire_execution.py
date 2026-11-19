@@ -24,7 +24,7 @@ from tradebot.execution import DemoExecutor
 from tradebot.fire_budget import entry_budget
 from tradebot.fire_entry import FireEntries
 from tradebot.fire_market import FireMarket, positions_for_fire
-from tradebot.fire_probe import ROLES, load_snapshot, run_probe, validate
+from tradebot.fire_probe import ROLES, decision_failure_code, load_snapshot, run_probe, validate
 from tradebot.market import _age_seconds
 
 
@@ -352,8 +352,10 @@ class FireDemoController:
             raw = (report.get("results") or {}).get("fire") or {}
             stage = "model_decision"
             if "decision" not in raw:
-                self.store.update(press, "reasoning", model_latency_ms=raw.get("latency_ms"))
-                raise FireTradeError("GPT-6 did not produce a valid decision")
+                self.store.update(press, "rejected_no_order", model_latency_ms=raw.get("latency_ms"),
+                                  reason_code=decision_failure_code(raw.get("error")),
+                                  orders_submitted=False, protection_verified=False)
+                return
             plan = validate(raw["decision"], snapshot["core"])
             self.store.update(
                 press, "preflight", direction=plan["direction"], model_latency_ms=raw.get("latency_ms"),
