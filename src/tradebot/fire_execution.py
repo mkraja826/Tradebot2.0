@@ -294,6 +294,7 @@ class FireDemoController:
             api_secret=os.environ["DELTA_DEMO_API_SECRET"],
             allow_orders=True,
         ))
+        self.archive = None
         self.snapshot_loader = snapshot_loader
         self.probe = probe
         self.pause = pause
@@ -347,6 +348,11 @@ class FireDemoController:
                 raise FireTradeError("Insufficient margin budget for one contract")
             midpoint = (float(snapshot["core"]["best_bid"]) + float(snapshot["core"]["best_ask"])) / 2
             context = decision_context(exchange, self.store, self.symbol, collected.timestamp(), midpoint)
+            if self.archive is not None:
+                try:
+                    context["historical_levels"] = self.archive.levels(self.symbol, collected.timestamp(), midpoint)
+                except sqlite3.Error:
+                    context["historical_levels"] = None
             self.store.update(press, "reasoning", indicators=context)
             model_snapshot = {**snapshot, "indicators": context, "fire_execution_scope": {
                 "environment": "delta-india-demo",

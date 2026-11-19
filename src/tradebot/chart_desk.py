@@ -4,6 +4,7 @@ from datetime import datetime
 from decimal import Decimal
 import json
 import math
+import sqlite3
 from threading import Lock
 import time
 
@@ -29,6 +30,7 @@ def epoch(value):
 
 class ChartDesk:
     def __init__(self, exchange, stores):
+        self.archive = None
         self.exchange = exchange
         self.stores = stores
         self.cache = {}
@@ -112,6 +114,15 @@ class ChartDesk:
                 pass
         if summary:
             return result
+
+        if self.archive is not None and not trade and result.get("quote"):
+            try:
+                mark = float(result["quote"]["mark"])
+                # Quote changes can change the nearest level across a pivot.
+                result["historical_levels"] = self.cached(("levels",symbol,now//300,mark),5,
+                    lambda: self.archive.levels(symbol,now,mark))
+            except (sqlite3.Error, TypeError, ValueError):
+                pass
 
         def bars():
             rows = self.exchange.candles(symbol=symbol,resolution=period,start=start,end=end)

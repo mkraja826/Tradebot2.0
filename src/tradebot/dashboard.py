@@ -13,10 +13,11 @@ import json
 import os
 from pathlib import Path
 import sqlite3
-from threading import Lock, Thread
+from threading import Event, Lock, Thread
 import time
 from urllib.parse import parse_qs, quote, urlsplit
 
+from tradebot.candle_archive import CandleArchive
 from tradebot.chart_desk import ChartDesk
 from tradebot.delta import DeltaDemo
 from tradebot.fire_dashboard import FirePreviewController
@@ -512,8 +513,14 @@ def main():
         parser.error("Port must be between 1024 and 65535")
     extra_host = os.getenv("TRADEBOT_DASHBOARD_ALLOWED_HOST", "").strip().lower()
     allowed = {extra_host} if extra_host and ":" not in extra_host else None
+    state = DashboardData()
+    archive = CandleArchive(state.root / "delta-demo-candles.sqlite")
+    state.chart_desk.archive = state.fire_trade.archive = state.gold_trade.archive = archive
     server = ThreadingHTTPServer(
-        (args.host, args.port), create_handler(DashboardData(), allowed_hosts=allowed))
+        (args.host, args.port), create_handler(state, allowed_hosts=allowed))
+    stopping = Event()
+    worker = Thread(target=archive.run, args=(DeltaDemo(), stopping), daemon=True)
+    worker.start()
     print("Tradebot 2.0 private dashboard on http://127.0.0.1:" + str(args.port),
           flush=True)
     print("Private loopback only: configure authenticated tunneling before viewing remotely.",
@@ -523,7 +530,9 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
+        stopping.set()
         server.server_close()
+        worker.join(timeout=10)
 
 
 if __name__ == "__main__":

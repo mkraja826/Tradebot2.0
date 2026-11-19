@@ -73,9 +73,33 @@
         level(o.kind==="stop_loss_order"?"SL":"TP",o.price,o.kind==="stop_loss_order"?"#ff8792":"#70dcad",[5,4]);
     }
     level("Mark",q?.mark,"#dcb76d",[2,5]);
+    const executionLevels=levels.length;
+    const history=hist?(thesisReady?t?.indicators?.historical_levels:null):d?.historical_levels;
+    if(history){
+      const labels={day:"Day",previous_day:"Previous day",week:"Week",previous_week:"Previous week",
+        month:"Month",previous_month:"Previous month"};
+      for(const [key,label] of Object.entries(labels)){
+        const period=history.periods[key];
+        level(label+" high",period?.high,"#ba90ad",[3,5]);
+        level(label+" low",period?.low,"#87aaca",[3,5]);
+      }
+      for(const [frame,swing] of Object.entries(history.swings)){
+        level(frame+" support",swing.support?.price,"#79baa5",[5,4]);
+        level(frame+" resistance",swing.resistance?.price,"#d18c89",[5,4]);
+      }
+    }
     get("desk-levels").replaceChildren(...levels.map(l=>btn(l.name+" "+money(l.price),()=>{
       get("desk-inspect").textContent=l.name+" "+money(l.price)+(q?.mark?" · "+((l.price/+q.mark-1)*100).toFixed(2)+"% from mark":"");
     })));
+    if(history){
+      const range=document.createElement("small");
+      const missing=Object.values(history.periods).filter(p=>p.bars<p.expected).length;
+      range.textContent=(history.scan_from?
+        (history.scanned_to_launch?"History scanned from ":"Loading older candles · scanned from ")+
+        new Date(history.scan_from*1000).toISOString().slice(0,10):"Waiting for historical candles")+
+        " · UTC · 5m closes"+(missing?" · "+missing+" incomplete periods":"");
+      get("desk-levels").append(range);
+    }
     const w=canvas.clientWidth,h=canvas.clientHeight,scale=devicePixelRatio||1;
     if(canvas.width!==Math.round(w*scale)||canvas.height!==Math.round(h*scale)){
       canvas.width=Math.round(w*scale);canvas.height=Math.round(h*scale);
@@ -84,7 +108,7 @@
     if(!visible.length){if(v.anchor===null)get("desk-inspect").textContent="";get("desk-outcome").textContent="";ctx.fillStyle="#afb9c3";ctx.fillText("Waiting for "+s+" candles",12,32);return;}
     const plot=w-74,dx=plot/visible.length;
     const prices=visible.flatMap(b=>[b[2],b[3]]);
-    if(v.fit)prices.push(...levels.map(l=>l.price));
+    if(v.fit)prices.push(...levels.slice(0,executionLevels).map(l=>l.price));
     const lo=Math.min(...prices),hi=Math.max(...prices),pad=(hi-lo)*.1||1;
     const y=p=>12+(hi+pad-p)/(hi-lo+2*pad)*(h-44);
     const x=i=>(i+.5)*dx;
