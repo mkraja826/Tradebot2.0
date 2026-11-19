@@ -94,7 +94,7 @@ function render(data) {
   text("agent-action",runner.action||"No heartbeat");
   text("last-heartbeat",runner.age_seconds==null?"No runner heartbeat recorded":ageLabel(runner.age_seconds));
   text("mode-label",runner.mode==="demo"?"DEMO TRADING MODE":runner.mode==="observe"?"READ-ONLY OBSERVER":"NOT VERIFIED");
-  text("agent-schedule",runner.schedule==="crypto-24x7"?"24/7 CRYPTO":runner.schedule==="nyse"?"NYSE HOURS":"—");
+  text("agent-schedule",runner.schedule==="crypto-24x7"?"24/7 CRYPTO":runner.schedule==="nyse-cash-observe"?"NYSE CASH HOURS · DEEPSEEK":runner.schedule==="nyse"?"NYSE HOURS":"—");
   text("btc-bid",market.status==="fresh"?"$"+nfmt(market.bid):"—");
   text("btc-ask",market.status==="fresh"?"$"+nfmt(market.ask):"—");
   text("quote-status",market.status==="fresh"?"Delta testnet · quote "+ageLabel(market.age_seconds):market.status==="waiting"?"Connecting to exchange":"Price unavailable / stale");
@@ -345,7 +345,10 @@ function renderDesk(data){
   const alert=chartRecords.find(r=>["closeout_alert","shutdown_exposure_alert","btc_flat_verified"].includes(r.kind));
   showPriority(data.halted?"Execution halted · review exchange exposure.":alert && alert.kind!=="btc_flat_verified"?"Closeout requires verification.":runner.status==="stale"?"Observer heartbeat stale.":!fresh?"Market data delayed · last check "+timeLabel(live.checked_at):account.status!=="connected"?"Exchange account unavailable.":null,true);
   const pos=byId("position-card");pos.classList.toggle("exposed",account.btc_open_positions>0);
-  text("next-scan","Next eligible scan · "+(runner.status==="running"&&runner.next_scan?timeLabel(runner.next_scan):"Awaiting runner schedule"));
+  text("next-scan",runner.schedule==="nyse-cash-observe"&&runner.action==="nyse_cash_closed_no_ai"?
+    "DeepSeek paused · NYSE cash market closed (opens 9:30 AM New York time on trading days)":
+    "Next eligible scan · "+(runner.status==="running"&&runner.next_scan?
+      timeLabel(runner.next_scan):"Awaiting runner schedule"));
   text("exit-due",account.btc_open_positions>0?"Timed exit · "+(runner.exit_due?timeLabel(runner.exit_due):"No deadline recorded"):"");
   const latestDecision=chartRecords.find(r=>decisionKinds.has(r.kind));
   if (latestDecision && decisionMarkerKey && latestDecision.key!==decisionMarkerKey && !frozenBars &&
