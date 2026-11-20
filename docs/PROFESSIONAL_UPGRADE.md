@@ -218,3 +218,32 @@ pending. No autonomy is enabled and no claim of profitability is made.
 Next: deploy and commission this read-only reconciler against existing demo
 receipts, inspect unresolved reason codes, then build validated portfolio
 performance metrics before event-triggered opportunity scanning.
+
+## Increment 9 — Verified-only performance statistics (offline)
+
+`python -m tradebot.fire_performance --database data/fire-reconciliation.sqlite`
+
+reads **only existing local immutable reconciliation reports** (no broker
+network calls, no orders and no paid GPT-6/Kimi/DeepSeek requests). It provides
+separate BTCUSD, XAUTUSD and combined VERIFIED SUBSET statistics: win/loss/
+breakeven counts, win rate, fee/funding-adjusted net USD, average net USD per
+verified trade, profit factor when defined, and a trade-sequence drawdown
+**only over the verified subset**.
+
+Results are explicitly **not complete account profitability, account max
+drawdown, ROI, trade expectancy in R, strategy edge, or current broker state**.
+Each trade's most recent timestamped reconciliation determines inclusion.
+A newer unverified snapshot, contradictory same-time snapshots, missing
+timestamp, malformed economics, or duplicate attributed broker facts prevent
+that trade from inflating performance. The output reports excluded samples,
+their reason codes and original evidence-as-of timestamps.
+
+There is no claim that the reconciliation ledger contains every executed or
+closed FIRE; a complete trade inventory and fresh broker evidence must be
+commissioned separately. For fewer than 100 verified trades, sample sufficiency
+is explicitly flagged; even larger samples require prospective out-of-sample
+evaluation. An empty ledger is not treated as zero profitability.
+
+This milestone remains repository-only until the VM can be staged safely.
+Do not restart services with open demo positions, elevate broker leverage,
+or enable autonomous execution on the strength of these metrics.
