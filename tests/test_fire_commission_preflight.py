@@ -52,14 +52,16 @@ class CommissioningPreflightTests(unittest.TestCase):
     def setUp(self):
         self.exchange = FakeReadOnlyDemo()
 
-    def run_gate(self, *, gate=None, services=lambda: True, fire=lambda: True):
+    def run_gate(self, *, gate=None, services=lambda: True, fire=lambda: True,
+                 equity=lambda *_:{"approved":True,"trade_authorized":False}):
         with patch(
             "tradebot.fire_commission_preflight.verify_staging_samples",
             return_value=flat_gate() if gate is None else gate,
         ):
             return commissioning_preflight(
                 self.exchange, "/fake/data",
-                pause=lambda _: None, check_services=services, check_fire=fire
+                pause=lambda _: None, check_services=services, check_fire=fire,
+                check_equity=equity,
             )
 
     def test_ready_is_read_only_and_never_trade_authority(self):
@@ -110,6 +112,19 @@ class CommissioningPreflightTests(unittest.TestCase):
         result = self.run_gate(fire=offline)
         self.assertIn("fire_execution_status_unavailable", result["blockers"])
         self.assertNotIn("secret:error", str(result))
+
+    def test_equity_loss_or_missing_checkpoint_prevents_readiness(self):
+        result = self.run_gate(equity=lambda *_:{"approved":False,"trade_authorized":False})
+        self.assertFalse(result["ready_for_supervised_operator_review"])
+        self.assertIn("equity_risk_prerequisites_not_passed", result["blockers"])
+
+    def test_equity_database_error_is_sanitized(self):
+        def fail(*_):
+            raise OSError("secret database details")
+        result = self.run_gate(equity=fail)
+        self.assertFalse(result["ready_for_supervised_operator_review"])
+        self.assertIn("signed_equity_prerequisites_unavailable", result["blockers"])
+        self.assertNotIn("secret database details", str(result))
 
 
 if __name__ == "__main__":
