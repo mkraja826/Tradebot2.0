@@ -32,6 +32,7 @@ INSTRUCTION = (
     "Use available margin, contract value, current position and spread. "
     "If the supplied snapshot contains fire_execution_scope, strictly respect "
     "its max_contracts_per_entry and attached stop/target requirement. Choose the quantity within that ceiling based on your thesis, stop distance and estimated dollar loss at the stop; the ceiling is optional capacity. "
+    "Use stop_loss and take_profit prices exactly aligned to core.ticker.tick_size; never assume off-tick prices will be accepted unchanged. "
     "Select leverage from 1x through 20x based on verified market volatility and stop distance; 20x is a hard cap, never a target. No model decision can override liquidation or risk controls. Do not invent available contract balance."
 )
 

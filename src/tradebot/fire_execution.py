@@ -249,6 +249,21 @@ def _live_preflight(exchange, snapshot, plan):
     if bid <= 0 or ask <= bid:
         raise FireTradeError("Invalid broker spread")
     validate(plan, {"best_bid": str(bid), "best_ask": str(ask)})
+    # Delta can normalize off-tick bracket trigger prices. Because protection
+    # verification requires the exact requested triggers, reject off-grid
+    # prices BEFORE the order instead of relying on post-fill emergency exit.
+    product = exchange._request("GET", "/v2/products/" + symbol)["result"]
+    if (not isinstance(product, dict) or
+            str(product.get("id")) != str(snapshot["core"]["ticker"]["product_id"]) or
+            product.get("symbol") != symbol):
+        raise FireTradeError("Selected broker product not verified")
+    tick = _dec(product.get("tick_size"))
+    if tick <= 0:
+        raise FireTradeError("Invalid broker tick size")
+    for price_name in ("stop_loss", "take_profit"):
+        requested = _dec(plan[price_name])
+        if requested <= 0 or requested % tick != 0:
+            raise FireTradeError("GPT-6 exit price not aligned to current broker tick size")
     mark = _dec(ticker.get("mark_price"))
     stop, target = _dec(plan["stop_loss"]), _dec(plan["take_profit"])
     if (mark <= 0 or not (

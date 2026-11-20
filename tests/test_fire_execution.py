@@ -64,7 +64,7 @@ class FakeDemo:
     def ticker(self, symbol):
         return {
             "symbol": "BTCUSD", "product_id": 27,
-            "mark_price": "63214.25",
+            "tick_size": "0.5", "mark_price": "63214.25",
             "timestamp": int(datetime.now(timezone.utc).timestamp()),
             "quotes": {"best_bid": "63214", "best_ask": "63214.5"},
         }
@@ -107,7 +107,8 @@ class FakeDemo:
         if method == "GET" and path == "/v2/products/BTCUSD":
             return {"result": {"id": 27, "symbol": "BTCUSD", "contract_type": "perpetual_futures",
                                "settling_asset": {"symbol": "USD"}, "notional_type": "vanilla",
-                               "initial_margin": "0.5", "contract_value": "0.001", "taker_commission_rate": "0.0005"}}
+                               "initial_margin": "0.5", "contract_value": "0.001",
+                               "tick_size": "0.5", "taker_commission_rate": "0.0005"}}
         if method == "GET" and path == "/v2/products/XAUTUSD":
             return {"result": {"id": 82, "symbol": "XAUTUSD",
                                "contract_type": "perpetual_futures"}}
@@ -199,6 +200,32 @@ class FireExecutionTests(unittest.TestCase):
         self.assertFalse(fire.start()[0])
         self.assertEqual(len(self.exchange.requests), 1)
         self.assertFalse(self.make().start()[0])  # persistent across restart
+
+    def test_off_tick_stop_rejected_before_order_mutation(self):
+        fire = self.make(plan=PLAN | {"stop_loss": "62950.13"})
+        self.assertTrue(fire.start()[0])
+        self.assertEqual(fire.snapshot()["status"], "rejected_no_order")
+        self.assertEqual(fire.snapshot()["reason_code"], "exchange_preflight_failed")
+        self.assertFalse(self.exchange.requests)
+
+    def test_off_tick_target_rejected_before_order_mutation(self):
+        fire = self.make(plan=PLAN | {"take_profit": "63950.13"})
+        self.assertTrue(fire.start()[0])
+        self.assertEqual(fire.snapshot()["reason_code"], "exchange_preflight_failed")
+        self.assertFalse(self.exchange.requests)
+
+    def test_unknown_broker_tick_rejected_without_order(self):
+        get = self.exchange._request
+        def remove_tick(method, path, **kwargs):
+            reply = get(method, path, **kwargs)
+            if path == "/v2/products/BTCUSD":
+                reply["result"].pop("tick_size", None)
+            return reply
+        self.exchange._request = remove_tick
+        fire = self.make()
+        self.assertTrue(fire.start()[0])
+        self.assertEqual(fire.snapshot()["reason_code"], "exchange_preflight_failed")
+        self.assertFalse(self.exchange.requests)
 
     def test_gpt6_can_select_lower_leverage_after_flat_verified_preflight(self):
         fire = self.make(plan=PLAN | {"leverage": 3})

@@ -39,7 +39,8 @@ class DemoAccount(FireMarket):
         if method == "GET" and path == "/v2/products/XAUTUSD":
             return {"result": {"symbol": self.symbol, "id": 82, "contract_type": "perpetual_futures",
                                "settling_asset": {"symbol": "USD"}, "notional_type": "vanilla",
-                               "initial_margin": "0.5", "contract_value": "0.001", "taker_commission_rate": "0.0005"}}
+                               "initial_margin": "0.5", "contract_value": "0.001",
+                               "tick_size": "0.01", "taker_commission_rate": "0.0005"}}
         if method == "GET" and path == "/v2/products/82/orders/leverage":
             return {"result": {"leverage": 5, "product_id": 82}}
         if method == "GET" and path == "/v2/wallet/balances":
