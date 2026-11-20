@@ -9,6 +9,7 @@ from threading import Lock
 import time
 
 from tradebot.fire_market import SYMBOLS
+from tradebot.fire_reconciliation import reconcile_fire
 
 PERIODS = {"1m": 60, "5m": 300, "15m": 900, "1h": 3600}
 
@@ -145,12 +146,13 @@ class ChartDesk:
         ids = dict(trade.get("exit_order_ids") or {})
         if trade.get("broker_order_id"):
             ids["entry"] = trade["broker_order_id"]
-        verified = {}
+        verified, broker_orders = {}, {}
         for kind, order_id in ids.items():
             if not str(order_id).isdigit():
                 continue
             try:
                 order = self.exchange._request("GET", "/v2/orders/"+str(order_id), auth=True)["result"]
+                broker_orders[str(order_id)] = order
                 if (str(order["id"]) != str(order_id) or (order.get("product_symbol") or order.get("symbol")) != symbol
                         or order["state"] != "closed" or Decimal(str(order["unfilled_size"])) != 0
                         or Decimal(str(order["average_fill_price"])) <= 0):
@@ -162,6 +164,15 @@ class ChartDesk:
                 continue
         if trade.get("id"):
             result["scorecard"] = self.scorecard(symbol, trade, verified)
+            reconciliation = self.cached(("reconciliation", symbol, trade["id"], trade.get("updated")), 60,
+                lambda: reconcile_fire(self.exchange, symbol, trade,
+                    self.stores[symbol].path.parent / "fire-reconciliation.sqlite", orders=broker_orders))
+            # An unavailable complete reconciliation leaves the explicitly
+            # provisional estimate intact, but never its net-profit flag.
+            if (not reconciliation["is_net_realized_pnl"] and
+                    result["scorecard"]["financial_reconciliation_status"] == "provisional_order_level_only"):
+                reconciliation = dict(reconciliation, financial_reconciliation_status="provisional_order_level_only")
+            result["scorecard"].update(reconciliation)
         return result
 
     def scorecard(self, symbol, trade, orders):

@@ -170,7 +170,15 @@
     metric("Entry fill",fmt(t.entry?.price));
     const exit=t[c.exit];
     metric("Exit",exit?(c.exit==="stop_loss_order"?"Stop-loss":"Take-profit")+" filled @ "+fmt(exit.price):"No confirmed bracket fill");
-    metric("Fees / Provisional P&L (USD, excludes funding; NOT net realized P&L)",fmt(c.fees_usd,6)+" / "+fmt(c.provisional_pnl_after_order_fees_usd,6));
+    if(c.is_net_realized_pnl===true && c.financial_reconciliation_status==="broker_reconciled" && c.net_realized_pnl_usd!=null){
+      metric("Verified net P&L (USD)",fmt(c.net_realized_pnl_usd,6));
+      metric("Fees / funding cashflow (USD)",fmt(c.reconciled_fees_usd,6)+" / "+fmt(c.funding_cashflow_usd,6));
+      metric("Matched entry / exit fills",c.entry_fill_count+" / "+c.exit_fill_count);
+      metric("Broker evidence checked",new Date(c.reconciliation_as_of_us/1000).toLocaleString());
+    }else{
+      metric("Fees / Provisional P&L (USD, excludes funding; NOT net realized P&L)",fmt(c.fees_usd,6)+" / "+fmt(c.provisional_pnl_after_order_fees_usd,6));
+      metric("Net P&L verification",(c.reconciliation_reason||"awaiting complete broker evidence").replaceAll("_"," "));
+    }
     metric("Price move from snapshot midpoint", [5,15,30].map(m=>m+"m "+(c.moves[m]==null?"—":fmt(c.moves[m])+"%")).join(" · "));
   }
   for(const [id,delta] of [["desk-newer",-1],["desk-older",1]]){

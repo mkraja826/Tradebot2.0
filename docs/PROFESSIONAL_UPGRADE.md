@@ -137,3 +137,84 @@ satisfy accurate broker-reconciled daily/weekly realized loss, total lifetime
 drawdown, or correlated portfolio risk. The guard only protects the manual
 FIRE entry pipeline; it is not yet wired to the legacy separate demo executor.
 Do not enable autonomous demo execution.
+
+## Increment 8 — Fill and wallet reconciliation
+
+The next agreed accounting increment is implemented for closed BTCUSD and
+XAUTUSD FIRE receipts. Reviewing a trade in the chart desk or ChatGPT plugin
+now attempts signed, read-only broker reconciliation, with a 60-second cache.
+The standalone command performs a fresh review:
+
+```bash
+.venv/bin/python -m tradebot.fire_reconciliation --symbol BTCUSD --fire-id YOUR_FIRE_ID --data-dir data
+```
+
+It exits 0 only for a verified result; 2 means evidence is unavailable or does
+not satisfy the checks. It never enables orders, calls AI, changes risk
+settings, or edits a trade receipt. Existing read-only demo credentials must
+already be available in the process environment.
+
+### Evidence required
+
+- Exact broker entry/exit identities and the entry's FIRE client ID; all known
+  orders terminal. Per-order quantities must match all individual fills,
+  including a cancelled partial entry or multiple partial exits.
+- USD-settled vanilla perpetual specifications, matching fill-side product
+  metadata and contract multiplier. Prices, quantities and cashflows use
+  decimal arithmetic; currencies are never implicitly converted or added.
+- Complete paginated product-fill and account-wallet windows from the FIRE
+  request through the observation cutoff. Missing pagination metadata,
+  repeated cursors, conflicting duplicate IDs, or more than 40 pages fail
+  closed. The request window is bounded to 31 days.
+- Broker position size after every fill must reproduce an initially flat,
+  isolated position ending flat. Intervening manual/unowned fills block
+  attribution. Liquidation, ADL, settlement and OTC fills are not supported.
+- Wallet cashflow must match fill-derived gross P&L; signed commissions must
+  match fill commissions, including negative maker fees. Funding postings
+  must match the final fill's broker `new_position.realized_funding` total.
+  Missing funding metadata is unknown, never an assumed zero.
+- Posting ownership uses exact order/fill references when present. A
+  product-only posting may be attributed only inside the proven isolated
+  position interval. Delayed unreferenced entries, unscoped wallet debits,
+  conflicting references, unknown adjustments/taxes/credits or other
+  unsupported financial types prevent verification. Explicit deposits,
+  withdrawals and transfers are excluded from trading returns.
+
+The last fill must be at least five minutes before the query cutoff. This is
+a local settling buffer, **not** an exchange settlement guarantee. A successful
+report is an **as-of-cutoff** reconciliation, not a guarantee against future
+broker corrections or late postings. Repeating a read recomputes the result;
+an unsuccessful fresh read never falls back to a saved verified outcome.
+
+`data/fire-reconciliation.sqlite` holds normalized immutable fill/posting
+facts and append-only reports. Evidence IDs cannot be claimed by two FIRE
+receipts. Conflicting evidence rolls back the batch and withholds verification.
+Raw responses, wallet balances, IP addresses and credentials are not saved in
+this ledger. Prior reports remain historical observations; they must not be
+treated as a current performance feed without fresh validation.
+
+The scorecard displays verified net P&L only when both the reconciliation
+status and verification flag agree and the amount is present. Otherwise it
+keeps the existing provisional estimate and shows the missing-evidence reason.
+The old `pnl_after_fees_usd` compatibility field remains provisional even when
+a separate verified net field is available.
+
+### Verification and remaining work
+
+Offline coverage includes long/short BTC/gold trades, partial entries/exits,
+rebates, funding, duplicates, currency isolation, external activity, delayed
+postings, malformed/paginated responses, immutable evidence and scorecard
+integration. No paid AI calls or demo/live orders are needed for these tests.
+
+This increment is **not VM-deployed or broker-commissioned**. Delta's
+[documented API](https://docs.delta.exchange/) describes fill metadata and
+wallet transaction types, but does not guarantee all optional fields or
+wallet reference keys. Actual VM responses must satisfy these conservative
+checks; unsupported schemas remain unverified. Automatic discovery of manual
+or emergency exits with missing IDs, old-history backfill, fee-credit/tax
+handling, and complete daily/weekly realized portfolio loss accounting remain
+pending. No autonomy is enabled and no claim of profitability is made.
+
+Next: deploy and commission this read-only reconciler against existing demo
+receipts, inspect unresolved reason codes, then build validated portfolio
+performance metrics before event-triggered opportunity scanning.

@@ -223,25 +223,48 @@ class DeltaDemo:
 
     def wallet_postings(self, start_us, end_us):
         """Read a complete bounded window, deduplicating overlapping pages."""
-        params = {"start_time": start_us, "end_time": end_us, "page_size": 100}
+        return self._account_history("/v2/wallet/transactions", start_us, end_us)
+
+    def product_fills(self, product_id, *, start_time_us, end_time_us):
+        """Complete signed fill window for one product, including partial fills."""
+        if type(product_id) is not int or product_id <= 0:
+            raise ValueError("Invalid product ID")
+        rows = self._account_history("/v2/fills", start_time_us, end_time_us,
+                                     product_ids=str(product_id))
+        if any(str(row.get("product_id")) != str(product_id) for row in rows):
+            raise DeltaError("Unexpected fill product")
+        return rows
+
+    def _account_history(self, path, start_us, end_us, **filters):
+        if (type(start_us) is not int or type(end_us) is not int
+                or start_us <= 0 or end_us <= start_us):
+            raise ValueError("Invalid account history window")
+        params = {"start_time": start_us, "end_time": end_us, "page_size": 100, **filters}
         rows, cursors = {}, set()
-        for _ in range(20):
-            reply = self._request("GET", "/v2/wallet/transactions", params=params, auth=True)
-            if not isinstance(reply.get("result"), list):
-                raise DeltaError("Invalid wallet transaction page")
-            for row in reply["result"]:
-                key = str(row["id"])
+        for _ in range(40):
+            reply = self._request("GET", path, params=params, auth=True)
+            page, meta = reply.get("result"), reply.get("meta")
+            # Absent metadata cannot establish complete financial history.
+            if (not isinstance(page, list) or len(page) > 100
+                    or any(not isinstance(row, dict) for row in page)
+                    or not isinstance(meta, dict) or "after" not in meta):
+                raise DeltaError("Invalid account history page")
+            for row in page:
+                identifier = row.get("id")
+                if type(identifier) not in (str, int) or not str(identifier).strip():
+                    raise DeltaError("Missing account history ID")
+                key = str(identifier)
                 if key in rows and rows[key] != row:
-                    raise DeltaError("Inconsistent wallet posting")
+                    raise DeltaError("Inconsistent account history ID")
                 rows[key] = row
-            cursor = (reply.get("meta") or {}).get("after")
-            if not cursor:
+            cursor = meta["after"]
+            if cursor is None or cursor == "":
                 return list(rows.values())
-            if cursor in cursors:
-                raise DeltaError("Repeated wallet cursor")
+            if not isinstance(cursor, str) or cursor in cursors:
+                raise DeltaError("Invalid account history cursor")
             params["after"] = cursor
             cursors.add(cursor)
-        raise DeltaError("Incomplete wallet transaction window")
+        raise DeltaError("Incomplete account history window")
 
     def btc_fills(self, *, start_time_us: int, end_time_us: int,
                   max_pages: int = 40) -> list[dict]:
