@@ -9,7 +9,7 @@ cd ~/Tradebot2-safety-20x
 set -a
 source "$HOME/.config/tradebot2/keys.env"
 set +a
-PYTHONPATH="$PWD/src" "$HOME/Tradebot2.0/.venv/bin/python" \\
+PYTHONPATH="$PWD/src" "$HOME/Tradebot2.0/.venv/bin/python" \
   -m tradebot.fire_commission_preflight --data-dir "$HOME/Tradebot2.0/data"
 ```
 
