@@ -256,12 +256,19 @@ def analyse(symbol, trade, product, orders, fills, postings, start_us, end_us):
     require(same(totals["commission"], -fees), "wallet_commission_mismatch")
     require(same(totals["funding"], number(final_funding)), "wallet_funding_mismatch")
     net = sum(totals.values(), ZERO)
+    entry_value = sum((number(f["price"]) * number(f["size"]) for f in selected
+                       if f["order_id"] == entry_id), ZERO)
+    exit_value = sum((number(f["price"]) * number(f["size"]) for f in selected
+                      if f["order_id"] != entry_id), ZERO)
     return {"financial_reconciliation_status": "broker_reconciled",
             "reconciliation_version": VERSION, "reconciliation_reason": "matched_fills_and_wallet",
             "net_realized_pnl_usd": decimal_text(net), "is_net_realized_pnl": True,
             "funding_reconciled": True, "gross_realized_pnl_usd": decimal_text(totals["cashflow"]),
             "reconciled_fees_usd": decimal_text(-totals["commission"]),
             "funding_cashflow_usd": decimal_text(totals["funding"]),
+            # Display averages only; net P&L above uses unrounded fill cashflows.
+            "reconciled_entry_price": decimal_text((entry_value / quantity).quantize(Decimal("0.00000001"))),
+            "reconciled_exit_price": decimal_text((exit_value / quantity).quantize(Decimal("0.00000001"))),
             "filled_contracts": decimal_text(quantity), "entry_fill_count": sum(f["order_id"] == entry_id for f in selected),
             "exit_fill_count": sum(f["order_id"] != entry_id for f in selected),
             "entry_at_us": first, "exit_at_us": last,

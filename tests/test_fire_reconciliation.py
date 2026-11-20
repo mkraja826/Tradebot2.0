@@ -123,11 +123,26 @@ class ReconciliationTests(unittest.TestCase):
         report = self.run_report()
         self.assertEqual(report["filled_contracts"], "2", report)
         self.assertEqual(report["net_realized_pnl_usd"], "0.075")
+        self.assertEqual(report["reconciled_entry_price"], "60005")
+        self.assertEqual(report["reconciled_exit_price"], "60105")
 
     def test_maker_rebate_is_not_charged_as_positive_fee(self):
         self.broker.fills[0]["commission"] = "-0.01"
         self.broker.postings[0]["amount"] = "0.01"
         self.assertEqual(self.run_report()["net_realized_pnl_usd"], "0.095")
+
+    def test_weighted_display_averages_do_not_round_realized_pnl(self):
+        self.broker.trade["contracts"] = 3
+        self.broker.orders["100"]["size"] = 3
+        self.broker.orders["101"]["size"] = 3
+        for fill, size, position in zip(self.broker.fills, (2, 1, 1, 2), (2, 3, 2, 0)):
+            fill["size"] = str(size)
+            fill["meta_data"]["new_position"]["size"] = position
+        self.broker.postings[-2]["amount"] = "0.31"
+        report = self.run_report()
+        self.assertEqual(report["net_realized_pnl_usd"], "0.185", report)
+        self.assertEqual(report["reconciled_entry_price"], "60003.33333333")
+        self.assertEqual(report["reconciled_exit_price"], "60106.66666667")
 
     def test_deposit_is_excluded_even_in_trade_interval(self):
         self.broker.postings.append(self.broker.posting("deposit", "deposit", "10000", 30))

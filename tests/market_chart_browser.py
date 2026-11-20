@@ -61,11 +61,14 @@ with sync_playwright() as pw:
     page.wait_for_selector('#desk-player',state='hidden')
     reconciliation_fixture.update(is_net_realized_pnl=True,financial_reconciliation_status='broker_reconciled',
         net_realized_pnl_usd='0.075',reconciled_fees_usd='0.1',funding_cashflow_usd='-0.025',
+        reconciled_entry_price='3700',reconciled_exit_price='3705',
         entry_fill_count=2,exit_fill_count=2,reconciliation_as_of_us=now*1000000)
     page.locator('#desk-history button').first.click()
     page.get_by_text('Verified net P&L (USD) · 0.075',exact=True).wait_for()
     assert 'Fees / funding cashflow (USD) · 0.1 / -0.025' in page.locator('#desk-scorecard').inner_text()
     assert 'Provisional P&L' not in page.locator('#desk-scorecard').inner_text()
+    assert 'Exit · Closed · average fill 3,705' in page.locator('#desk-scorecard').inner_text()
+    assert 'No confirmed bracket fill' not in page.locator('#desk-scorecard').inner_text()
     page.locator('#desk-live').click()
     page.wait_for_selector('#desk-player',state='hidden')
     reconciliation_fixture.update(is_net_realized_pnl=False,financial_reconciliation_status='awaiting_complete_broker_evidence',
