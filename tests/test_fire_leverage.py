@@ -63,6 +63,41 @@ class DynamicLeverageTests(unittest.TestCase):
         with self.assertRaises(LeverageRejected):
             verify_liquidation_clearance(self.broker, 27, self.plan, self.position)
 
+    def test_short_liquidation_buffer_enforced_in_both_directions(self):
+        self.broker.position = -1
+        plan = {"direction": "SHORT", "contracts": 1, "leverage": 20,
+                "stop_loss": "63600", "take_profit": "62000"}
+        position = {"product_id": 27, "size": -1, "entry_price": "63214.25"}
+        self.broker.liquidation_price = "65000"
+        proof = verify_liquidation_clearance(self.broker, 27, plan, position)
+        self.assertTrue(proof["liquidation_verified"])
+        self.assertEqual(proof["liquidation_price"], "65000")
+        self.broker.liquidation_price = "64000"
+        with self.assertRaises(LiquidationUnsafe):
+            verify_liquidation_clearance(self.broker, 27, plan, position)
+
+    def test_exact_one_percent_liquidation_buffer_boundary_rejected(self):
+        from decimal import Decimal
+        entry = Decimal("63214.25")
+        buffer = entry * Decimal("0.01")
+        for direction, sign, stop in (
+            ("LONG", 1, Decimal("62950")),
+            ("SHORT", -1, Decimal("63600")),
+        ):
+            with self.subTest(direction=direction):
+                self.broker.position = sign
+                self.plan["direction"] = direction
+                self.plan["stop_loss"] = str(stop)
+                self.position["size"] = sign
+                # The safety inequality is strict: exactly 1% is NOT safe.
+                self.broker.liquidation_price = str(
+                    stop - buffer if direction == "LONG" else stop + buffer
+                )
+                with self.assertRaises(LiquidationUnsafe):
+                    verify_liquidation_clearance(
+                        self.broker, 27, self.plan, self.position
+                    )
+
     def test_signed_profile_margin_mode_required(self):
         self.broker.position = 1
         self.broker.margin_mode = "portfolio"
