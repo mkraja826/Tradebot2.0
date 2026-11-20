@@ -65,6 +65,11 @@ class ReceiptTests(unittest.TestCase):
         with self.assertRaisesRegex(EquityReadError, "boundary_ambiguous"):
             validate_receipt("1000", r, now=at)
 
+    def test_fresh_prior_day_receipt_cannot_authorize_after_midnight(self):
+        at = NOW.replace(minute=0) - timedelta(seconds=5)
+        with self.assertRaisesRegex(EquityReadError, "boundary_ambiguous"):
+            validate_receipt("1000", receipt_for(at=at), now=at + timedelta(seconds=10))
+
     def test_original_evidence_and_receipts_immutable_and_duplicate_safe(self):
         with TemporaryDirectory() as tmp:
             guard = PortfolioEquityGuard(Path(tmp) / "risk.sqlite")

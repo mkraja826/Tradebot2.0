@@ -66,6 +66,7 @@ def validate_receipt(equity, receipt, *, now=None):
     # A response straddling midnight cannot establish which period's opening
     # was observed. Wait for the next genuine read, never move its timestamp.
     day = 86_400_000_000
-    if started // day != received // day or server // day != received // day:
+    if (started // day != received // day or server // day != received // day
+            or now_us // day != received // day):
         raise EquityReadError("equity_boundary_ambiguous")
     return datetime.fromtimestamp(received / 1_000_000, timezone.utc)
