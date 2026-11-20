@@ -66,6 +66,14 @@ def audit_leverage_broker(markets):
             if leverage <= 0:
                 raise ValueError("invalid leverage")
             state["configured_leverage"] = str(leverage)
+            # The profile is a separate signed request; the margined position
+            # schema doesn't promise a margin_mode key.
+            profile = market._request("GET", "/v2/profile", auth=True)["result"]
+            if not isinstance(profile, dict) or profile.get("margin_mode") not in ("isolated", "portfolio"):
+                raise ValueError("unknown account margin mode")
+            state["margin_mode"] = profile["margin_mode"]
+            if state["margin_mode"] != "isolated":
+                result["blockers"].append(symbol.lower() + "_isolated_margin_required")
             if leverage > 20:
                 result["blockers"].append(symbol.lower() + "_leverage_above_20x")
             positions = market.positions()
@@ -109,14 +117,15 @@ def audit_leverage_broker(markets):
                 margin_entry = _number(row.get("entry_price"))
                 if live_entry <= 0 or abs(live_entry - margin_entry) > live_entry * Decimal("0.0001"):
                     raise ValueError("margin entry price mismatch")
-                state["margin_mode"] = str(row.get("margin_mode"))
+                if row.get("margin_mode", state["margin_mode"]) != state["margin_mode"]:
+                    raise ValueError("position margin mode conflicts with profile")
                 liquidation = _number(row.get("liquidation_price"))
                 if liquidation <= 0:
                     raise ValueError("unpriced liquidation")
                 state["liquidation_price"] = str(liquidation)
                 state["margin_evidence_verified"] = True
-                if state["margin_mode"] != "isolated":
-                    result["blockers"].append(symbol.lower() + "_isolated_margin_required")
+                # Margin mode was checked on the signed profile even when
+                # there were no active positions.
         except Exception:
             # Never serialize upstream errors, response bodies, headers or keys.
             result["blockers"].append(symbol.lower() + "_broker_evidence_unverified")

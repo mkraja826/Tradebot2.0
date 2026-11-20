@@ -47,6 +47,8 @@ class DemoAccount(FireMarket):
             return {"result":{"entry_price":"3800","size": self.gold_size}}
         if method == "GET" and path == "/v2/orders":
             return {"result":self.orders[:]}
+        if method == "GET" and path == "/v2/profile":
+            return {"result": {"margin_mode": "isolated"}}
         if method == "GET" and path == "/v2/positions/margined":
             assert params == {"product_ids": "82"}
             return {"result": ([{"product_id": 82, "size": self.gold_size,

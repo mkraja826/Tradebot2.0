@@ -20,8 +20,9 @@ pilot **continues to permit at most one contract** per manual FIRE.
 - Risk and margin are checked against the *selected* leverage before the
   mutation, then recalculated with signed broker leverage and equity after it.
 - After an entry fill, both SL and TP must be confirmed. The **signed**
-  `/v2/positions/margined` response must also confirm isolated margin,
-  matching signed position quantity and a liquidation price with at least
+  `/v2/profile` response must separately verify account-level isolated
+  margin, while `/v2/positions/margined` must verify the matching signed
+  position quantity and a liquidation price with at least
   1% of entry-price buffer *beyond* the SL. Missing/stale margin evidence
   causes fail-closed emergency closeout; it is not proof of a safe entry.
 - The watchdog rechecks broker liquidation evidence, never calls GPT-6 or

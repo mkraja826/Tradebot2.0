@@ -77,6 +77,8 @@ class FakeDemo:
                 "balances": [{"asset_symbol": "USD", "available_balance": "173.81"}]}
 
     def _request(self, method, path, *, auth=False, payload=None, params=None):
+        if method == "GET" and path == "/v2/profile":
+            return {"result": {"margin_mode": self.margin_mode}}
         if method == "GET" and path == "/v2/positions/margined":
             return {"result": ([{"product_id": 27, "size": self.position,
                                  "margin_mode": self.margin_mode,

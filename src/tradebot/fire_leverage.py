@@ -79,6 +79,11 @@ def verify_liquidation_clearance(exchange, product_id, plan, position):
     """
     if not isinstance(position, dict):
         raise LeverageRejected("Missing real-time filled position")
+    # Delta exposes margin_mode on the signed account profile, not on the
+    # documented /positions/margined response. Never assume isolated mode.
+    profile = exchange._request("GET", "/v2/profile", auth=True)["result"]
+    if not isinstance(profile, dict) or profile.get("margin_mode") != "isolated":
+        raise LeverageRejected("Signed isolated-margin account profile required")
     entry = _positive(position.get("entry_price"))
     expected = plan["contracts"] if plan["direction"] == "LONG" else -plan["contracts"]
     if _positive_or_zero(position.get("size")) != expected:
@@ -92,8 +97,12 @@ def verify_liquidation_clearance(exchange, product_id, plan, position):
     matches = [row for row in rows if isinstance(row, dict) and
                str(row.get("product_id")) == str(product_id) and
                _positive_or_zero(row.get("size")) != 0]
-    if len(matches) != 1 or matches[0].get("margin_mode") != "isolated":
-        raise LeverageRejected("Isolated margin position not verified")
+    if len(matches) != 1:
+        raise LeverageRejected("Margin-aware position not verified")
+    # Optional response field: if it exists, it must not contradict the
+    # account-wide margin mode independently verified above.
+    if matches[0].get("margin_mode", "isolated") != "isolated":
+        raise LeverageRejected("Position margin mode conflicts with profile")
     broker_position = matches[0]
     if _positive_or_zero(broker_position.get("size")) != expected:
         raise LeverageRejected("Margined position size mismatch")

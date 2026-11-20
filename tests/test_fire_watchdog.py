@@ -32,8 +32,12 @@ class Broker:
                   "product_symbol": "BTCUSD", "entry_price": "63214"}] if self.size else [])
 
     def _request(self, method, path, *, params=None, auth=False):
-        if method != "GET" or path != "/v2/positions/margined" or not auth:
+        if method != "GET" or not auth:
             raise AssertionError("Unexpected broker call")
+        if path == "/v2/profile":
+            return {"result": {"margin_mode": "isolated"}}
+        if path != "/v2/positions/margined":
+            raise AssertionError("Unexpected broker path")
         assert params == {"product_ids": "27"}
         return {"result": ([{"product_id": 27, "size": self.size,
                              "margin_mode": "isolated", "entry_price": "63214",

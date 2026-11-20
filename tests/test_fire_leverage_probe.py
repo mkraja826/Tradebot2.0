@@ -37,6 +37,8 @@ class FakeMarket:
         if path.endswith("/orders/leverage"):
             return {"result": {"product_id": self.product_id,
                                "leverage": self.leverage}}
+        if path == "/v2/profile":
+            return {"result": {"margin_mode": self.margin_mode}}
         if path == "/v2/positions/margined":
             assert params == {"product_ids": str(self.product_id)}
             return {"result": [{"product_id": self.product_id, "size": self.size,
@@ -64,6 +66,12 @@ class BrokerCompatibilityTests(unittest.TestCase):
         for broker in markets.values():
             self.assertTrue(all(call[0] == "GET" for call in broker.calls
                                 if isinstance(call, tuple)))
+
+    def test_flat_portfolio_margin_blocks_broker_commissioning(self):
+        result = audit_leverage_broker(self.markets(margin_mode="portfolio"))
+        self.assertIn("btcusd_isolated_margin_required", result["blockers"])
+        self.assertFalse(result["safe_to_deploy"])
+        self.assertEqual(result["markets"]["BTCUSD"]["margin_mode"], "portfolio")
 
     def test_active_btc_reports_evidence_but_prevents_release(self):
         result = audit_leverage_broker(self.markets(size=-20, leverage=100))
