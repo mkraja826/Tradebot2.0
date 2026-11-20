@@ -2,7 +2,7 @@
 import unittest
 
 from tradebot.fire_leverage import (
-    LeverageRejected, synchronize_leverage, verify_liquidation_clearance
+    LeverageRejected, LiquidationUnsafe, synchronize_leverage, verify_liquidation_clearance
 )
 from test_fire_execution import FakeDemo
 
@@ -56,7 +56,7 @@ class DynamicLeverageTests(unittest.TestCase):
         self.assertEqual(proof["liquidation_price"], "60000")
         self.assertTrue(proof["liquidation_verified"])
         self.broker.liquidation_price = "62700"
-        with self.assertRaises(LeverageRejected):
+        with self.assertRaises(LiquidationUnsafe):
             verify_liquidation_clearance(self.broker, 27, self.plan, self.position)
         self.broker.liquidation_price = "60000"
         self.broker.margin_mode = "portfolio"

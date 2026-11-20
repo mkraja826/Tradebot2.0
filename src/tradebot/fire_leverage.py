@@ -12,6 +12,14 @@ class LeverageRejected(ValueError):
     pass
 
 
+class LiquidationUnsafe(LeverageRejected):
+    """Broker supplied a liquidation level that violates the SL safety gap.
+
+    This is NOT stale/missing evidence: do not spend retry time on a proven
+    unsafe position. The caller must take the emergency-closeout pathway.
+    """
+
+
 def _positive(raw):
     try:
         value = Decimal(str(raw))
@@ -115,7 +123,7 @@ def verify_liquidation_clearance(exchange, product_id, plan, position):
     stop = _positive(plan["stop_loss"])
     gap = entry * Decimal("0.01")
     if plan["direction"] == "LONG" and not liquidation + gap < stop:
-        raise LeverageRejected("Liquidation too close to LONG stop-loss")
+        raise LiquidationUnsafe("Liquidation too close to LONG stop-loss")
     if plan["direction"] == "SHORT" and not liquidation - gap > stop:
-        raise LeverageRejected("Liquidation too close to SHORT stop-loss")
+        raise LiquidationUnsafe("Liquidation too close to SHORT stop-loss")
     return {"liquidation_verified": True, "liquidation_price": str(liquidation)}

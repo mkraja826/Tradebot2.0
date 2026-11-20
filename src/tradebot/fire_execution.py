@@ -22,7 +22,7 @@ from uuid import uuid4
 from tradebot.delta import DEMO_API, DeltaDemo, DeltaError
 from tradebot.execution import DemoExecutor
 from tradebot.fire_budget import entry_budget
-from tradebot.fire_leverage import synchronize_leverage, verify_liquidation_clearance, LeverageRejected
+from tradebot.fire_leverage import synchronize_leverage, verify_liquidation_clearance, LeverageRejected, LiquidationUnsafe
 from tradebot.fire_account_guard import require_flat_demo_account
 from tradebot.fire_portfolio_reservation import FirePortfolioReservation
 from tradebot.fire_risk import assess_fire_plan
@@ -289,7 +289,13 @@ def _protection_check(exchange, receipt, *, pause=sleep, attempts=12):
                 receipt["protected_at"] = _now().isoformat()
                 try:
                     receipt.update(verify_liquidation_clearance(exchange, product_id, plan, position))
+                except LiquidationUnsafe:
+                    # Broker evidence explicitly places liquidation inside
+                    # the stop buffer. Any retry delays emergency closeout.
+                    raise
                 except LeverageRejected:
+                    # Only missing/stale margin evidence is temporarily
+                    # retried; after the bounded window, fail closed.
                     if attempt == attempts - 1:
                         raise
                     pause(1)

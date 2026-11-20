@@ -3,8 +3,10 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from tradebot.delta import DEMO_API, DeltaError
+from tradebot.fire_leverage import verify_liquidation_clearance
 from tradebot.portfolio_equity_guard import PortfolioEquityGuard
 from tradebot.fire_execution import (
     FireDemoController, FireTradeStore, protective_orders_verified,
@@ -224,6 +226,17 @@ class FireExecutionTests(unittest.TestCase):
         self.assertEqual(fire.snapshot()["status"], "flat_verified")
         self.assertEqual(fire.snapshot()["reason_code"], "emergency_flat_verified")
         self.assertFalse(fire.snapshot()["protection_verified"])
+        self.assertEqual(self.exchange.position, 0)
+
+    def test_proven_unsafe_liquidation_emergency_closes_without_11_second_retry(self):
+        self.exchange.liquidation_price = "63150"
+        with patch("tradebot.fire_execution.verify_liquidation_clearance",
+                   wraps=verify_liquidation_clearance) as clearance:
+            fire = self.make()
+            fire.start()
+        self.assertEqual(clearance.call_count, 1)
+        self.assertEqual(fire.snapshot()["status"], "flat_verified")
+        self.assertEqual(fire.snapshot()["reason_code"], "emergency_flat_verified")
         self.assertEqual(self.exchange.position, 0)
 
     def test_unrelated_margin_position_blocks_before_paid_gpt(self):
