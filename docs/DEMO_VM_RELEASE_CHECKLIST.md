@@ -45,10 +45,14 @@ a `flat_verified` receipt is NOT net-P&L verification.
    watchdog health. Check snapshot freshness and the verified vs provisional
    financial labels. Roll back service code safely if needed **without
    reverting the private receipt database** or disabling protection.
-9. Before considering any subsequent FIRE opt-in, separately verify 5x-or-
-   lower broker leverage for each selected contract, historical candle
-   integrity, signed equity opening checkpoints and loss limits, and
-   manual broker supervision. Autonomy remains DISABLED.
+9. For the staged dynamic-leverage PR, do not enable FIRE unless each
+   selected broker leverage is at most **20x**, and GPT-6 selection (1–20x),
+   the independent 0.25% per-trade equity-risk limit, margin readback,
+   isolated-margin liquidation clearance and the independent watchdog have
+   been exchange-commissioned. Historical candle integrity, signed equity
+   opening checkpoints, combined portfolio exposure and loss limits, and
+   manual broker supervision remain required. The 20x cap is not a target.
+   **Autonomy remains DISABLED.**
 
 **The preflight does not change leverage or broker settings.** It cannot
 verify protectiveness of stop orders, account-wide holdings omitted by the
