@@ -14,6 +14,7 @@ import time
 from tradebot.delta import DEMO_API, DeltaDemo
 from tradebot.execution import DemoExecutor
 from tradebot.fire_market import FireMarket, positions_for_fire
+from tradebot.fire_leverage import verify_liquidation_clearance, LeverageRejected
 from tradebot.portfolio_equity_guard import PortfolioEquityGuard
 from tradebot.fire_execution import (
     EXPOSED, FireTradeStore, active_position, protective_orders_verified
@@ -102,8 +103,13 @@ def watchdog_tick(exchange, store, *, pause=None):
                  protective_orders_verified(orders, product_id=product_id,
                                             plan=plan))
     if confirmed:
-        store.update(press, "protected_active", protection_verified=True)
-        return {"status": "protected_active"}
+        try:
+            proof = verify_liquidation_clearance(exchange, product_id, plan, position)
+        except (LeverageRejected, KeyError, TypeError):
+            confirmed = False
+        else:
+            store.update(press, "protected_active", protection_verified=True, **proof)
+            return {"status": "protected_active"}
 
     # A position with incomplete brackets is not safe to abandon when the
     # browser closes, but this automated emergency closeout may still fail.

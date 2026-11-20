@@ -42,13 +42,13 @@ def synchronize_leverage(exchange, product_id, leverage):
     current = _leverage_setting(exchange, product_id)
     if current > 20:
         raise LeverageRejected("Operator must reduce legacy broker leverage first")
-    rows = positions_for_fire(exchange)
-    if (not isinstance(rows, list)
-            or any(not isinstance(row, dict) or
-                   _positive_or_zero(row.get("size")) != 0 for row in rows)
-            or exchange.open_orders()):
-        raise LeverageRejected("Leverage change requires flat broker account for selected market")
     if current != leverage:
+        rows = positions_for_fire(exchange)
+        if (not isinstance(rows, list)
+                or any(not isinstance(row, dict) or
+                       _positive_or_zero(row.get("size")) != 0 for row in rows)
+                or exchange.open_orders()):
+            raise LeverageRejected("Leverage change requires flat broker account for selected market")
         reply = exchange._request(
             "POST", f"/v2/products/{product_id}/orders/leverage",
             auth=True, payload={"leverage": str(leverage)}
