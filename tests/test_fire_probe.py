@@ -79,6 +79,15 @@ class FireProbeTest(unittest.TestCase):
         self.assertEqual(validate(PLAN | dict(direction="SHORT", stop_loss=109, take_profit=95),
                                   CORE)["direction"], "SHORT")
 
+    def test_dynamic_leverage_schema_fails_closed(self):
+        for leverage in (0, 21, True, 2.5, "5", None):
+            with self.subTest(leverage=leverage), self.assertRaises(PlanError):
+                validate(PLAN | {"leverage": leverage}, CORE, require_leverage=True)
+        self.assertEqual(validate(PLAN | {"leverage":20}, CORE,
+                                  require_leverage=True)["leverage"], 20)
+        with self.assertRaises(PlanError):
+            validate(PLAN, CORE, require_leverage=True)
+
     def test_observer_still_uses_primary_route(self):
         self.assertEqual(AIPlanner(model=PRIMARY_MODEL).model, PRIMARY_MODEL)
         with self.assertRaises(PlanError):

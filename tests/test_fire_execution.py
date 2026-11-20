@@ -36,7 +36,7 @@ def seed_demo_equity(path, equity):
     return guard
 
 
-PLAN = {"direction": "LONG", "contracts": 1,
+PLAN = {"direction": "LONG", "contracts": 1, "leverage": 5,
         "stop_loss": "62950", "take_profit": "63950"}
 
 
@@ -52,6 +52,10 @@ class FakeDemo:
         self.active_orders = []
         self.order = None
         self.leverage = 5
+        self.leverage_changes = []
+        self.ignore_leverage_change = False
+        self.liquidation_price = "60000"
+        self.margin_mode = "isolated"
 
     def ticker(self, symbol):
         return {
@@ -63,7 +67,7 @@ class FakeDemo:
 
     def btc_positions(self):
         return ([{"product_id": 27, "size": str(self.position),
-                  "product_symbol": "BTCUSD"}] if self.position else [])
+                  "product_symbol": "BTCUSD", "entry_price": "63214.25"}] if self.position else [])
 
     def open_orders(self):
         return list(self.active_orders)
@@ -72,7 +76,17 @@ class FakeDemo:
         return {"meta": {"net_equity": "173.81"},
                 "balances": [{"asset_symbol": "USD", "available_balance": "173.81"}]}
 
-    def _request(self, method, path, *, auth=False, payload=None):
+    def _request(self, method, path, *, auth=False, payload=None, params=None):
+        if method == "GET" and path == "/v2/positions/margined":
+            return {"result": ([{"product_id": 27, "size": self.position,
+                                 "margin_mode": self.margin_mode,
+                                 "liquidation_price": self.liquidation_price}]
+                                if self.position else [])}
+        if method == "POST" and path.endswith("/orders/leverage"):
+            self.leverage_changes.append(payload)
+            if not self.ignore_leverage_change:
+                self.leverage = int(payload["leverage"])
+            return {"result": {"product_id": 27, "leverage": payload["leverage"]}}
         if method == "GET" and path.endswith("/orders/leverage"):
             return {"result": {"leverage": self.leverage, "product_id": 27}}
         if method == "GET" and path == "/v2/products/BTCUSD":
@@ -167,6 +181,34 @@ class FireExecutionTests(unittest.TestCase):
         self.assertFalse(fire.start()[0])
         self.assertEqual(len(self.exchange.requests), 1)
         self.assertFalse(self.make().start()[0])  # persistent across restart
+
+    def test_gpt6_can_select_lower_leverage_after_flat_verified_preflight(self):
+        fire = self.make(plan=PLAN | {"leverage": 3})
+        self.assertTrue(fire.start()[0])
+        state = fire.snapshot()
+        self.assertEqual(state["status"], "protected_active")
+        self.assertEqual(state["selected_leverage"], 3)
+        self.assertEqual(state["budget"]["leverage"], "3")
+        self.assertTrue(state["liquidation_verified"])
+        self.assertEqual(self.exchange.leverage_changes, [{"leverage": "3"}])
+        self.assertEqual(len(self.exchange.requests), 1)
+
+    def test_broker_leverage_readback_mismatch_blocks_order(self):
+        self.exchange.ignore_leverage_change = True
+        fire = self.make(plan=PLAN | {"leverage": 3})
+        self.assertTrue(fire.start()[0])
+        self.assertEqual(fire.snapshot()["status"], "rejected_no_order")
+        self.assertEqual(fire.snapshot()["reason_code"], "leverage_sync_failed")
+        self.assertEqual(self.exchange.requests, [])
+
+    def test_liquidation_inside_stop_triggers_emergency_flat(self):
+        self.exchange.liquidation_price = "63150"
+        fire = self.make()
+        self.assertTrue(fire.start()[0])
+        self.assertEqual(fire.snapshot()["status"], "flat_verified")
+        self.assertEqual(fire.snapshot()["reason_code"], "emergency_flat_verified")
+        self.assertFalse(fire.snapshot()["protection_verified"])
+        self.assertEqual(self.exchange.position, 0)
 
     def test_multiple_contracts_rejected_by_backend_pilot_cap(self):
         fire = self.make(plan=PLAN | {"contracts": 2})

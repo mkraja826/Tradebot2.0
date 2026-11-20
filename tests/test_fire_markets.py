@@ -47,6 +47,11 @@ class DemoAccount(FireMarket):
             return {"result":{"entry_price":"3800","size": self.gold_size}}
         if method == "GET" and path == "/v2/orders":
             return {"result":self.orders[:]}
+        if method == "GET" and path == "/v2/positions/margined":
+            assert params == {"product_ids": "82"}
+            return {"result": ([{"product_id": 82, "size": self.gold_size,
+                                 "margin_mode": "isolated", "liquidation_price": "3500"}]
+                                if self.gold_size else [])}
         if method == "GET" and path.startswith("/v2/orders/client_order_id/"):
             return {"result":self.parent}
         assert payload["product_id"] == 82
@@ -107,7 +112,7 @@ class MarketTest(unittest.TestCase):
             def decide(routes, loader):
                 self.assertEqual(loader()["core"]["ticker"]["symbol"], "XAUTUSD")
                 self.assertEqual(loader()["fire_execution_scope"]["max_contracts_per_entry"], 1)
-                return {"results":{"fire":{"decision":{"direction":"LONG","contracts":1,
+                return {"results":{"fire":{"decision":{"direction":"LONG","contracts":1,"leverage":5,
                                                       "stop_loss":"3700","take_profit":"4000"}}}}
             desk = FireDemoController(Path(tmp)/"fire-xaut.sqlite",enabled=True,symbol="XAUTUSD",
                                       exchange_factory=lambda:broker,snapshot_loader=snapshot,probe=decide,
