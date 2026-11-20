@@ -29,7 +29,7 @@ class FireHttpTests(unittest.TestCase):
             self.model_calls.append(routes)
             self.assertIn("indicators", loader())
             return {"results": {"fire": {"decision": {
-                "direction": "LONG", "contracts": 1,
+                "direction": "LONG", "contracts": 1, "leverage": 5,
                 "stop_loss": "62950", "take_profit": "63950",
             }}}}
         trade = FireDemoController(
