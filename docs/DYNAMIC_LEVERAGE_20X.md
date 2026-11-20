@@ -8,6 +8,22 @@ The independent risk engine retains a 0.25% equity-at-risk allowance, fee and
 slippage reserve, and minimum 1.5x net reward-to-risk. The initial supervised
 pilot **continues to permit at most one contract** per manual FIRE.
 
+## Account-wide entry safety (added after broker-read verification)
+
+Before spending GPT-6 credits, and again before leverage synchronization and
+the durable entry intent, FIRE checks the **entire demo account** through
+signed GET requests. This requires an isolated-margin account profile,
+account-wide zero positions from /v2/positions/margined, independently
+verified real-time zero positions for BTCUSD and XAUTUSD, and **zero pending
+orders across all products**, not just the selected symbol. Unexpected
+responses or incomplete order pagination reject the trade.
+
+This intentionally disallows simultaneous manual/FIRE exposures in the
+shared Delta Demo account; the independent portfolio risk governor is not yet
+complete. The analytical margin endpoint may lag up to ten seconds, so no
+single check certifies future flatness and no guarantee against an unrelated
+manual trade racing the request is implied. Do not enable autonomous FIRE.
+
 ## Broker integration
 
 - A legacy broker setting above 20x fails before any billable GPT-6 call.
