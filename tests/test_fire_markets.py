@@ -17,7 +17,7 @@ class DemoAccount(FireMarket):
     def __init__(self):
         super().__init__("XAUTUSD", allow_orders=True)
         self.btc_order = {"id": 1, "product_id": 27}
-        self.orders = [self.btc_order]
+        self.orders = []
         self.gold_size = 0
         self.posts = []
         self.parent = {}
@@ -33,6 +33,9 @@ class DemoAccount(FireMarket):
                 "quotes": {"best_bid":"3799", "best_ask":"3801"}}
 
     def _request(self, method, path, *, params=None, payload=None, auth=False):
+        if method == "GET" and path == "/v2/products/BTCUSD":
+            return {"result": {"symbol": "BTCUSD", "id": 27,
+                               "contract_type": "perpetual_futures"}}
         if method == "GET" and path == "/v2/products/XAUTUSD":
             return {"result": {"symbol": self.symbol, "id": 82, "contract_type": "perpetual_futures",
                                "settling_asset": {"symbol": "USD"}, "notional_type": "vanilla",
@@ -43,14 +46,16 @@ class DemoAccount(FireMarket):
             return {"result": [{"asset_symbol": "USD", "available_balance": "100"}],
                     "meta": {"net_equity": "100"}}
         if method == "GET" and path == "/v2/positions":
-            assert params == {"product_id":82}
+            assert params in ({"product_id":82}, {"product_id":27})
+            if params["product_id"] == 27:
+                return {"result": {"product_id": 27, "entry_price":"0","size":0}}
             return {"result":{"entry_price":"3800","size": self.gold_size}}
         if method == "GET" and path == "/v2/orders":
             return {"result":self.orders[:]}
         if method == "GET" and path == "/v2/profile":
             return {"result": {"margin_mode": "isolated"}}
         if method == "GET" and path == "/v2/positions/margined":
-            assert params == {"product_ids": "82"}
+            assert params in (None, {"product_ids": "82"})
             return {"result": ([{"product_id": 82, "size": self.gold_size,
                                  "margin_mode": "isolated", "entry_price": "3800",
                                  "liquidation_price": "3500"}]
@@ -123,10 +128,36 @@ class MarketTest(unittest.TestCase):
             self.assertTrue(desk.start()[0])
             self.assertEqual(desk.snapshot()["status"],"protected_active")
             self.assertEqual(watchdog_tick(broker,desk.store)["status"], "protected_active")
+            # A BTC manual order appearing AFTER Gold's verified entry must
+            # not be cancelled during Gold's emergency closeout.
+            broker.orders.insert(0, broker.btc_order)
             broker.orders.pop()
             self.assertEqual(watchdog_tick(broker,desk.store)["status"],"emergency_flat_verified")
             self.assertEqual(broker.orders,[broker.btc_order])
             self.assertEqual([p["reduce_only"] for p in broker.posts],[False,True])
+
+    def test_existing_btc_manual_order_prevents_gold_entry(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            broker = DemoAccount()
+            broker.orders = [broker.btc_order]
+            seed_demo_equity(Path(tmp) / "fire-xaut.sqlite", "100")
+            called = []
+            def snapshot(symbol):
+                return {"environment":"delta-india-demo", "position_contracts":0,
+                        "collected_at":datetime.now(timezone.utc).isoformat(),
+                        "core":{"best_bid":"3799","best_ask":"3801","ticker":broker.ticker(symbol)}}
+            def decide(routes, loader):
+                called.append(True)
+                return {"results":{"fire":{"decision":{"direction":"LONG",
+                      "contracts":1,"leverage":5,"stop_loss":"3700","take_profit":"4000"}}}}
+            desk = FireDemoController(Path(tmp)/"fire-xaut.sqlite", enabled=True,
+                                      symbol="XAUTUSD", exchange_factory=lambda: broker,
+                                      snapshot_loader=snapshot, probe=decide,
+                                      spawn=lambda callback:callback(), pause=lambda _:None)
+            desk.start()
+            self.assertEqual(desk.snapshot()["reason_code"], "account_exposure_preflight_failed")
+            self.assertEqual(called, [])
+            self.assertEqual(broker.posts, [])
 
     def test_independent_kimi_position_tracking(self):
         with tempfile.TemporaryDirectory() as tmp:
