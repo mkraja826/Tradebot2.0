@@ -110,6 +110,66 @@ class MarketTest(unittest.TestCase):
             self.assertEqual(market.product_id, 82)
             fetch.assert_called_once_with("XAUTUSD")
 
+    def test_emergency_reduce_only_precedes_protective_cancellation(self):
+        broker = DemoAccount()
+        broker.gold_size = 1
+        broker.orders = [
+            {"id": 8, "product_id": 82, "state": "pending", "stop_order_type": "stop_loss_order"},
+            {"id": 9, "product_id": 82, "state": "pending", "stop_order_type": "take_profit_order"},
+        ]
+        orig = broker._request
+        observations = []
+        def track(method, path, **kwargs):
+            if method == "POST" and path == "/v2/orders" and kwargs["payload"]["reduce_only"]:
+                self.assertTrue(broker.orders, "Bracket already cancelled before reduce-only exit")
+                observations.append("close_first")
+            if method == "DELETE":
+                self.assertEqual(broker.gold_size, 0, "Cancelled while position still open")
+                observations.append("cancel_after_flat")
+            return orig(method, path, **kwargs)
+        broker._request = track
+        broker.close_exposure(lambda _: None)
+        self.assertEqual(observations, ["close_first", "cancel_after_flat"])
+        self.assertEqual(broker.gold_size, 0)
+        self.assertEqual(broker.orders, [])
+
+    def test_failed_reduce_only_preserves_protective_orders(self):
+        broker = DemoAccount()
+        broker.gold_size = -1
+        stop = {"id": 8, "product_id": 82, "state": "pending", "stop_order_type": "stop_loss_order"}
+        broker.orders = [stop]
+        orig = broker._request
+        def reject(method, path, **kwargs):
+            if method == "POST" and path == "/v2/orders" and kwargs["payload"]["reduce_only"]:
+                raise DeltaError("Ambiguous reduce-only exit response")
+            return orig(method, path, **kwargs)
+        broker._request = reject
+        with self.assertRaises(DeltaError):
+            broker.close_exposure(lambda _: None)
+        self.assertEqual(broker.gold_size, -1)
+        self.assertEqual(broker.orders, [stop])
+
+    def test_unconfirmed_close_never_cancels_brackets_or_reposts(self):
+        broker = DemoAccount()
+        broker.gold_size = 1
+        broker.orders = [{"id": 8, "product_id": 82, "state": "pending",
+                          "stop_order_type": "stop_loss_order"}]
+        orig = broker._request
+        attempts = []
+        def delayed(method, path, **kwargs):
+            if method == "POST" and path == "/v2/orders" and kwargs["payload"]["reduce_only"]:
+                attempts.append("post")
+                return {"result": {"id": 42}}
+            if method == "DELETE":
+                self.fail("Unconfirmed exit cancelled protection")
+            return orig(method, path, **kwargs)
+        broker._request = delayed
+        with self.assertRaisesRegex(DeltaError, "protective orders preserved"):
+            broker.close_exposure(lambda _: None)
+        self.assertEqual(attempts, ["post"])
+        self.assertEqual(broker.gold_size, 1)
+        self.assertEqual(len(broker.orders), 1)
+
     def test_gold_entry_and_emergency_closeout_leave_bitcoin_order_alone(self):
         with tempfile.TemporaryDirectory() as tmp:
             broker = DemoAccount()
