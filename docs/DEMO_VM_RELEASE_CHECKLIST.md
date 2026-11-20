@@ -30,6 +30,11 @@ a `flat_verified` receipt is NOT net-P&L verification.
    while leaving existing services untouched. Run offline tests.
 5. Load the VM's *existing private* demo API environment and run:
    `python -m tradebot.demo_upgrade_preflight --data-dir data`
+   The preflight uses account-wide GET /v2/positions/margined plus
+   per-product filtered GET /v2/positions; unfiltered GET /v2/positions
+   returns HTTP 400 on Delta India Demo. Margined positions may lag up to
+   10 seconds; repeat the GET-only preflight after at least 10 seconds and
+   keep new entries disabled throughout the deployment window.
    The preflight only makes signed/demo GET requests and opens existing
    receipt databases in read-only mode. Exit code 2 means **DO NOT RESTART**.
 6. A zero exit code means **only** that no currently open broker
