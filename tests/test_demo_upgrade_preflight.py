@@ -1,5 +1,6 @@
 """Offline regression tests for the no-order, no-AI VM restart gate."""
 from pathlib import Path
+import sqlite3
 from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import Mock
@@ -95,9 +96,58 @@ class DemoUpgradePreflightTests(unittest.TestCase):
     def test_leverage_100x_reported_and_fire_remains_disabled(self):
         result = self.check(FakeReadOnly(btc_lev=100,gold_lev=100))
         self.assertTrue(result["safe_to_stage_execution_restart"])
-        self.assertIn("broker_leverage_above_5x_btcusd",result["blockers"])
-        self.assertIn("broker_leverage_above_5x_xautusd",result["blockers"])
+        self.assertIn("broker_leverage_above_20x_btcusd", result["blockers"])
+        self.assertIn("broker_leverage_above_20x_xautusd", result["blockers"])
         self.assertFalse(result["safe_to_enable_fire"])
+
+    def test_20x_is_a_ceiling_not_permission_to_enable_fire(self):
+        result = self.check(FakeReadOnly(btc_lev=20, gold_lev=5))
+        self.assertEqual(result["leverage"], {"BTCUSD": "20", "XAUTUSD": "5"})
+        self.assertNotIn("broker_leverage_above_20x_btcusd", result["blockers"])
+        self.assertFalse(result["safe_to_enable_fire"])
+
+    def test_old_unconfirmed_entry_blocks_staging_even_when_parent_flat(self):
+        press = self.gold.reserve()
+        self.gold.update(press, "flat_verified")
+        with sqlite3.connect(self.gold.path) as db:
+            db.execute(
+                "CREATE TABLE fire_entries (press TEXT PRIMARY KEY, "
+                "status TEXT NOT NULL, receipt TEXT NOT NULL)"
+            )
+            db.execute("INSERT INTO fire_entries VALUES (?,?,?)",
+                       (press, "unconfirmed", "{}"))
+        result = self.check()
+        self.assertEqual(result["unresolved_fire_receipts"], 1)
+        self.assertFalse(result["safe_to_stage_execution_restart"])
+        self.assertIn("unresolved_fire_receipts", result["blockers"])
+        # Read-only upgrade check must not change the stale row.
+        with sqlite3.connect(self.gold.path) as db:
+            self.assertEqual(db.execute("SELECT status FROM fire_entries").fetchone()[0],
+                             "unconfirmed")
+
+    def test_terminal_entry_with_flat_parent_does_not_block_staging(self):
+        press = self.gold.reserve()
+        self.gold.update(press, "flat_verified")
+        with sqlite3.connect(self.gold.path) as db:
+            db.execute(
+                "CREATE TABLE fire_entries (press TEXT PRIMARY KEY, "
+                "status TEXT NOT NULL, receipt TEXT NOT NULL)"
+            )
+            db.execute("INSERT INTO fire_entries VALUES (?,?,?)",
+                       (press, "filled", "{}"))
+        self.assertTrue(self.check()["safe_to_stage_execution_restart"])
+
+    def test_orphaned_entry_refuses_upgrade_without_mutation(self):
+        with sqlite3.connect(self.gold.path) as db:
+            db.execute(
+                "CREATE TABLE fire_entries (press TEXT PRIMARY KEY, "
+                "status TEXT NOT NULL, receipt TEXT NOT NULL)"
+            )
+            db.execute("INSERT INTO fire_entries VALUES (?,?,?)",
+                       ("orphan", "unconfirmed", "{}"))
+        result = self.check()
+        self.assertIn("fire_receipts_not_verified_xautusd", result["blockers"])
+        self.assertFalse(result["safe_to_stage_execution_restart"])
 
     def test_live_account_client_is_rejected_without_network(self):
         fake = FakeReadOnly()

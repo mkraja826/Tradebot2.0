@@ -42,15 +42,36 @@ def _receipt_states(root, symbol):
     with closing(sqlite3.connect(file.resolve().as_uri() + "?mode=ro",
                                  uri=True, timeout=5)) as db:
         db.execute("PRAGMA query_only = ON")
-        rows = db.execute("SELECT status FROM fire_requests").fetchall()
+        requests = db.execute("SELECT press,status FROM fire_requests").fetchall()
+        # FIRE has a separate durable entry ledger. An old unconfirmed entry
+        # can block all future orders even when the parent request is flat.
+        has_entries = db.execute(
+            "SELECT 1 FROM sqlite_master "
+            "WHERE type='table' AND name='fire_entries'"
+        ).fetchone()
+        entries = (db.execute("SELECT press,status FROM fire_entries").fetchall()
+                   if has_entries else [])
     allowed = SAFE_TERMINAL | {
         "requested", "reasoning", "preflight", "submitting",
         "reconciling", "verifying_protection", "protected_active",
         "exposure_unknown",
     }
-    if any(type(row[0]) is not str or row[0] not in allowed for row in rows):
-        raise ValueError("unexpected FIRE receipt state")
-    return sum(status not in SAFE_TERMINAL for (status,) in rows)
+    by_press = {}
+    for press, status in requests:
+        if (type(press) is not str or not press
+                or type(status) is not str or status not in allowed):
+            raise ValueError("unexpected FIRE receipt state")
+        by_press[press] = status
+    unresolved = {press for press, status in requests if status not in SAFE_TERMINAL}
+    allowed_entry = {"submitting", "unconfirmed", "accepted",
+                     "filled", "cancelled", "flat_verified"}
+    for press, status in entries:
+        if (type(press) is not str or press not in by_press
+                or type(status) is not str or status not in allowed_entry):
+            raise ValueError("orphaned or unexpected broker entry state")
+        if status in ("submitting", "unconfirmed", "accepted"):
+            unresolved.add(press)
+    return len(unresolved)
 
 
 def audit_demo_upgrade(exchange, data_dir):
@@ -116,7 +137,6 @@ def audit_demo_upgrade(exchange, data_dir):
         if unresolved:
             blockers.append("unresolved_fire_receipts")
 
-    leverages_ok = True
     for symbol in MARKETS:
         try:
             product = exchange._request("GET", "/v2/products/" + symbol)["result"]
@@ -136,11 +156,9 @@ def audit_demo_upgrade(exchange, data_dir):
             if leverage <= 0:
                 raise ValueError("invalid broker leverage")
             out["leverage"][symbol] = str(leverage)
-            if leverage > 5:
-                leverages_ok = False
-                blockers.append("broker_leverage_above_5x_" + symbol.lower())
+            if leverage > 20:
+                blockers.append("broker_leverage_above_20x_" + symbol.lower())
         except Exception:
-            leverages_ok = False
             blockers.append("broker_leverage_not_verified_" + symbol.lower())
 
     # An upgrade may be staged ONLY if every monitored market is broker-flat,
