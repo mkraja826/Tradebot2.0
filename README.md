@@ -1,5 +1,14 @@
 # Tradebot 2.0 — Autonomous BTC derivatives research (Delta India demo only)
 
+**Latest repository increment (2026-11-20):** closed BTCUSD/XAUTUSD FIRE reviews
+can reconcile individual entry/exit fills against signed wallet cashflows,
+commissions, and funding. Only complete, consistent evidence exposes verified
+net P&L; all other outcomes remain unverified with a reason. The engine is
+read-only and uses no paid AI. This increment has not been deployed or
+commissioned against the operator's VM. See the current
+[professional upgrade progress](docs/PROFESSIONAL_UPGRADE.md#increment-8--fill-and-wallet-reconciliation);
+older milestones below describe their original commissioning checkpoints.
+
 A Bitcoin-only AI futures and options bot project for the **Delta Exchange India testnet/demo account**. The repository has **no live-account support**. Trading is not running or deployed. The CLI defaults to read-only, with an **explicitly gated testnet-only order mode**. No keys are stored in this repository.
 
 ## Current GPT-6 FIRE Demo release (operator opt-in; not broker commissioned)
