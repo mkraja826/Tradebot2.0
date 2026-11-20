@@ -17,6 +17,12 @@ fi
 if [[ "$(sudo systemctl is-active tradebot2-dashboard)" != "active" ]]; then
   echo "Private dashboard must be active first." >&2; exit 1
 fi
+# The fail-closed disable drop-in takes precedence over EnvironmentFile.
+# Never report FIRE enabled while it still explicitly suppresses execution.
+if [[ -f /etc/systemd/system/tradebot2-dashboard.service.d/99-fire-disabled.conf ]]; then
+  echo "FIRE is explicitly disabled. Supervised risk commissioning is required before re-enabling." >&2
+  exit 1
+fi
 # Refuse to enable real POSTs unless the dashboard already has its
 # authenticated Cloudflare hostname configured (never open VM firewall).
 EXISTING_ENV="$(sudo systemctl show -p Environment --value tradebot2-dashboard)"
