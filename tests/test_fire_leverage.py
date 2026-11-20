@@ -63,6 +63,12 @@ class DynamicLeverageTests(unittest.TestCase):
         with self.assertRaises(LeverageRejected):
             verify_liquidation_clearance(self.broker, 27, self.plan, self.position)
 
+    def test_stale_margin_entry_cannot_certify_new_position(self):
+        self.broker.position = 1
+        self.position["entry_price"] = "63500"
+        with self.assertRaises(LeverageRejected):
+            verify_liquidation_clearance(self.broker, 27, self.plan, self.position)
+
     def test_missing_margin_evidence_is_never_safe_by_default(self):
         self.broker.position = 1
         self.broker.liquidation_price = None

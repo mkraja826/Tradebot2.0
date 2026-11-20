@@ -62,8 +62,8 @@ class BrokerCompatibilityTests(unittest.TestCase):
         self.assertFalse(result["order_mutations"])
         self.assertEqual(result["ai_calls"], 0)
         for broker in markets.values():
-            self.assertTrue(all(method == "GET" for method, _ in broker.calls
-                                if isinstance(method, str) and method == "GET"))
+            self.assertTrue(all(call[0] == "GET" for call in broker.calls
+                                if isinstance(call, tuple)))
 
     def test_active_btc_reports_evidence_but_prevents_release(self):
         result = audit_leverage_broker(self.markets(size=-20, leverage=100))

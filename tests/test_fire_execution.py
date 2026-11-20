@@ -80,6 +80,7 @@ class FakeDemo:
         if method == "GET" and path == "/v2/positions/margined":
             return {"result": ([{"product_id": 27, "size": self.position,
                                  "margin_mode": self.margin_mode,
+                                 "entry_price": "63214.25",
                                  "liquidation_price": self.liquidation_price}]
                                 if self.position else [])}
         if method == "POST" and path.endswith("/orders/leverage"):

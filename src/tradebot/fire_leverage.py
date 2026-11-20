@@ -97,6 +97,11 @@ def verify_liquidation_clearance(exchange, product_id, plan, position):
     broker_position = matches[0]
     if _positive_or_zero(broker_position.get("size")) != expected:
         raise LeverageRejected("Margined position size mismatch")
+    # The analytical endpoint can lag by up to 10 seconds. A same-sized
+    # *previous* position must not certify the newly filled entry.
+    margin_entry = _positive(broker_position.get("entry_price"))
+    if abs(margin_entry - entry) > entry * Decimal("0.0001"):
+        raise LeverageRejected("Margined entry price differs from live fill")
     liquidation = _positive(broker_position.get("liquidation_price"))
     stop = _positive(plan["stop_loss"])
     gap = entry * Decimal("0.01")

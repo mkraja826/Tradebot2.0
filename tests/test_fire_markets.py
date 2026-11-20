@@ -50,7 +50,8 @@ class DemoAccount(FireMarket):
         if method == "GET" and path == "/v2/positions/margined":
             assert params == {"product_ids": "82"}
             return {"result": ([{"product_id": 82, "size": self.gold_size,
-                                 "margin_mode": "isolated", "liquidation_price": "3500"}]
+                                 "margin_mode": "isolated", "entry_price": "3800",
+                                 "liquidation_price": "3500"}]
                                 if self.gold_size else [])}
         if method == "GET" and path.startswith("/v2/orders/client_order_id/"):
             return {"result":self.parent}

@@ -36,7 +36,8 @@ class Broker:
             raise AssertionError("Unexpected broker call")
         assert params == {"product_ids": "27"}
         return {"result": ([{"product_id": 27, "size": self.size,
-                             "margin_mode": "isolated", "liquidation_price": "60000"}]
+                             "margin_mode": "isolated", "entry_price": "63214",
+                             "liquidation_price": "60000"}]
                             if self.size else [])}
 
     def open_orders(self):
