@@ -23,6 +23,7 @@ from tradebot.delta import DEMO_API, DeltaDemo, DeltaError
 from tradebot.execution import DemoExecutor
 from tradebot.fire_budget import entry_budget
 from tradebot.fire_leverage import synchronize_leverage, verify_liquidation_clearance, LeverageRejected
+from tradebot.fire_account_guard import require_flat_demo_account
 from tradebot.fire_portfolio_reservation import FirePortfolioReservation
 from tradebot.fire_risk import assess_fire_plan
 from tradebot.portfolio_equity_guard import PortfolioEquityGuard
@@ -367,6 +368,10 @@ class FireDemoController:
             stage = "market_availability"
             if snapshot["position_contracts"] or active_position(exchange, product_id) or exchange.open_orders():
                 raise FireTradeError("Selected market already has a position or pending order")
+            stage = "account_exposure_preflight"
+            require_flat_demo_account(
+                exchange, selected_symbol=self.symbol, selected_product_id=product_id
+            )
             stage = "margin_budget"
             price = max(_dec(snapshot["core"]["best_ask"]), _dec(snapshot["core"]["ticker"]["mark_price"]))
             budget = entry_budget(exchange, self.symbol, product_id, price)
@@ -451,6 +456,10 @@ class FireDemoController:
             risk_assessment = assess_fire_plan(plan, current_budget, exchange_quote)
             self.store.update(press, "preflight", risk_assessment={
                 **risk_assessment, "equity_monitor": equity_recheck})
+            stage = "account_exposure_recheck"
+            require_flat_demo_account(
+                exchange, selected_symbol=self.symbol, selected_product_id=product_id
+            )
             stage = "leverage_sync"
             synchronize_leverage(exchange, product_id, plan["leverage"])
             # Recompute the final broker-verified budget after a leverage change.
@@ -461,6 +470,12 @@ class FireDemoController:
             final_assessment = assess_fire_plan(plan, final_budget, exchange_quote)
             self.store.update(press, "preflight", budget=final_budget, risk_assessment={
                 **final_assessment, "equity_monitor": equity_recheck})
+            # Final signed account-wide exposure check immediately before the
+            # durable order-intent path, even when leverage was unchanged.
+            stage = "account_exposure_final"
+            require_flat_demo_account(
+                exchange, selected_symbol=self.symbol, selected_product_id=product_id
+            )
             units = _dec(final_budget["contract_value"]) * plan["contracts"]
             estimated_entry = exchange_quote["best_ask" if plan["direction"] == "LONG" else "best_bid"]
             self.store.update(press, "submitting", sizing_estimate={
