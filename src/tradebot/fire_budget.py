@@ -3,8 +3,8 @@ from decimal import Decimal
 
 
 MARGIN_SHARE = Decimal("0.20")
-MAX_BROKER_LEVERAGE = Decimal("5")
-MAX_EFFECTIVE_LEVERAGE = Decimal("5")
+MAX_BROKER_LEVERAGE = Decimal("20")
+MAX_EFFECTIVE_LEVERAGE = Decimal("20")
 
 
 def number(value):
@@ -14,7 +14,7 @@ def number(value):
     return result
 
 
-def entry_budget(exchange, symbol, product_id, price):
+def entry_budget(exchange, symbol, product_id, price, *, planned_leverage=None):
     product = exchange._request("GET", "/v2/products/" + symbol)["result"]
     if (product["symbol"] != symbol or product["id"] != product_id
             or product["contract_type"] != "perpetual_futures"
@@ -24,9 +24,12 @@ def entry_budget(exchange, symbol, product_id, price):
     settings = exchange._request("GET", f"/v2/products/{product_id}/orders/leverage", auth=True)["result"]
     if str(settings.get("product_id", product_id)) != str(product_id):
         raise ValueError("Unexpected leverage product")
-    leverage = number(settings["leverage"])
-    if not 0 < leverage <= MAX_BROKER_LEVERAGE:
+    broker_leverage = number(settings["leverage"])
+    if not 0 < broker_leverage <= MAX_BROKER_LEVERAGE:
         raise ValueError("Configured broker leverage exceeds demo safety policy")
+    leverage = (broker_leverage if planned_leverage is None else number(planned_leverage))
+    if not 0 < leverage <= MAX_BROKER_LEVERAGE or leverage != leverage.to_integral_value():
+        raise ValueError("Planned leverage exceeds 20x policy")
     wallet = exchange.wallet_balances()
     equity = number(wallet["meta"]["net_equity"])
     usd, = (r for r in wallet["balances"] if r["asset_symbol"] == "USD")
@@ -65,6 +68,7 @@ def entry_budget(exchange, symbol, product_id, price):
             high = mid - 1
     return {"margin_budget_usd": str(ceiling), "leverage": str(leverage),
             "equity_usd": str(equity), "taker_commission_rate": str(fee),
-            "risk_policy": "fire-demo-risk-v1",
+            "risk_policy": "fire-demo-risk-v2-dynamic-leverage",
+            "broker_leverage": str(broker_leverage),
             "contract_value": str(multiplier), "max_contracts_per_entry": low,
             "notional_per_contract_usd": str(per_contract), "max_margin_usd": str(margin(low))}

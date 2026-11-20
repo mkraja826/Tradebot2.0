@@ -15,14 +15,14 @@ class RiskRejected(ValueError):
 @dataclass(frozen=True)
 class FireRiskLimits:
     equity_risk_fraction: Decimal = Decimal("0.0025")
-    max_effective_leverage: Decimal = Decimal("5")
+    max_effective_leverage: Decimal = Decimal("20")
     minimum_net_reward_risk: Decimal = Decimal("1.5")
     slippage_reserve_each_side: Decimal = Decimal("0.0005")
-    version: str = "fire-demo-risk-v1"
+    version: str = "fire-demo-risk-v2-dynamic-leverage"
 
     def __post_init__(self):
         if (not 0 < self.equity_risk_fraction <= Decimal("0.01")
-                or not 0 < self.max_effective_leverage <= Decimal("5")
+                or not 0 < self.max_effective_leverage <= Decimal("20")
                 or not Decimal("1") <= self.minimum_net_reward_risk
                 or not 0 <= self.slippage_reserve_each_side <= Decimal("0.01")):
             raise ValueError("Invalid demo risk policy")
@@ -53,6 +53,11 @@ def assess_fire_plan(plan, budget, quote, *, limits=None):
         raise RiskRejected("Supervised demo FIRE pilot permits only one contract")
     if contracts > budget.get("max_contracts_per_entry", -1):
         raise RiskRejected("Above verified margin limit")
+    leverage_selected = plan.get("leverage")
+    if type(leverage_selected) is not int or not 1 <= leverage_selected <= 20:
+        raise RiskRejected("GPT-6 proposed leverage outside 1..20")
+    if _amount(budget.get("leverage"), positive=True) != leverage_selected:
+        raise RiskRejected("Margin budget not calculated for proposed leverage")
     equity = _amount(budget.get("equity_usd"), positive=True)
     multiplier = _amount(budget.get("contract_value"), positive=True)
     fee_rate = _amount(budget.get("taker_commission_rate"))
@@ -80,10 +85,16 @@ def assess_fire_plan(plan, budget, quote, *, limits=None):
         raise RiskRejected("Stop-loss exposure exceeds equity risk limit")
     if leverage > limits.max_effective_leverage:
         raise RiskRejected("Effective leverage exceeds policy")
+    # Independent theoretical cushion, NOT a broker liquidation estimate.
+    # Reserve 2.5% for maintenance/fees and another 1% beyond the stop.
+    stop_fraction = abs(entry - stop) / entry
+    if stop_fraction + Decimal("0.035") >= Decimal(1) / leverage_selected:
+        raise RiskRejected("Stop too close to theoretical liquidation at selected leverage")
     if ratio < limits.minimum_net_reward_risk:
         raise RiskRejected("Expected net reward-to-risk below policy")
     return {
         "policy_version": limits.version,
+        "selected_leverage": leverage_selected,
         "equity_usd": str(equity),
         "notional_usd": str(notional),
         "estimated_loss_including_costs_usd": str(loss),
