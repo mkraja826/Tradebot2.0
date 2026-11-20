@@ -35,7 +35,7 @@ def verify_staging_samples(exchange, data_dir, *, pause=time.sleep):
         "blockers": [],
     }
     # Passing the positional data directory does not grant write permissions:
-    # audit_demo_upgrade opens receipt SQLite in immutable read-only mode.
+    # audit_demo_upgrade opens receipt SQLite in read-only mode.
     samples = []
     for sample_index in range(2):
         if sample_index:

@@ -28,15 +28,18 @@ a `flat_verified` receipt is NOT net-P&L verification.
    Do not copy credentials to GitHub, logs or chat.
 4. Install the latest tested repository commit in a staging worktree/venv
    while leaving existing services untouched. Run offline tests.
-5. Load the VM's *existing private* demo API environment and run:
-   `python -m tradebot.demo_upgrade_preflight --data-dir data`
-   The preflight uses account-wide GET /v2/positions/margined plus
-   per-product filtered GET /v2/positions; unfiltered GET /v2/positions
-   returns HTTP 400 on Delta India Demo. Margined positions may lag up to
-   10 seconds; repeat the GET-only preflight after at least 10 seconds and
-   keep new entries disabled throughout the deployment window.
-   The preflight only makes signed/demo GET requests and opens existing
-   receipt databases in read-only mode. Exit code 2 means **DO NOT RESTART**.
+5. Load the VM's *existing private* demo API environment in the isolated
+   staging worktree and run:
+   `python -m tradebot.fire_release_gate --data-dir data`
+   This read-only two-sample gate waits **11 seconds** between signed checks
+   to reduce stale-margin false-flat signals. It requires account-wide
+   GET /v2/positions/margined, both filtered real-time GET /v2/positions
+   (unfiltered returns HTTP 400 on Delta India Demo), an isolated-margin
+   signed profile, all account orders, and terminal SQLite FIRE receipts.
+   Exit code 2 means **DO NOT RESTART**. Even exit 0 is only a candidate
+   for manual staging: independently verify that NEW FIRE permission is
+   disabled and the watchdog is healthy. Do not run this check on a live
+   service code path or print any API credentials.
 6. A zero exit code means **only** that no currently open broker
    positions/orders or unresolved local FIRE requests were found. It does
    not authorize re-enabling FIRE and is not a full security/reconciliation
