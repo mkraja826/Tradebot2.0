@@ -22,6 +22,8 @@ from uuid import uuid4
 from tradebot.delta import DEMO_API, DeltaDemo, DeltaError
 from tradebot.execution import DemoExecutor
 from tradebot.fire_budget import entry_budget
+from tradebot.fire_leverage import synchronize_leverage, verify_liquidation_clearance, LeverageRejected, LiquidationUnsafe
+from tradebot.fire_account_guard import require_flat_demo_account
 from tradebot.fire_portfolio_reservation import FirePortfolioReservation
 from tradebot.fire_risk import assess_fire_plan
 from tradebot.portfolio_equity_guard import PortfolioEquityGuard
@@ -210,7 +212,7 @@ class FireTradeStore:
         allowed = {"model", "direction", "contracts", "stop_loss",
                    "take_profit", "broker_order_id", "order_state",
                    "protection_verified", "orders_submitted",
-                   "model_latency_ms", "budget", "sizing_estimate", "risk_assessment", "reason_code", "snapshot_at", "thesis", "decision_at", "entry", "exit_order_ids", "protected_at", "decision_quote", "indicators"}
+                   "model_latency_ms", "budget", "sizing_estimate", "risk_assessment", "reason_code", "snapshot_at", "thesis", "decision_at", "entry", "exit_order_ids", "protected_at", "decision_quote", "indicators", "selected_leverage", "liquidation_verified", "liquidation_price"}
         if set(fields) - allowed:
             raise FireTradeError("Unexpected FIRE status data")
         with closing(self._connect()) as db:
@@ -247,6 +249,21 @@ def _live_preflight(exchange, snapshot, plan):
     if bid <= 0 or ask <= bid:
         raise FireTradeError("Invalid broker spread")
     validate(plan, {"best_bid": str(bid), "best_ask": str(ask)})
+    # Delta can normalize off-tick bracket trigger prices. Because protection
+    # verification requires the exact requested triggers, reject off-grid
+    # prices BEFORE the order instead of relying on post-fill emergency exit.
+    product = exchange._request("GET", "/v2/products/" + symbol)["result"]
+    if (not isinstance(product, dict) or
+            str(product.get("id")) != str(snapshot["core"]["ticker"]["product_id"]) or
+            product.get("symbol") != symbol):
+        raise FireTradeError("Selected broker product not verified")
+    tick = _dec(product.get("tick_size"))
+    if tick <= 0:
+        raise FireTradeError("Invalid broker tick size")
+    for price_name in ("stop_loss", "take_profit"):
+        requested = _dec(plan[price_name])
+        if requested <= 0 or requested % tick != 0:
+            raise FireTradeError("GPT-6 exit price not aligned to current broker tick size")
     mark = _dec(ticker.get("mark_price"))
     stop, target = _dec(plan["stop_loss"]), _dec(plan["take_profit"])
     if (mark <= 0 or not (
@@ -265,7 +282,7 @@ def _live_preflight(exchange, snapshot, plan):
     return {"mark": mark, "best_bid": bid, "best_ask": ask}
 
 
-def _protection_check(exchange, receipt, *, pause=sleep, attempts=6):
+def _protection_check(exchange, receipt, *, pause=sleep, attempts=12):
     plan = receipt["plan"]
     product_id = receipt["product_id"]
     direction = 1 if plan["direction"] == "LONG" else -1
@@ -285,6 +302,19 @@ def _protection_check(exchange, receipt, *, pause=sleep, attempts=6):
                 receipt["exit_order_ids"] = {kind: next(iter(ids)) for kind, ids in found.items()
                                              if len(ids) == 1}
                 receipt["protected_at"] = _now().isoformat()
+                try:
+                    receipt.update(verify_liquidation_clearance(exchange, product_id, plan, position))
+                except LiquidationUnsafe:
+                    # Broker evidence explicitly places liquidation inside
+                    # the stop buffer. Any retry delays emergency closeout.
+                    raise
+                except LeverageRejected:
+                    # Only missing/stale margin evidence is temporarily
+                    # retried; after the bounded window, fail closed.
+                    if attempt == attempts - 1:
+                        raise
+                    pause(1)
+                    continue
                 return "protected_active"
         if attempt < attempts - 1:
             pause(1)
@@ -359,6 +389,10 @@ class FireDemoController:
             stage = "market_availability"
             if snapshot["position_contracts"] or active_position(exchange, product_id) or exchange.open_orders():
                 raise FireTradeError("Selected market already has a position or pending order")
+            stage = "account_exposure_preflight"
+            require_flat_demo_account(
+                exchange, selected_symbol=self.symbol, selected_product_id=product_id
+            )
             stage = "margin_budget"
             price = max(_dec(snapshot["core"]["best_ask"]), _dec(snapshot["core"]["ticker"]["mark_price"]))
             budget = entry_budget(exchange, self.symbol, product_id, price)
@@ -395,6 +429,8 @@ class FireDemoController:
                 "instrument": self.symbol + " perpetual futures",
                 **budget,
                 "attached_stop_loss_and_take_profit_required": True,
+                "dynamic_leverage_enabled": True,
+                "min_leverage": 1, "max_leverage": 20,
                 "separate_learning_model_has_no_trade_authority": True,
             }}
             stage = "save_model_input"
@@ -408,7 +444,7 @@ class FireDemoController:
                                   reason_code=decision_failure_code(raw.get("error")),
                                   orders_submitted=False, protection_verified=False)
                 return
-            plan = validate(raw["decision"], snapshot["core"])
+            plan = validate(raw["decision"], snapshot["core"], require_leverage=True)
             if plan["direction"] == "WAIT":
                 self.store.update(
                     press, "rejected_no_order", model_latency_ms=raw.get("latency_ms"),
@@ -417,7 +453,7 @@ class FireDemoController:
                     orders_submitted=False, protection_verified=False)
                 return
             self.store.update(
-                press, "preflight", direction=plan["direction"], model_latency_ms=raw.get("latency_ms"),
+                press, "preflight", direction=plan["direction"], selected_leverage=plan["leverage"], model_latency_ms=raw.get("latency_ms"),
                 contracts=plan["contracts"], stop_loss=plan["stop_loss"],
                 take_profit=plan["take_profit"],
                 snapshot_at=snapshot["collected_at"], decision_at=_now().isoformat(),
@@ -430,7 +466,8 @@ class FireDemoController:
             exchange_quote = _live_preflight(exchange, snapshot, plan)
             price = max(exchange_quote["mark"], exchange_quote["best_ask"])
             stage = "margin_budget_recheck"
-            current_budget = entry_budget(exchange, self.symbol, product_id, price)
+            current_budget = entry_budget(exchange, self.symbol, product_id, price,
+                                          planned_leverage=plan["leverage"])
             self.store.update(press, "preflight", budget=current_budget)
             if plan["contracts"] > current_budget["max_contracts_per_entry"]:
                 raise FireTradeError("Live margin budget changed")
@@ -440,7 +477,27 @@ class FireDemoController:
             risk_assessment = assess_fire_plan(plan, current_budget, exchange_quote)
             self.store.update(press, "preflight", risk_assessment={
                 **risk_assessment, "equity_monitor": equity_recheck})
-            units = _dec(current_budget["contract_value"]) * plan["contracts"]
+            stage = "account_exposure_recheck"
+            require_flat_demo_account(
+                exchange, selected_symbol=self.symbol, selected_product_id=product_id
+            )
+            stage = "leverage_sync"
+            synchronize_leverage(exchange, product_id, plan["leverage"])
+            # Recompute the final broker-verified budget after a leverage change.
+            stage = "leverage_budget_recheck"
+            final_budget = entry_budget(exchange, self.symbol, product_id, price)
+            if final_budget["leverage"] != str(plan["leverage"]) or plan["contracts"] > final_budget["max_contracts_per_entry"]:
+                raise FireTradeError("Verified leverage or margin budget changed")
+            final_assessment = assess_fire_plan(plan, final_budget, exchange_quote)
+            self.store.update(press, "preflight", budget=final_budget, risk_assessment={
+                **final_assessment, "equity_monitor": equity_recheck})
+            # Final signed account-wide exposure check immediately before the
+            # durable order-intent path, even when leverage was unchanged.
+            stage = "account_exposure_final"
+            require_flat_demo_account(
+                exchange, selected_symbol=self.symbol, selected_product_id=product_id
+            )
+            units = _dec(final_budget["contract_value"]) * plan["contracts"]
             estimated_entry = exchange_quote["best_ask" if plan["direction"] == "LONG" else "best_bid"]
             self.store.update(press, "submitting", sizing_estimate={
                 "notional_usd": str(units * estimated_entry),
@@ -478,6 +535,8 @@ class FireDemoController:
             state = _protection_check(exchange, receipt, pause=self.pause)
             self.store.update(
                 press, state, protection_verified=state == "protected_active",
+                liquidation_verified=receipt.get("liquidation_verified") is True,
+                liquidation_price=receipt.get("liquidation_price"),
                 exit_order_ids=receipt.get("exit_order_ids", {}), protected_at=receipt.get("protected_at"),
                 orders_submitted=True)
         except Exception:

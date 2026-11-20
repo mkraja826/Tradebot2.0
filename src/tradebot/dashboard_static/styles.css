@@ -172,3 +172,46 @@ body{background:var(--bg)}.eyebrow{color:#ddb982}.panel,.metric.card{border-colo
 .market-terminal h3 {font-size:1rem;margin:14px 0 8px}
 #desk-player:not([hidden]) {display:flex;gap:12px} #desk-scrub {flex:1}
 @media(max-width:650px){.market-terminal>.chart-top{align-items:flex-start;flex-direction:column}.market-actions label{position:absolute;clip-path:inset(50%)}.desk-tools button,.market-actions button{min-height:42px}}
+
+
+/* Signed-wallet equity checkpoint readiness: always visible on mobile and
+ * desktop, independent of FIRE controls. No execution affordance. */
+.equity-risk-banner {
+  border:1px solid #9c784e;
+  border-left:4px solid #e3af68;
+  border-radius:10px;
+  background:#2b251e;
+  padding:15px 17px;
+  margin:0 0 14px;
+  color:#f1e8d9;
+}
+.equity-risk-banner-heading {
+  display:flex;
+  justify-content:space-between;
+  align-items:baseline;
+  gap:12px;
+  flex-wrap:wrap;
+}
+.equity-risk-banner strong {font-size:13px;line-height:1.5;font-weight:750}
+#equity-risk-state {font-size:9px;letter-spacing:.8px;font-weight:800;color:#f2c387}
+.equity-risk-banner p {margin:8px 0 0;line-height:1.55;font-size:11px;color:#d6c7b5}
+.equity-risk-banner #equity-risk-detail {font-size:10px;color:#b9a998}
+.equity-risk-banner[data-state="healthy"] {
+  border-color:#4b6a61;
+  border-left-color:#79b5a0;
+  background:#192522;
+  color:#d5e8dc;
+}
+.equity-risk-banner[data-state="healthy"] #equity-risk-state {color:#9bd3bb}
+.equity-risk-banner[data-state="healthy"] p {color:#b5cfc3}
+.equity-risk-banner[data-state="evidence_unavailable"],
+.equity-risk-banner[data-state="evidence_stale"] {
+  border-left-color:#d38572;
+  background:#2b2222;
+}
+@media(max-width:650px) {
+  .equity-risk-banner {padding:13px;margin-bottom:12px}
+  .equity-risk-banner-heading {align-items:flex-start;flex-direction:column;gap:2px}
+  .equity-risk-banner strong {font-size:12px}
+  .equity-risk-banner p {font-size:11px;overflow-wrap:anywhere}
+}

@@ -28,10 +28,18 @@ a `flat_verified` receipt is NOT net-P&L verification.
    Do not copy credentials to GitHub, logs or chat.
 4. Install the latest tested repository commit in a staging worktree/venv
    while leaving existing services untouched. Run offline tests.
-5. Load the VM's *existing private* demo API environment and run:
-   `python -m tradebot.demo_upgrade_preflight --data-dir data`
-   The preflight only makes signed/demo GET requests and opens existing
-   receipt databases in read-only mode. Exit code 2 means **DO NOT RESTART**.
+5. Load the VM's *existing private* demo API environment in the isolated
+   staging worktree and run:
+   `python -m tradebot.fire_release_gate --data-dir data`
+   This read-only two-sample gate waits **11 seconds** between signed checks
+   to reduce stale-margin false-flat signals. It requires account-wide
+   GET /v2/positions/margined, both filtered real-time GET /v2/positions
+   (unfiltered returns HTTP 400 on Delta India Demo), an isolated-margin
+   signed profile, all account orders, and terminal SQLite FIRE receipts.
+   Exit code 2 means **DO NOT RESTART**. Even exit 0 is only a candidate
+   for manual staging: independently verify that NEW FIRE permission is
+   disabled and the watchdog is healthy. Do not run this check on a live
+   service code path or print any API credentials.
 6. A zero exit code means **only** that no currently open broker
    positions/orders or unresolved local FIRE requests were found. It does
    not authorize re-enabling FIRE and is not a full security/reconciliation
@@ -45,10 +53,14 @@ a `flat_verified` receipt is NOT net-P&L verification.
    watchdog health. Check snapshot freshness and the verified vs provisional
    financial labels. Roll back service code safely if needed **without
    reverting the private receipt database** or disabling protection.
-9. Before considering any subsequent FIRE opt-in, separately verify 5x-or-
-   lower broker leverage for each selected contract, historical candle
-   integrity, signed equity opening checkpoints and loss limits, and
-   manual broker supervision. Autonomy remains DISABLED.
+9. For the staged dynamic-leverage PR, do not enable FIRE unless each
+   selected broker leverage is at most **20x**, and GPT-6 selection (1–20x),
+   the independent 0.25% per-trade equity-risk limit, margin readback,
+   isolated-margin liquidation clearance and the independent watchdog have
+   been exchange-commissioned. Historical candle integrity, signed equity
+   opening checkpoints, combined portfolio exposure and loss limits, and
+   manual broker supervision remain required. The 20x cap is not a target.
+   **Autonomy remains DISABLED.**
 
 **The preflight does not change leverage or broker settings.** It cannot
 verify protectiveness of stop orders, account-wide holdings omitted by the

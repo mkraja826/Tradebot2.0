@@ -29,7 +29,20 @@ class Broker:
 
     def btc_positions(self):
         return ([{"product_id": 27, "size": str(self.size),
-                  "product_symbol": "BTCUSD"}] if self.size else [])
+                  "product_symbol": "BTCUSD", "entry_price": "63214"}] if self.size else [])
+
+    def _request(self, method, path, *, params=None, auth=False):
+        if method != "GET" or not auth:
+            raise AssertionError("Unexpected broker call")
+        if path == "/v2/profile":
+            return {"result": {"margin_mode": "isolated"}}
+        if path != "/v2/positions/margined":
+            raise AssertionError("Unexpected broker path")
+        assert params == {"product_ids": "27"}
+        return {"result": ([{"product_id": 27, "size": self.size,
+                             "margin_mode": "isolated", "entry_price": "63214",
+                             "liquidation_price": "60000"}]
+                            if self.size else [])}
 
     def open_orders(self):
         return list(self.orders)
@@ -74,7 +87,7 @@ class WatchdogTests(unittest.TestCase):
                 press, "filled", json.dumps({
                     "press": press, "status": "filled", "product_id": 27,
                     "order_id": 1234, "plan": {
-                        "direction": "LONG", "contracts": 1,
+                        "direction": "LONG", "contracts": 1, "leverage": 5,
                         "stop_loss": "62800", "take_profit": "63750",
                     },
                 }),

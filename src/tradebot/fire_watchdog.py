@@ -14,7 +14,9 @@ import time
 from tradebot.delta import DEMO_API, DeltaDemo
 from tradebot.execution import DemoExecutor
 from tradebot.fire_market import FireMarket, positions_for_fire
+from tradebot.fire_leverage import verify_liquidation_clearance, LeverageRejected
 from tradebot.portfolio_equity_guard import PortfolioEquityGuard
+from tradebot.equity_checkpoint_health import checkpoint_health
 from tradebot.fire_execution import (
     EXPOSED, FireTradeStore, active_position, protective_orders_verified
 )
@@ -102,8 +104,13 @@ def watchdog_tick(exchange, store, *, pause=None):
                  protective_orders_verified(orders, product_id=product_id,
                                             plan=plan))
     if confirmed:
-        store.update(press, "protected_active", protection_verified=True)
-        return {"status": "protected_active"}
+        try:
+            proof = verify_liquidation_clearance(exchange, product_id, plan, position)
+        except (LeverageRejected, KeyError, TypeError):
+            confirmed = False
+        else:
+            store.update(press, "protected_active", protection_verified=True, **proof)
+            return {"status": "protected_active"}
 
     # A position with incomplete brackets is not safe to abandon when the
     # browser closes, but this automated emergency closeout may still fail.
@@ -138,6 +145,8 @@ def main(argv=None):
                for symbol, path in (("BTCUSD", args.database),
                                     ("XAUTUSD", Path(args.database).with_name("fire-xaut.sqlite")))]
     equity_guard = PortfolioEquityGuard(Path(args.database).parent / "fire-equity-risk.sqlite")
+    last_checkpoint_status = None
+    last_checkpoint_log_at = 0.0
     while True:
         # Read-only sampling: maintain true UTC day/week opening checkpoints
         # even while no FIRE trade is requested. Never interrupt SL/TP protection.
@@ -148,6 +157,25 @@ def main(argv=None):
         except Exception:
             print(json.dumps({"status": "equity_evidence_unavailable",
                               "action": "new_fire_blocked_until_verified"}), flush=True)
+        # Emit an actionable alert immediately when a UTC opening window was
+        # missed. Reduce log noise by printing on state transitions or every
+        # five minutes, not every 15-second broker polling iteration.
+        health = checkpoint_health(equity_guard.path)
+        fingerprint = (health["status"], tuple(health["blocking_conditions"]))
+        tick_at = time.monotonic()
+        if (fingerprint != last_checkpoint_status or
+                tick_at - last_checkpoint_log_at >= 300):
+            print(json.dumps({
+                "event": "equity_checkpoint_health",
+                "status": health["status"],
+                "daily_checkpoint": health["daily_checkpoint"],
+                "weekly_checkpoint": health["weekly_checkpoint"],
+                "latest_observation_age_seconds": health["latest_observation_age_seconds"],
+                "alert_codes": health["alert_codes"],
+                "action": "block_new_fire_until_signed_equity_limits_pass",
+            }), flush=True)
+            last_checkpoint_status = fingerprint
+            last_checkpoint_log_at = tick_at
         for store, exchange in markets:
             try:
                 state = watchdog_tick(exchange, store)

@@ -14,11 +14,11 @@ ROLES = {"fire": "tb-gpt-6"}
 INSTRUCTION = (
     "Decide whether an actual perpetual futures trade is justified for the exact symbol in core.ticker.symbol. "
     "WAIT is a correct decision whenever evidence, cost, risk or entry quality is inadequate. "
-    "For WAIT return direction WAIT, contracts 0, stop_loss null, take_profit null, "
+    "For WAIT return direction WAIT, contracts 0, stop_loss null, take_profit null, leverage null, "
     "and a concise thesis explaining why no trade is justified. Never force an entry. "
-    "Otherwise return only a JSON object with direction (LONG or SHORT), contracts (positive "
+    "Otherwise return only a JSON object with direction (LONG or SHORT), leverage (integer from 1 to 20), contracts (positive "
     "integer absolute target position size), stop_loss and take_profit (prices). "
-    "Use these exact top-level keys: direction, contracts, stop_loss, take_profit, thesis. "
+    "Use these exact top-level keys: direction, leverage, contracts, stop_loss, take_profit, thesis. "
     "Use uppercase LONG or SHORT and an unquoted whole number for contracts. "
     "For LONG put stop_loss below best_bid and take_profit above best_ask; reverse these levels for SHORT. "
     "Include a thesis string giving one concise sentence of reasoning. "
@@ -32,11 +32,12 @@ INSTRUCTION = (
     "Use available margin, contract value, current position and spread. "
     "If the supplied snapshot contains fire_execution_scope, strictly respect "
     "its max_contracts_per_entry and attached stop/target requirement. Choose the quantity within that ceiling based on your thesis, stop distance and estimated dollar loss at the stop; the ceiling is optional capacity. "
-    "Do not invent leverage, margin or available contract balance."
+    "Use stop_loss and take_profit prices exactly aligned to core.ticker.tick_size; never assume off-tick prices will be accepted unchanged. "
+    "Select leverage from 1x through 20x based on verified market volatility and stop distance; 20x is a hard cap, never a target. No model decision can override liquidation or risk controls. Do not invent available contract balance."
 )
 
 
-def validate(decision, core):
+def validate(decision, core, *, require_leverage=False):
     if not isinstance(decision, dict):
         raise PlanError("Expected an object")
     side = decision.get("direction")
@@ -46,12 +47,17 @@ def validate(decision, core):
         if (type(size) is not int or size != 0
                 or decision.get("stop_loss") is not None
                 or decision.get("take_profit") is not None
+                or decision.get("leverage") is not None
                 or not isinstance(reason, str) or not reason.strip()):
             raise PlanError("Malformed WAIT decision")
         return dict(direction="WAIT", contracts=0,
                     stop_loss=None, take_profit=None)
     if side not in ("LONG", "SHORT") or type(size) is not int or size < 1:
         raise PlanError("Invalid direction or contract count")
+    leverage = decision.get("leverage")
+    if require_leverage or leverage is not None:
+        if type(leverage) is not int or not 1 <= leverage <= 20:
+            raise PlanError("Invalid proposed leverage (must be integer 1..20)")
     try:
         stop, target, bid, ask = (Decimal(str(v)) for v in (
             decision["stop_loss"], decision["take_profit"], core["best_bid"], core["best_ask"]))
@@ -62,7 +68,10 @@ def validate(decision, core):
     lower, upper = (stop, target) if side == "LONG" else (target, stop)
     if not lower < bid <= ask < upper:
         raise PlanError("Exit prices must bracket the quote in the chosen direction")
-    return dict(direction=side, contracts=size, stop_loss=str(stop), take_profit=str(target))
+    plan = dict(direction=side, contracts=size, stop_loss=str(stop), take_profit=str(target))
+    if leverage is not None:
+        plan["leverage"] = leverage
+    return plan
 
 
 def decision_failure_code(error):
@@ -81,6 +90,7 @@ def decision_failure_code(error):
         "Expected an object": "model_invalid_object",
         "Invalid direction or contract count": "model_invalid_direction_or_quantity",
         "Malformed WAIT decision": "model_invalid_wait",
+        "Invalid proposed leverage (must be integer 1..20)": "model_invalid_leverage",
         "Missing or malformed price": "model_invalid_price",
         "Invalid price": "model_invalid_price",
         "Exit prices must bracket the quote in the chosen direction": "model_invalid_exit_levels",
@@ -124,7 +134,8 @@ def run_probe(routes, snapshot_loader, client_factory=TopBillingClient):
             if not isinstance(choice, dict):
                 raise PlanError("Malformed Top Billing response")
             parsed = decision_payload(choice)
-            decision = validate(parsed, snapshot["core"])
+            decision = validate(parsed, snapshot["core"],
+                                require_leverage=bool(snapshot.get("fire_execution_scope", {}).get("dynamic_leverage_enabled")))
             result = {"decision": decision, "usage": reply.get("usage"), "request_id": client.last_request_id}
             if isinstance(parsed.get("thesis"), str):
                 result["thesis"] = parsed["thesis"][:350]

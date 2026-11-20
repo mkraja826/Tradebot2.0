@@ -47,21 +47,56 @@ class FireMarket(DeltaDemo):
         return [row for row in super().open_orders(**kwargs) if str(row["product_id"]) == pid]
 
     def close_exposure(self, pause):
-        for _ in range(3):
-            if self.open_orders():
-                self.cancel_product_orders(self.product_id)
-            for row in self.positions():
-                size = Decimal(str(row["size"]))
-                if size != size.to_integral_value():
-                    raise DeltaError("Fractional position size")
+        """Reduce-only exit before cancelling protection; never leave a live
+        position naked because an emergency close request failed.
+
+        Send at most ONE close order per invocation. A timeout/ambiguous result
+        is not a license to re-post. Preserve existing protective stops until
+        signed position evidence confirms zero exposure.
+        """
+        def signed_size():
+            rows = self.positions()
+            nonzero = []
+            for row in rows:
+                try:
+                    size = Decimal(str(row["size"]))
+                except (ValueError, ArithmeticError, KeyError, TypeError):
+                    raise DeltaError("Unverified position size") from None
+                if not size.is_finite() or size != size.to_integral_value():
+                    raise DeltaError("Non-integral exchange position size")
                 if size:
-                    self._request("POST", "/v2/orders", auth=True, payload={
-                        "product_id": self.product_id, "side": "sell" if size > 0 else "buy",
-                        "size": abs(int(size)), "order_type": "market_order", "reduce_only": True,
-                        "client_order_id": "fire-exit-" + uuid4().hex[:20]})
-            if not any(Decimal(str(row["size"])) for row in self.positions()) and not self.open_orders():
+                    nonzero.append(size)
+            if len(nonzero) > 1:
+                raise DeltaError("Multiple selected-market positions")
+            return nonzero[0] if nonzero else Decimal(0)
+
+        size = signed_size()
+        if size:
+            # Do not cancel bracket orders first: if the broker rejects or
+            # loses the exit response, they must remain in place.
+            self._request("POST", "/v2/orders", auth=True, payload={
+                "product_id": self.product_id, "side": "sell" if size > 0 else "buy",
+                "size": abs(int(size)), "order_type": "market_order", "reduce_only": True,
+                "client_order_id": "fire-exit-" + uuid4().hex[:20]})
+            for attempt in range(5):
+                if signed_size() == 0:
+                    break
+                if attempt < 4:
+                    pause(1)
+            else:
+                raise DeltaError("Reduce-only exit unconfirmed; protective orders preserved")
+
+        # Only after the broker confirms zero position can protective child
+        # orders be removed without briefly uncovering live exposure.
+        if signed_size() != 0:
+            raise DeltaError("Closeout flatness became unverified")
+        if self.open_orders():
+            self.cancel_product_orders(self.product_id)
+        for attempt in range(3):
+            if signed_size() == 0 and not self.open_orders():
                 return
-            pause(1)
+            if attempt < 2:
+                pause(1)
         raise DeltaError("Selected market flatness unverified")
 
     def snapshot(self):

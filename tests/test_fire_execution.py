@@ -3,8 +3,10 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from tradebot.delta import DEMO_API, DeltaError
+from tradebot.fire_leverage import verify_liquidation_clearance
 from tradebot.portfolio_equity_guard import PortfolioEquityGuard
 from tradebot.fire_execution import (
     FireDemoController, FireTradeStore, protective_orders_verified,
@@ -36,7 +38,7 @@ def seed_demo_equity(path, equity):
     return guard
 
 
-PLAN = {"direction": "LONG", "contracts": 1,
+PLAN = {"direction": "LONG", "contracts": 1, "leverage": 5,
         "stop_loss": "62950", "take_profit": "63950"}
 
 
@@ -52,18 +54,24 @@ class FakeDemo:
         self.active_orders = []
         self.order = None
         self.leverage = 5
+        self.leverage_changes = []
+        self.ignore_leverage_change = False
+        self.liquidation_price = "60000"
+        self.margin_mode = "isolated"
+        self.other_positions = []
+        self.other_open_orders = []
 
     def ticker(self, symbol):
         return {
             "symbol": "BTCUSD", "product_id": 27,
-            "mark_price": "63214.25",
+            "tick_size": "0.5", "mark_price": "63214.25",
             "timestamp": int(datetime.now(timezone.utc).timestamp()),
             "quotes": {"best_bid": "63214", "best_ask": "63214.5"},
         }
 
     def btc_positions(self):
         return ([{"product_id": 27, "size": str(self.position),
-                  "product_symbol": "BTCUSD"}] if self.position else [])
+                  "product_symbol": "BTCUSD", "entry_price": "63214.25"}] if self.position else [])
 
     def open_orders(self):
         return list(self.active_orders)
@@ -72,13 +80,38 @@ class FakeDemo:
         return {"meta": {"net_equity": "173.81"},
                 "balances": [{"asset_symbol": "USD", "available_balance": "173.81"}]}
 
-    def _request(self, method, path, *, auth=False, payload=None):
+    def _request(self, method, path, *, auth=False, payload=None, params=None):
+        if method == "GET" and path == "/v2/profile":
+            return {"result": {"margin_mode": self.margin_mode}}
+        if method == "GET" and path == "/v2/positions/margined":
+            return {"result": ([{"product_id": 27, "size": self.position,
+                                 "margin_mode": self.margin_mode,
+                                 "entry_price": "63214.25",
+                                 "liquidation_price": self.liquidation_price}]
+                                if self.position else []) + self.other_positions}
+        if method == "GET" and path == "/v2/positions":
+            assert params and params.get("product_id") in (27, 82)
+            return {"result": ({"size": self.position, "product_id": 27,
+                                "entry_price": "63214.25"} if params["product_id"] == 27
+                               else {"size": 0, "product_id": 82, "entry_price": "0"})}
+        if method == "GET" and path == "/v2/orders":
+            return {"result": self.active_orders + self.other_open_orders,
+                    "meta": {"after": None}}
+        if method == "POST" and path.endswith("/orders/leverage"):
+            self.leverage_changes.append(payload)
+            if not self.ignore_leverage_change:
+                self.leverage = int(payload["leverage"])
+            return {"result": {"product_id": 27, "leverage": payload["leverage"]}}
         if method == "GET" and path.endswith("/orders/leverage"):
             return {"result": {"leverage": self.leverage, "product_id": 27}}
         if method == "GET" and path == "/v2/products/BTCUSD":
             return {"result": {"id": 27, "symbol": "BTCUSD", "contract_type": "perpetual_futures",
                                "settling_asset": {"symbol": "USD"}, "notional_type": "vanilla",
-                               "initial_margin": "0.5", "contract_value": "0.001", "taker_commission_rate": "0.0005"}}
+                               "initial_margin": "0.5", "contract_value": "0.001",
+                               "tick_size": "0.5", "taker_commission_rate": "0.0005"}}
+        if method == "GET" and path == "/v2/products/XAUTUSD":
+            return {"result": {"id": 82, "symbol": "XAUTUSD",
+                               "contract_type": "perpetual_futures"}}
 
         self.requests.append((method, path, payload))
         if self.submit_timeout:
@@ -167,6 +200,103 @@ class FireExecutionTests(unittest.TestCase):
         self.assertFalse(fire.start()[0])
         self.assertEqual(len(self.exchange.requests), 1)
         self.assertFalse(self.make().start()[0])  # persistent across restart
+
+    def test_off_tick_stop_rejected_before_order_mutation(self):
+        fire = self.make(plan=PLAN | {"stop_loss": "62950.13"})
+        self.assertTrue(fire.start()[0])
+        self.assertEqual(fire.snapshot()["status"], "rejected_no_order")
+        self.assertEqual(fire.snapshot()["reason_code"], "exchange_preflight_failed")
+        self.assertFalse(self.exchange.requests)
+
+    def test_off_tick_target_rejected_before_order_mutation(self):
+        fire = self.make(plan=PLAN | {"take_profit": "63950.13"})
+        self.assertTrue(fire.start()[0])
+        self.assertEqual(fire.snapshot()["reason_code"], "exchange_preflight_failed")
+        self.assertFalse(self.exchange.requests)
+
+    def test_unknown_broker_tick_rejected_without_order(self):
+        get = self.exchange._request
+        def remove_tick(method, path, **kwargs):
+            reply = get(method, path, **kwargs)
+            if path == "/v2/products/BTCUSD":
+                reply["result"].pop("tick_size", None)
+            return reply
+        self.exchange._request = remove_tick
+        fire = self.make()
+        self.assertTrue(fire.start()[0])
+        self.assertEqual(fire.snapshot()["reason_code"], "exchange_preflight_failed")
+        self.assertFalse(self.exchange.requests)
+
+    def test_gpt6_can_select_lower_leverage_after_flat_verified_preflight(self):
+        fire = self.make(plan=PLAN | {"leverage": 3})
+        self.assertTrue(fire.start()[0])
+        state = fire.snapshot()
+        self.assertEqual(state["status"], "protected_active")
+        self.assertEqual(state["selected_leverage"], 3)
+        self.assertEqual(state["budget"]["leverage"], "3")
+        self.assertTrue(state["liquidation_verified"])
+        self.assertEqual(self.exchange.leverage_changes, [{"leverage": "3"}])
+        self.assertEqual(len(self.exchange.requests), 1)
+
+    def test_broker_leverage_readback_mismatch_blocks_order(self):
+        self.exchange.ignore_leverage_change = True
+        fire = self.make(plan=PLAN | {"leverage": 3})
+        self.assertTrue(fire.start()[0])
+        self.assertEqual(fire.snapshot()["status"], "rejected_no_order")
+        self.assertEqual(fire.snapshot()["reason_code"], "leverage_sync_failed")
+        self.assertEqual(self.exchange.requests, [])
+
+    def test_liquidation_inside_stop_triggers_emergency_flat(self):
+        self.exchange.liquidation_price = "63150"
+        fire = self.make()
+        self.assertTrue(fire.start()[0])
+        self.assertEqual(fire.snapshot()["status"], "flat_verified")
+        self.assertEqual(fire.snapshot()["reason_code"], "emergency_flat_verified")
+        self.assertFalse(fire.snapshot()["protection_verified"])
+        self.assertEqual(self.exchange.position, 0)
+
+    def test_proven_unsafe_liquidation_emergency_closes_without_11_second_retry(self):
+        self.exchange.liquidation_price = "63150"
+        with patch("tradebot.fire_execution.verify_liquidation_clearance",
+                   wraps=verify_liquidation_clearance) as clearance:
+            fire = self.make()
+            fire.start()
+        self.assertEqual(clearance.call_count, 1)
+        self.assertEqual(fire.snapshot()["status"], "flat_verified")
+        self.assertEqual(fire.snapshot()["reason_code"], "emergency_flat_verified")
+        self.assertEqual(self.exchange.position, 0)
+
+    def test_unrelated_margin_position_blocks_before_paid_gpt(self):
+        self.exchange.other_positions = [{"product_id": 999, "size": "-5"}]
+        fire = self.make()
+        fire.start()
+        self.assertEqual(fire.snapshot()["reason_code"], "account_exposure_preflight_failed")
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.exchange.requests, [])
+
+    def test_other_market_pending_order_blocks_before_paid_gpt(self):
+        self.exchange.other_open_orders = [{"id": 12, "product_id": 82}]
+        fire = self.make()
+        fire.start()
+        self.assertEqual(fire.snapshot()["reason_code"], "account_exposure_preflight_failed")
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.exchange.requests, [])
+
+    def test_portfolio_change_after_model_blocks_order(self):
+        original = self.exchange._request
+        count = [0]
+        def race(method, path, **kwargs):
+            if path == "/v2/positions/margined":
+                count[0] += 1
+                if count[0] > 1:
+                    return {"result": [{"product_id": 999, "size": 1}]}
+            return original(method, path, **kwargs)
+        self.exchange._request = race
+        fire = self.make()
+        fire.start()
+        self.assertEqual(fire.snapshot()["reason_code"], "account_exposure_recheck_failed")
+        self.assertEqual(len(self.calls), 1)
+        self.assertEqual(self.exchange.requests, [])
 
     def test_multiple_contracts_rejected_by_backend_pilot_cap(self):
         fire = self.make(plan=PLAN | {"contracts": 2})
