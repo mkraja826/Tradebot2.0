@@ -82,6 +82,7 @@ def audit_demo_upgrade(exchange, data_dir):
         "order_mutations": False,
         "ai_calls": 0,
         "broker_positions": None,
+        "realtime_fire_positions": {},
         "broker_open_orders": None,
         "unresolved_fire_receipts": None,
         "leverage": {},
@@ -96,15 +97,21 @@ def audit_demo_upgrade(exchange, data_dir):
         return out
 
     try:
-        result = exchange._request("GET", "/v2/positions", auth=True)["result"]
+        # Unfiltered /v2/positions is invalid on Delta India Demo (HTTP 400).
+        # The margined endpoint is account-wide but may lag up to 10 seconds.
+        # Independently check both FIRE markets in real time below.
+        result = exchange._request("GET", "/v2/positions/margined", auth=True)["result"]
         if not isinstance(result, list):
-            raise ValueError("global positions must be a complete list")
+            raise ValueError("invalid account-wide margined position list")
         active = 0
         for row in result:
             if (not isinstance(row, dict) or
-                    not str(row.get("product_id", "")).isdigit()):
+                    type(row.get("product_id")) is not int or row["product_id"] <= 0):
                 raise ValueError("unidentified account position")
-            if _decimal(row.get("size")) != 0:
+            size = _decimal(row.get("size"))
+            if size != size.to_integral_value():
+                raise ValueError("fractional account position")
+            if size:
                 active += 1
         out["broker_positions"] = active
         if active:
@@ -160,7 +167,39 @@ def audit_demo_upgrade(exchange, data_dir):
                 blockers.append("broker_leverage_above_20x_" + symbol.lower())
         except Exception:
             blockers.append("broker_leverage_not_verified_" + symbol.lower())
+            continue
+        try:
+            # Real-time positions require product_id or underlying symbol.
+            live = exchange._request(
+                "GET", "/v2/positions",
+                params={"product_id": product["id"]}, auth=True
+            )["result"]
+            if isinstance(live, dict):
+                if str(live.get("product_id", product["id"])) != str(product["id"]):
+                    raise ValueError("real-time product mismatch")
+                rows = [live]
+            elif isinstance(live, list):
+                rows = live
+            else:
+                raise ValueError("invalid real-time positions")
+            if any(not isinstance(row, dict) or str(
+                    row.get("product_id", product["id"])) != str(product["id"])
+                   for row in rows):
+                raise ValueError("unexpected real-time position")
+            sizes = [_decimal(row.get("size")) for row in rows]
+            if any(size != size.to_integral_value() for size in sizes):
+                raise ValueError("fractional live positions")
+            if sum(bool(size) for size in sizes) > 1:
+                raise ValueError("multiple selected-market positions")
+            total = sum(sizes)
+            out["realtime_fire_positions"][symbol] = int(total)
+            if total:
+                blockers.append("realtime_market_exposure_" + symbol.lower())
+        except Exception:
+            blockers.append("realtime_position_not_verified_" + symbol.lower())
 
+    # A single flat preflight is preliminary: repeat after at least 10 seconds
+    # because the account-wide margined endpoint can lag a new fill.
     # An upgrade may be staged ONLY if every monitored market is broker-flat,
     # all pending orders are absent, and all FIRE stores have terminal states.
     # High leverage is separately disqualifying for enabling new entries.
@@ -169,6 +208,10 @@ def audit_demo_upgrade(exchange, data_dir):
         "account_has_open_orders", "account_orders_not_verified",
         "fire_receipts_not_verified_btcusd", "fire_receipts_not_verified_xautusd",
         "unresolved_fire_receipts",
+        "realtime_market_exposure_btcusd",
+        "realtime_market_exposure_xautusd",
+        "realtime_position_not_verified_btcusd",
+        "realtime_position_not_verified_xautusd",
     }
     out["safe_to_stage_execution_restart"] = not any(
         b in stage_blockers for b in blockers)
