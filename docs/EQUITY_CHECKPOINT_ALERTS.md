@@ -1,5 +1,10 @@
 # UTC equity opening checkpoint health alerts
 
+**Milestone 1 candidate:** collection moves to a dedicated read-only service.
+Deploy the collector together with the watchdog changes; see
+[recovery, validation and rollback instructions](EQUITY_CHECKPOINT_RECOVERY.md).
+The description below records the original PR #2 behavior.
+
 The independent watchdog collects a **signed Delta DEMO wallet equity**
 observation roughly once per minute. The FIRE portfolio equity guard requires
 an *actual observation in the first 5 minutes* of both the current UTC day and

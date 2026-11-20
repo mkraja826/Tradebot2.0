@@ -10,6 +10,7 @@ from tradebot.fire_market import FireMarket
 from tradebot.fire_watchdog import watchdog_tick
 from tradebot.trade_memory import TradeMemory
 from test_fire_execution import seed_demo_equity
+from equity_fixtures import receipt_for
 
 
 class DemoAccount(FireMarket):
@@ -45,6 +46,7 @@ class DemoAccount(FireMarket):
             return {"result": {"leverage": 5, "product_id": 82}}
         if method == "GET" and path == "/v2/wallet/balances":
             return {"result": [{"asset_symbol": "USD", "available_balance": "100"}],
+                    "_wallet_read_receipt": receipt_for("100"),
                     "meta": {"net_equity": "100"}}
         if method == "GET" and path == "/v2/positions":
             assert params in ({"product_id":82}, {"product_id":27})

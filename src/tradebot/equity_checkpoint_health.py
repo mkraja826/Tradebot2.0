@@ -40,6 +40,11 @@ def checkpoint_health(path, *, at=None, stale_after_seconds=180):
             week + timedelta(seconds=ANCHOR_WINDOW)
         ).isoformat(),
         "latest_observation_age_seconds": None,
+        "latest_observation_utc": None,
+        "observation_status": "unavailable",
+        "database_integrity": "unavailable",
+        "daily_next_window_start_utc": (today + timedelta(days=1)).isoformat(),
+        "weekly_next_window_start_utc": (week + timedelta(days=7)).isoformat(),
         "status": "evidence_unavailable",
         "checkpoint_prerequisites_met": False,
         "trade_authorized": False,
@@ -57,8 +62,11 @@ def checkpoint_health(path, *, at=None, stale_after_seconds=180):
             path.resolve().as_uri() + "?mode=ro", uri=True, timeout=5
         )) as db:
             db.execute("PRAGMA query_only=ON")
+            db.execute("BEGIN")  # one consistent view despite concurrent collectors
+            if db.execute("PRAGMA quick_check(1)").fetchone() != ("ok",):
+                raise ValueError("Database integrity failure")
             latest = db.execute(
-                "SELECT observed_us,equity_usd FROM equity_evidence "
+                "SELECT observed_us,equity_usd,origin FROM equity_evidence "
                 "ORDER BY observed_us DESC LIMIT 1"
             ).fetchone()
 
@@ -66,32 +74,44 @@ def checkpoint_health(path, *, at=None, stale_after_seconds=180):
                 start = stamp(period_start)
                 end = start + ANCHOR_WINDOW*1_000_000
                 observation = db.execute(
-                    "SELECT equity_usd FROM equity_evidence "
+                    "SELECT equity_usd,origin FROM equity_evidence "
                     "WHERE observed_us>=? AND observed_us<=? AND observed_us<=? "
                     "ORDER BY observed_us LIMIT 1",
                     (start, end, now_us),
                 ).fetchone()
                 if observation:
                     amount(observation[0])
+                    if observation[1] != "delta_demo_signed_wallet":
+                        raise ValueError("Unverified observation origin")
                     return "verified"
                 return "pending_window" if now_us <= end else "missed_window"
 
             report["daily_checkpoint"] = state(today)
             report["weekly_checkpoint"] = state(week)
             if latest:
-                observed_us, observed_equity = latest
+                observed_us, observed_equity, origin = latest
                 amount(observed_equity)
-                if type(observed_us) is not int or observed_us > now_us:
-                    raise ValueError("Future signed observation")
-                report["latest_observation_age_seconds"] = int(
-                    (now_us - observed_us) / 1_000_000
-                )
+                if type(observed_us) is not int or origin != "delta_demo_signed_wallet":
+                    raise ValueError("Invalid signed observation")
+                if observed_us > now_us:
+                    report["alert_codes"].append("equity_clock_inconsistent")
+                    raise ValueError("Future observation; clock or evidence invalid")
+                peak = db.execute("SELECT high_usd FROM equity_watermark WHERE singleton=1").fetchone()
+                if peak is None or amount(peak[0]) < amount(observed_equity):
+                    raise ValueError("Invalid equity watermark")
+                report["latest_observation_age_seconds"] = (now_us - observed_us) / 1_000_000
+                report["latest_observation_utc"] = datetime.fromtimestamp(
+                    observed_us / 1_000_000, timezone.utc).isoformat()
+            report["database_integrity"] = "verified"
     except (sqlite3.Error, ValueError, TypeError, OSError):
         report["daily_checkpoint"] = "unavailable"
         report["weekly_checkpoint"] = "unavailable"
         report["latest_observation_age_seconds"] = None
+        report["latest_observation_utc"] = None
+        report["database_integrity"] = "failed"
         report["blocking_conditions"].append("equity_ledger_unavailable")
-        report["alert_codes"].append("equity_ledger_unavailable")
+        report["blocking_conditions"].extend(report["alert_codes"])
+        report["alert_codes"].append("equity_ledger_integrity_failed")
         return report
 
     for name in ("daily", "weekly"):
@@ -101,6 +121,7 @@ def checkpoint_health(path, *, at=None, stale_after_seconds=180):
             if status == "missed_window":
                 report["alert_codes"].append("missed_" + name + "_checkpoint")
     age = report["latest_observation_age_seconds"]
+    report["observation_status"] = "stale" if age is None or age > stale_after_seconds else "fresh"
     if age is None or age > stale_after_seconds:
         report["blocking_conditions"].append("signed_equity_observation_stale")
         report["alert_codes"].append("signed_equity_observation_stale")

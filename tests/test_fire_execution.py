@@ -4,6 +4,7 @@ from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
+from equity_fixtures import receipt_for
 
 from tradebot.delta import DEMO_API, DeltaError
 from tradebot.fire_leverage import verify_liquidation_clearance
@@ -78,6 +79,7 @@ class FakeDemo:
 
     def wallet_balances(self):
         return {"meta": {"net_equity": "173.81"},
+                "equity_read_receipt": receipt_for("173.81"),
                 "balances": [{"asset_symbol": "USD", "available_balance": "173.81"}]}
 
     def _request(self, method, path, *, auth=False, payload=None, params=None):
@@ -372,10 +374,34 @@ class FireExecutionTests(unittest.TestCase):
         self.assertEqual(self.calls, [])
         self.assertEqual(self.exchange.requests, [])
 
+    def test_missing_receipt_blocks_before_paid_model_or_broker_post(self):
+        wallet = self.exchange.wallet_balances()
+        wallet.pop("equity_read_receipt")
+        with patch.object(self.exchange, "wallet_balances", return_value=wallet):
+            fire = self.make()
+            fire.start()
+        self.assertEqual(fire.snapshot()["reason_code"], "portfolio_equity_limits_failed")
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.exchange.requests, [])
+
+    def test_final_equity_recheck_blocks_loss_after_model_and_budget_checks(self):
+        first = self.exchange.wallet_balances()
+        second = self.exchange.wallet_balances()
+        reduced = self.exchange.wallet_balances()
+        reduced["meta"]["net_equity"] = "169"
+        reduced["equity_read_receipt"] = receipt_for("169")
+        with patch.object(self.exchange, "wallet_balances", side_effect=[first,second,reduced]):
+            fire = self.make()
+            fire.start()
+        self.assertEqual(fire.snapshot()["reason_code"], "portfolio_equity_limits_final_failed")
+        self.assertEqual(len(self.calls), 1)
+        self.assertEqual(self.exchange.requests, [])
+
     def test_daily_equity_loss_halts_before_paid_ai(self):
         from unittest.mock import patch
         wallet = self.exchange.wallet_balances()
         reduced = dict(wallet, meta={"net_equity": "169"})
+        reduced["equity_read_receipt"] = receipt_for("169")
         with patch.object(self.exchange, "wallet_balances", return_value=reduced):
             fire = self.make()
             fire.start()

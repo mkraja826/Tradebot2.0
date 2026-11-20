@@ -10,6 +10,9 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 import os
 import sqlite3
+import json
+
+from tradebot.equity_receipt import validate_receipt
 
 DAY = 86400
 ANCHOR_WINDOW = 300  # a signed snapshot from the first 5m of a UTC period
@@ -62,9 +65,28 @@ class PortfolioEquityGuard:
                 CREATE TABLE IF NOT EXISTS equity_watermark(
                     singleton INTEGER PRIMARY KEY CHECK(singleton=1),
                     high_usd TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS equity_read_receipts(
+                    observed_us INTEGER PRIMARY KEY REFERENCES equity_evidence(observed_us),
+                    receipt TEXT NOT NULL);
                 CREATE TRIGGER IF NOT EXISTS reject_equity_evidence_update
                     BEFORE UPDATE ON equity_evidence BEGIN
                     SELECT RAISE(ABORT, 'Immutable equity observation');
+                END;
+                CREATE TRIGGER IF NOT EXISTS reject_equity_evidence_replace
+                    BEFORE INSERT ON equity_evidence
+                    WHEN EXISTS(SELECT 1 FROM equity_evidence WHERE observed_us=NEW.observed_us)
+                    BEGIN SELECT RAISE(ABORT, 'Immutable equity observation'); END;
+                CREATE TRIGGER IF NOT EXISTS reject_equity_receipt_replace
+                    BEFORE INSERT ON equity_read_receipts
+                    WHEN EXISTS(SELECT 1 FROM equity_read_receipts WHERE observed_us=NEW.observed_us)
+                    BEGIN SELECT RAISE(ABORT, 'Immutable equity receipt'); END;
+                CREATE TRIGGER IF NOT EXISTS reject_equity_receipt_update
+                    BEFORE UPDATE ON equity_read_receipts BEGIN
+                    SELECT RAISE(ABORT, 'Immutable equity receipt');
+                END;
+                CREATE TRIGGER IF NOT EXISTS reject_equity_receipt_delete
+                    BEFORE DELETE ON equity_read_receipts BEGIN
+                    SELECT RAISE(ABORT, 'Immutable equity receipt');
                 END;
                 CREATE TRIGGER IF NOT EXISTS reject_equity_evidence_delete
                     BEFORE DELETE ON equity_evidence BEGIN
@@ -80,17 +102,20 @@ class PortfolioEquityGuard:
     @staticmethod
     def _opening(db, period_start_us, instant_us):
         rows = db.execute(
-            "SELECT equity_usd FROM equity_evidence WHERE observed_us>=? "
+            "SELECT equity_usd,origin FROM equity_evidence WHERE observed_us>=? "
             "AND observed_us<=? AND observed_us<=? ORDER BY observed_us LIMIT 1",
             (period_start_us, period_start_us + ANCHOR_WINDOW*1000000, instant_us)
         ).fetchone()
+        if rows and rows[1] != "delta_demo_signed_wallet":
+            raise EquityRiskError("Unverified opening equity origin")
         return amount(rows[0]) if rows else None
 
-    def observe(self, equity, *, at=None):
+    def observe(self, equity, *, at=None, receipt=None):
         """Persist exactly one signed-wallet derived equity reading.
 
-        This function accepts an equity scalar, not a wallet body; callers
-        must use an authenticated Delta India Demo read before calling.
+        Internal persistence helper, also used by offline fixtures. Runtime
+        callers MUST use observe_verified_read / observe_signed_demo. There is
+        deliberately no CLI for importing or backdating opening observations.
         """
         instant = at or datetime.now(timezone.utc)
         current_us = stamp(instant)
@@ -100,6 +125,20 @@ class PortfolioEquityGuard:
         week_start = day_start - timedelta(days=day_start.weekday())
         with closing(sqlite3.connect(self.path, timeout=20)) as db:
             db.execute("BEGIN IMMEDIATE")
+            if db.execute("PRAGMA quick_check(1)").fetchone() != ("ok",):
+                raise EquityRiskError("equity_database_integrity_failed")
+            latest = db.execute("SELECT max(observed_us) FROM equity_evidence").fetchone()[0]
+            if latest is not None and current_us < latest:
+                raise EquityRiskError("equity_observation_out_of_order_or_clock_reversed")
+            peak_row = db.execute(
+                "SELECT high_usd FROM equity_watermark WHERE singleton=1").fetchone()
+            if latest is not None and peak_row is None:
+                raise EquityRiskError("equity_watermark_missing")
+            if latest is not None:
+                previous_equity = db.execute("SELECT equity_usd FROM equity_evidence WHERE observed_us=?",
+                                             (latest,)).fetchone()[0]
+                if amount(peak_row[0]) < amount(previous_equity):
+                    raise EquityRiskError("equity_watermark_inconsistent")
             old = db.execute("SELECT equity_usd FROM equity_evidence WHERE observed_us=?",
                              (current_us,)).fetchone()
             if old is not None:
@@ -108,8 +147,16 @@ class PortfolioEquityGuard:
             else:
                 db.execute("INSERT INTO equity_evidence VALUES (?,?,'delta_demo_signed_wallet')",
                            (current_us, str(current)))
-            peak_row = db.execute(
-                "SELECT high_usd FROM equity_watermark WHERE singleton=1").fetchone()
+            if receipt is not None:
+                encoded = json.dumps(receipt, sort_keys=True, separators=(",", ":"))
+                existing = db.execute("SELECT receipt FROM equity_read_receipts WHERE observed_us=?",
+                                      (current_us,)).fetchone()
+                if existing is not None and existing[0] != encoded:
+                    raise EquityRiskError("Conflicting signed equity receipt timestamp")
+                if old is not None and existing is None:
+                    raise EquityRiskError("Cannot retroactively attest historical equity")
+                if existing is None:
+                    db.execute("INSERT INTO equity_read_receipts VALUES (?,?)", (current_us, encoded))
             peak = max(current, amount(peak_row[0])) if peak_row else current
             db.execute(
                 "INSERT INTO equity_watermark(singleton,high_usd) VALUES (1,?) "
@@ -158,13 +205,24 @@ class PortfolioEquityGuard:
             status["approved"] = True
         return status
 
-    def observe_signed_demo(self, exchange, *, at=None):
+    def observe_verified_read(self, equity, receipt, *, now=None):
+        instant = validate_receipt(equity, receipt, now=now)
+        return self.observe(equity, at=instant, receipt=receipt)
+
+    def require_verified_read(self, equity, receipt, *, now=None):
+        report = self.observe_verified_read(equity, receipt, now=now)
+        if not report["approved"]:
+            raise EquityRiskError(report["reason"])
+        return report
+
+    def observe_signed_demo(self, exchange):
         """Only signed DEMO wallet reads may populate the risk history."""
         from tradebot.delta import DEMO_API
         if getattr(exchange, "base_url", None) != DEMO_API:
             raise EquityRiskError("Non-demo equity source refused")
         balances = exchange.wallet_balances()
-        return self.observe(balances["meta"]["net_equity"], at=at)
+        return self.observe_verified_read(balances["meta"]["net_equity"],
+                                          balances.get("equity_read_receipt"))
 
     def require_approved(self, equity, *, at=None):
         report = self.observe(equity, at=at)

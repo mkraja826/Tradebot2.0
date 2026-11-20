@@ -402,7 +402,8 @@ class FireDemoController:
             stage = "portfolio_equity_limits"
             if getattr(exchange, "base_url", None) != DEMO_API:
                 raise FireTradeError("Only signed Delta Demo equity accepted")
-            equity_precheck = self.equity_guard.require_approved(budget["equity_usd"])
+            equity_precheck = self.equity_guard.require_verified_read(
+                budget["equity_usd"], budget.get("equity_read_receipt"))
             self.store.update(press, "reasoning", risk_assessment={
                 "equity_monitor": equity_precheck})
             midpoint = (float(snapshot["core"]["best_bid"]) + float(snapshot["core"]["best_ask"])) / 2
@@ -472,7 +473,8 @@ class FireDemoController:
             if plan["contracts"] > current_budget["max_contracts_per_entry"]:
                 raise FireTradeError("Live margin budget changed")
             stage = "portfolio_equity_limits_recheck"
-            equity_recheck = self.equity_guard.require_approved(current_budget["equity_usd"])
+            equity_recheck = self.equity_guard.require_verified_read(
+                current_budget["equity_usd"], current_budget.get("equity_read_receipt"))
             stage = "risk_governor"
             risk_assessment = assess_fire_plan(plan, current_budget, exchange_quote)
             self.store.update(press, "preflight", risk_assessment={
@@ -488,6 +490,9 @@ class FireDemoController:
             final_budget = entry_budget(exchange, self.symbol, product_id, price)
             if final_budget["leverage"] != str(plan["leverage"]) or plan["contracts"] > final_budget["max_contracts_per_entry"]:
                 raise FireTradeError("Verified leverage or margin budget changed")
+            stage = "portfolio_equity_limits_final"
+            equity_recheck = self.equity_guard.require_verified_read(
+                final_budget["equity_usd"], final_budget.get("equity_read_receipt"))
             final_assessment = assess_fire_plan(plan, final_budget, exchange_quote)
             self.store.update(press, "preflight", budget=final_budget, risk_assessment={
                 **final_assessment, "equity_monitor": equity_recheck})

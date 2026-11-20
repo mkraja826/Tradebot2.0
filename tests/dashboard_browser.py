@@ -5,6 +5,7 @@ from pathlib import Path
 from threading import Thread
 from functools import partial
 import time
+import os
 
 from playwright.sync_api import sync_playwright
 
@@ -22,7 +23,8 @@ snapshot = {
     "runner":{"status":"running","mode":"observe","age_seconds":2},
 }
 with sync_playwright() as p:
-    browser = p.chromium.launch(channel="chrome")
+    executable = os.environ.get("PLAYWRIGHT_CHROMIUM_EXECUTABLE")
+    browser = p.chromium.launch(**({"executable_path":executable} if executable else {"channel":"chrome"}))
     for width in (375, 768, 1440):
         page = browser.new_page(viewport={"width":width,"height":844}, reduced_motion="reduce")
         errors = []
