@@ -41,6 +41,11 @@
           <div class="runtime-pill" id="runtime-pill"><span class="status-light"></span><span id="runtime-status">Awaiting heartbeat</span></div>
         </section>
         <div class="notice" id="halt-banner" hidden>◈ &nbsp;PERSISTENT EXECUTION HALT DETECTED — inspect exchange positions and orders before restarting.</div>
+        <section id="equity-risk-banner" class="equity-risk-banner" role="status" aria-live="polite" aria-atomic="true" aria-label="Equity checkpoint risk" data-state="unavailable">
+          <div class="equity-risk-banner-heading"><strong id="equity-risk-title">Equity risk checks unavailable</strong><span id="equity-risk-state">VERIFYING</span></div>
+          <p id="equity-risk-message">Checking signed daily and weekly equity checkpoints. New trades require separate risk approval.</p>
+          <p id="equity-risk-detail">FIRE execution remains controlled separately by broker and risk safeguards.</p>
+        </section>
         <div id="priority" hidden role="status"></div>
         <section class="panel market-terminal" id="market-chart">
           <div class="chart-top"><div><div class="eyebrow">DELTA INDIA DEMO</div><h2 id="market-title">Bitcoin perpetual</h2></div>

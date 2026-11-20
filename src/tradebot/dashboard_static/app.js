@@ -16,6 +16,66 @@ const timeLabel = iso => {
 const ageLabel = seconds => seconds == null ? "Never reported" :
   seconds < 90 ? Math.round(seconds) + "s ago" : Math.round(seconds / 60) + "m ago";
 
+// Equity evidence is a diagnostic only. Never enable an execution button
+// based on this endpoint or infer authorization from a healthy status.
+function renderEquityCheckpointRisk(data) {
+  const banner=byId("equity-risk-banner");
+  if(!banner)return;
+  const valid=data && typeof data==="object" &&
+    typeof data.status==="string" &&
+    ["healthy","checkpoint_pending","checkpoint_missed",
+      "evidence_stale","evidence_unavailable"].includes(data.status);
+  const status=valid?data.status:"evidence_unavailable";
+  const titles={
+    healthy:"Equity opening checkpoints verified",
+    checkpoint_pending:"Equity checkpoint observation pending",
+    checkpoint_missed:"Equity opening checkpoint missed — trading risk gate blocked",
+    evidence_stale:"Signed equity evidence is stale — risk review required",
+    evidence_unavailable:"Equity risk evidence unavailable — risk review required"
+  };
+  const messages={
+    healthy:"Daily and weekly opening checkpoints have been recorded; this does not authorize a trade.",
+    checkpoint_pending:"The current UTC opening window is still available. Waiting for a signed equity observation.",
+    checkpoint_missed:"A required UTC opening window closed without an authentic equity observation. Historical checkpoints cannot be backfilled.",
+    evidence_stale:"Signed equity observations are no longer recent enough for the risk monitor.",
+    evidence_unavailable:"The equity evidence ledger or its health endpoint could not be verified."
+  };
+  const labels={
+    verified:"Verified",pending_window:"Pending opening window",
+    missed_window:"Missed opening window",unavailable:"Unavailable"
+  };
+  const daily=valid && labels[data.daily_checkpoint]||"Unavailable";
+  const weekly=valid && labels[data.weekly_checkpoint]||"Unavailable";
+  const rawAge=valid?data.latest_observation_age_seconds:null;
+  const age=Number.isFinite(rawAge)&&rawAge>=0?
+    " · Last signed sample "+ageLabel(rawAge):" · Signed sample age unknown";
+  banner.dataset.state=status;
+  text("equity-risk-title",titles[status]);
+  text("equity-risk-state",status==="healthy"?"READ ONLY · VERIFIED":"RISK EVIDENCE INCOMPLETE");
+  text("equity-risk-message",messages[status]);
+  text("equity-risk-detail","Daily: "+daily+" · Weekly: "+weekly+age+
+    " · FIRE requires independent authorization.");
+}
+
+async function refreshEquityCheckpointRisk() {
+  try {
+    const res=await fetch("/api/risk/checkpoints",{
+      credentials:"same-origin",cache:"no-store",signal:AbortSignal.timeout(8000)
+    });
+    if(!res.ok)throw new Error("Risk health endpoint unavailable");
+    const data=await res.json();
+    if(!data || typeof data!=="object" ||
+       data.mode!=="read_only" || data.trade_authorized!==false)
+      throw new Error("Risk health response unverified");
+    renderEquityCheckpointRisk(data);
+  } catch(error) {
+    // Fail closed visually on network errors, malformed data and timeouts.
+    renderEquityCheckpointRisk(null);
+  }
+}
+refreshEquityCheckpointRisk();
+setInterval(refreshEquityCheckpointRisk,30000);
+
 function drawEquity(points) {
   const root = byId("equity-plot"); root.replaceChildren();
   const valid = (points || []).map(p => ({at:p.at, equity:Number(p.equity)})).filter(p => Number.isFinite(p.equity));

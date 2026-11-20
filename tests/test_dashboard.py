@@ -125,6 +125,7 @@ class DashboardTests(unittest.TestCase):
 
     def test_local_routes_and_host_policy(self):
         class Stub:
+            root = self.dir
             def snapshot(self):
                 return {"dashboard_mode": "read_only", "environment": "delta-india-demo"}
         server = ThreadingHTTPServer(("127.0.0.1", 0), create_handler(Stub()))
@@ -142,6 +143,14 @@ class DashboardTests(unittest.TestCase):
         with urlopen(base + "/api/overview") as res:
             payload = json.load(res)
             self.assertEqual(payload["dashboard_mode"], "read_only")
+        with urlopen(base + "/api/risk/checkpoints") as res:
+            risk = json.load(res)
+            self.assertEqual(res.status, 200)
+            self.assertEqual(risk["status"], "evidence_unavailable")
+            self.assertFalse(risk["checkpoint_prerequisites_met"])
+            self.assertFalse(risk["trade_authorized"])
+            self.assertEqual(risk["mode"], "read_only")
+        self.assertFalse((self.dir / "fire-equity-risk.sqlite").exists())
         for route in ("/styles.css", "/app.js"):
             with urlopen(base + route) as res:
                 self.assertEqual(res.status, 200)
@@ -168,6 +177,12 @@ class DashboardTests(unittest.TestCase):
         self.assertNotIn('fetch("https', js)
         self.assertNotIn("innerHTML", js)
         self.assertIn('fetch("/api/overview"', js)
+        self.assertIn('id="equity-risk-banner"', html)
+        self.assertIn('aria-live="polite"', html)
+        self.assertIn('fetch("/api/risk/checkpoints"', js)
+        self.assertIn("renderEquityCheckpointRisk(null)", js)
+        self.assertIn("data-state", css)
+        self.assertNotIn('fetch("/api/risk/checkpoints", {method:"POST"', js)
 
 
 if __name__ == "__main__":
