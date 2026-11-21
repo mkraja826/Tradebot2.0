@@ -220,6 +220,77 @@ class BrokerInventoryTests(unittest.TestCase):
         self.assertIn("local_evidence_changed_during_broker_observation",
                       report["blockers"])
 
+    def test_unconfirmed_entry_blocks_even_if_parent_receipt_says_no_order(self):
+        fireid = "a" * 32
+        with sqlite3.connect(self.root / "fire-ops.sqlite") as db:
+            db.execute("INSERT INTO fire_requests VALUES (?,?,?,?,?)",
+                       (fireid, "2026-11-20T10:00:00+00:00",
+                        "2026-11-20T10:00:00+00:00", "flat_verified",
+                        '{"orders_submitted":true,"broker_order_id":"entry-1"}'))
+            db.execute("CREATE TABLE fire_entries (press TEXT PRIMARY KEY,"
+                       "status TEXT NOT NULL,receipt TEXT NOT NULL)")
+            db.execute("INSERT INTO fire_entries VALUES (?,?,?)",
+                       (fireid, "unconfirmed", "{}"))
+        report = self.check()
+        self.assertIn("unresolved_local_fire_entries", report["blockers"])
+        self.assertEqual(report["local_unresolved_entry_intents"], 1)
+        self.assertFalse(report["safe_to_enable_fire"])
+
+    def test_no_order_receipt_with_cancelled_entry_still_fails_closed(self):
+        fireid = "a" * 32
+        with sqlite3.connect(self.root / "fire-xaut.sqlite") as db:
+            db.execute("INSERT INTO fire_requests VALUES (?,?,?,?,?)",
+                       (fireid, "2026-11-20T10:00:00+00:00",
+                        "2026-11-20T10:00:00+00:00", "rejected_no_order",
+                        '{"orders_submitted":false}'))
+            db.execute("CREATE TABLE fire_entries (press TEXT PRIMARY KEY,"
+                       "status TEXT NOT NULL,receipt TEXT NOT NULL)")
+            db.execute("INSERT INTO fire_entries VALUES (?,?,?)",
+                       (fireid, "cancelled", "{}"))
+        report = self.check()
+        self.assertIn("local_history_unavailable", report["blockers"])
+        self.assertEqual(report["samples_checked"], 0)
+        self.assertFalse(report["trade_authorized"])
+
+    def test_same_count_same_status_receipt_change_detected_by_fingerprint(self):
+        fireid = "a" * 32
+        with sqlite3.connect(self.root / "fire-ops.sqlite") as db:
+            db.execute("INSERT INTO fire_requests VALUES (?,?,?,?,?)",
+                       (fireid, "2026-11-20T10:00:00+00:00",
+                        "2026-11-20T10:00:00+00:00", "rejected_no_order",
+                        '{"orders_submitted":false,"reason_code":"original"}'))
+        def replace_payload():
+            with sqlite3.connect(self.root / "fire-ops.sqlite") as db:
+                db.execute("UPDATE fire_requests SET result=? WHERE press=?",
+                           ('{"orders_submitted":false,"reason_code":"modified"}', fireid))
+        self.exchange.second_sample_hook = replace_payload
+        report = self.check()
+        self.assertEqual(report["total_local_receipts"] if "total_local_receipts" in report
+                         else report["local_receipts_total"], 1)
+        self.assertEqual(report["samples_checked"], 2)
+        self.assertIn("local_evidence_changed_during_broker_observation",
+                      report["blockers"])
+        self.assertFalse(report["trade_authorized"])
+
+    def test_new_unresolved_entry_during_broker_reads_is_rejected(self):
+        fireid = "b" * 32
+        with sqlite3.connect(self.root / "fire-ops.sqlite") as db:
+            db.execute("INSERT INTO fire_requests VALUES (?,?,?,?,?)",
+                       (fireid, "2026-11-20T10:00:00+00:00",
+                        "2026-11-20T10:00:00+00:00", "flat_verified",
+                        '{"orders_submitted":true,"broker_order_id":"entry-1"}'))
+            db.execute("CREATE TABLE fire_entries (press TEXT PRIMARY KEY,"
+                       "status TEXT NOT NULL,receipt TEXT NOT NULL)")
+        def append_entry():
+            with sqlite3.connect(self.root / "fire-ops.sqlite") as db:
+                db.execute("INSERT INTO fire_entries VALUES (?,?,?)",
+                           (fireid, "unconfirmed", "{}"))
+        self.exchange.second_sample_hook = append_entry
+        report = self.check()
+        self.assertIn("local_evidence_changed_during_broker_observation",
+                      report["blockers"])
+        self.assertFalse(report["trade_authorized"])
+
     def test_broker_snapshot_change_is_not_disguised_as_two_flat_checks(self):
         self.exchange.second_sample_hook = lambda: setattr(
             self.exchange, "margined", [{"product_id": 999, "size": "7"}])
