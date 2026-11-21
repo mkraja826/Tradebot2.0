@@ -48,6 +48,19 @@ commissioning lock must remain intact. No historical checkpoints are created.
   an `equity_read_receipt_invalid` alert, not a green opening/observation.
   This preserves older SQLite rows and diagnoses their missing provenance
   without backfilling or repairing them. An origin label alone is insufficient.
+- **Runtime FIRE equity admission independently validates historical
+  provenance inside the equity write transaction.** The first opening
+  observations of the current UTC day/week and the latest prior observation
+  must have stored transport receipts matching their original values and
+  microsecond timestamps; a receiptless origin label cannot satisfy the risk
+  gate even if a stale monitor response incorrectly reports healthy. The
+  incoming genuine signed wallet read may establish the current opening only
+  within its real first-five-minute window, not after a missed boundary.
+  Invalid historical evidence fails *before* a new observation/watermark write.
+  The independent read-only collector may still record diagnostic readings;
+  only the trade-admission method enforces these stricter historical gates.
+  The former `require_approved(equity, at=...)` unsigned shortcut now denies
+  approval; legacy callers must provide a fresh transport receipt.
 - Operational heartbeats, start history and a durable incident outbox live in
   a separate private `fire-monitoring.sqlite`. Active alerts are recorded on
   transition and reminded no more than once per five minutes. Alert state and

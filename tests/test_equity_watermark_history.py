@@ -20,8 +20,10 @@ class HistoricalWatermarkTests(unittest.TestCase):
 
     def seed(self, peak="1100", latest="1000"):
         guard = PortfolioEquityGuard(self.path)
-        guard.observe(peak, at=self.now - timedelta(days=1))
-        return guard.observe(latest, at=self.now)
+        previous = self.now - timedelta(days=1)
+        guard.observe_verified_read(peak, receipt_for(peak, previous), now=previous)
+        return guard.observe_verified_read(latest, receipt_for(latest, self.now),
+                                           now=self.now)
 
     def overwrite_peak(self, value):
         # Fault injection into an isolated fixture, never a recovery operation.

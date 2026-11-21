@@ -1,6 +1,7 @@
 """Runtime must never bootstrap replacement loss history after evidence loss."""
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
+import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import sqlite3
@@ -22,7 +23,8 @@ class RuntimeIntegrityTests(unittest.TestCase):
 
     def seed(self):
         guard = PortfolioEquityGuard(self.path)
-        guard.observe("2000", at=self.now)
+        guard.observe_verified_read("2000", receipt_for("2000", self.now),
+                                     now=self.now)
         return guard
 
     def check(self, guard, equity="2000", seconds=1):
@@ -61,12 +63,12 @@ class RuntimeIntegrityTests(unittest.TestCase):
             db.execute("INSERT INTO equity_evidence VALUES (?,?,'delta_demo_signed_wallet')",
                        (int(self.now.timestamp()*1000000), "2000"))
             db.execute("INSERT INTO equity_watermark VALUES (1,'2000')")
-        with self.assertRaisesRegex(EquityRiskError, "loss_limit_daily_weekly_drawdown"):
+        with self.assertRaisesRegex(EquityRiskError, "equity_checkpoint_receipt_missing"):
             self.check(RuntimeEquityGuard(self.path), "1000")
         with closing(sqlite3.connect(self.path)) as db:
             self.assertEqual(db.execute("SELECT high_usd FROM equity_watermark").fetchone(), ("2000",))
-            self.assertEqual(db.execute("SELECT count(*) FROM equity_evidence").fetchone()[0], 2)
-            self.assertEqual(db.execute("SELECT count(*) FROM equity_read_receipts").fetchone()[0], 1)
+            self.assertEqual(db.execute("SELECT count(*) FROM equity_evidence").fetchone()[0], 1)
+            self.assertEqual(db.execute("SELECT count(*) FROM equity_read_receipts").fetchone()[0], 0)
 
     def test_missing_watermark_rejected_before_additive_migration(self):
         self.seed()
@@ -123,6 +125,57 @@ class RuntimeIntegrityTests(unittest.TestCase):
                 self.check(guard)
         self.assertFalse(self.path.exists())
 
+    def test_existing_only_rejects_unsigned_opening_before_observation_write(self):
+        guard = PortfolioEquityGuard(self.path)
+        guard.observe("2000", at=self.now)
+        instant = self.now + timedelta(seconds=1)
+        before = guard.latest_observed_us()
+        with self.assertRaisesRegex(EquityRiskError, "equity_checkpoint_receipt_missing"):
+            RuntimeEquityGuard(self.path).require_verified_read(
+                "2000", receipt_for("2000", instant), now=instant)
+        with closing(sqlite3.connect(self.path)) as db:
+            self.assertEqual(db.execute("SELECT count(*) FROM equity_evidence").fetchone()[0], 1)
+            self.assertEqual(db.execute("SELECT count(*) FROM equity_read_receipts").fetchone()[0], 0)
+        self.assertEqual(guard.latest_observed_us(), before)
+
+    def test_existing_only_rejects_unsigned_latest_after_verified_opening(self):
+        guard = self.seed()
+        latest = self.now + timedelta(seconds=1)
+        guard.observe("2000", at=latest)
+        requested = self.now + timedelta(seconds=2)
+        with self.assertRaisesRegex(EquityRiskError, "equity_checkpoint_receipt_missing"):
+            RuntimeEquityGuard(self.path).require_verified_read(
+                "2000", receipt_for("2000", requested), now=requested)
+        with closing(sqlite3.connect(self.path)) as db:
+            self.assertEqual(db.execute("SELECT count(*) FROM equity_evidence").fetchone()[0], 2)
+            self.assertEqual(db.execute("SELECT count(*) FROM equity_read_receipts").fetchone()[0], 1)
+
+    def test_collector_can_record_diagnostic_sample_but_cannot_approve_old_anchor(self):
+        guard = PortfolioEquityGuard(self.path)
+        guard.observe("2000", at=self.now)
+        instant = self.now + timedelta(seconds=1)
+        # Collector uses observe_verified_read; pass the deterministic fixture
+        # clock rather than the actual current time for this offline scenario.
+        report = guard.observe_verified_read("2000", receipt_for("2000", instant),
+                                             now=instant)
+        self.assertTrue(report["approved"])  # diagnostic arithmetic only
+        requested = self.now + timedelta(seconds=2)
+        with self.assertRaisesRegex(EquityRiskError, "equity_checkpoint_receipt_missing"):
+            RuntimeEquityGuard(self.path).require_verified_read(
+                "2000", receipt_for("2000", requested), now=requested)
+
+    def test_exact_original_receipt_mismatch_cannot_approve_runtime_equity(self):
+        guard = PortfolioEquityGuard(self.path)
+        guard.observe("2000", at=self.now)
+        with closing(sqlite3.connect(self.path)) as db, db:
+            altered = receipt_for("999", self.now)
+            db.execute("INSERT INTO equity_read_receipts VALUES (?,?)",
+                       (int(self.now.timestamp()*1_000_000), json.dumps(altered)))
+        instant = self.now + timedelta(seconds=1)
+        with self.assertRaisesRegex(EquityRiskError, "equity_checkpoint_receipt_unverified"):
+            RuntimeEquityGuard(self.path).require_verified_read(
+                "2000", receipt_for("2000", instant), now=instant)
+
     def test_concurrent_existing_only_opens_preserve_one_receipt_and_peak(self):
         self.seed()
         with ThreadPoolExecutor(max_workers=6) as pool:
@@ -130,7 +183,7 @@ class RuntimeIntegrityTests(unittest.TestCase):
         self.assertTrue(all(r["approved"] for r in results))
         with closing(sqlite3.connect(self.path)) as db:
             self.assertEqual(db.execute("SELECT count(*) FROM equity_evidence").fetchone()[0], 2)
-            self.assertEqual(db.execute("SELECT count(*) FROM equity_read_receipts").fetchone()[0], 1)
+            self.assertEqual(db.execute("SELECT count(*) FROM equity_read_receipts").fetchone()[0], 2)
             self.assertEqual(db.execute("SELECT high_usd FROM equity_watermark").fetchone(), ("2000",))
 
 
