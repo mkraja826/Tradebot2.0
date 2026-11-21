@@ -174,6 +174,54 @@ class BrokerInventoryTests(unittest.TestCase):
         self.assertEqual(report["broker_positions_last"], 1)
         self.assertFalse(report["trade_authorized"])
 
+    def test_matching_signed_btc_position_is_consistent_but_still_exposure(self):
+        self.exchange.margined = [{"product_id": 27, "size": "5"}]
+        self.exchange.live[27] = "5"
+        report = self.check()
+        self.assertIn("account_has_exposure", report["blockers"])
+        self.assertIn("fire_market_has_exposure", report["blockers"])
+        self.assertNotIn("lagging_or_inconsistent_broker_positions",
+                         report["blockers"])
+        self.assertFalse(report["safe_to_enable_fire"])
+
+    def test_same_sign_different_btc_quantities_fail_closed(self):
+        # Previous presence-only comparison treated both +5 and +3 as
+        # consistent, despite an authenticated broker quantity disagreement.
+        self.exchange.margined = [{"product_id": 27, "size": "5"}]
+        self.exchange.live[27] = "3"
+        report = self.check()
+        self.assertIn("lagging_or_inconsistent_broker_positions",
+                      report["blockers"])
+        self.assertIn("account_has_exposure", report["blockers"])
+        self.assertIn("fire_market_has_exposure", report["blockers"])
+        self.assertFalse(report["trade_authorized"])
+
+    def test_opposite_sign_gold_positions_fail_closed(self):
+        self.exchange.margined = [{"product_id": 82, "size": "-2"}]
+        self.exchange.live[82] = "2"
+        report = self.check()
+        self.assertIn("lagging_or_inconsistent_broker_positions",
+                      report["blockers"])
+        self.assertFalse(report["trade_authorized"])
+
+    def test_equal_signed_gold_short_positions_still_block_exposure(self):
+        self.exchange.margined = [{"product_id": 82, "size": "-2"}]
+        self.exchange.live[82] = "-2"
+        report = self.check()
+        self.assertNotIn("lagging_or_inconsistent_broker_positions",
+                         report["blockers"])
+        self.assertIn("account_has_exposure", report["blockers"])
+        self.assertIn("fire_market_has_exposure", report["blockers"])
+        self.assertFalse(report["safe_to_enable_fire"])
+
+    def test_zero_margined_row_matches_zero_realtime_size(self):
+        self.exchange.margined = [{"product_id": 27, "size": "0"}]
+        report = self.check()
+        self.assertEqual(report["broker_positions_last"], 0)
+        self.assertNotIn("lagging_or_inconsistent_broker_positions",
+                         report["blockers"])
+        self.assertFalse(report["trade_authorized"])
+
     def test_realtime_gold_exposure_not_hidden_by_lagging_margined_endpoint(self):
         self.exchange.live[82] = "-1"
         report = self.check()
