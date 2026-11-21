@@ -2,6 +2,7 @@
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
+import sqlite3
 import unittest
 
 from equity_fixtures import receipt_for
@@ -31,6 +32,35 @@ class CheckpointHealthTests(unittest.TestCase):
         self.assertFalse(self.db.exists())
         self.assertFalse(result["checkpoint_prerequisites_met"])
         self.assertFalse(result["trade_authorized"])
+
+    def test_legacy_receipt_table_missing_reports_uncommissioned_without_writes(self):
+        # Historical schema from the original VM, before the signed transport
+        # receipts migration.  This is not a damaged SQLite file.
+        with sqlite3.connect(self.db) as db:
+            db.executescript("""
+                CREATE TABLE equity_evidence(
+                    observed_us INTEGER PRIMARY KEY,
+                    equity_usd TEXT NOT NULL,
+                    origin TEXT NOT NULL);
+                CREATE TABLE equity_watermark(
+                    singleton INTEGER PRIMARY KEY, high_usd TEXT NOT NULL);
+                INSERT INTO equity_evidence VALUES
+                    (1795392060000000, '1000', 'delta_demo_signed_wallet');
+                INSERT INTO equity_watermark VALUES (1, '1000');
+            """)
+        before = self.db.read_bytes()
+        result = self.check(utc(23, 0, 2))
+        self.assertEqual(result["database_integrity"], "verified")
+        self.assertEqual(result["status"], "legacy_receipt_schema_uncommissioned")
+        self.assertIn("equity_receipt_schema_missing", result["blocking_conditions"])
+        self.assertIn("equity_read_receipt_invalid", result["alert_codes"])
+        self.assertFalse(result["checkpoint_prerequisites_met"])
+        self.assertFalse(result["trade_authorized"])
+        self.assertEqual(self.db.read_bytes(), before)
+        with sqlite3.connect(self.db) as db:
+            self.assertIsNone(db.execute(
+                "SELECT name FROM sqlite_master WHERE name='equity_read_receipts'"
+            ).fetchone())
 
     def test_no_observations_after_window_alerts_both(self):
         PortfolioEquityGuard(self.db)
