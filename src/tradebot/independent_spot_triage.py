@@ -97,8 +97,10 @@ def read_coinbase_spot(utc_at):
     }
 
 
-def inspect_external_spot_context(exchange, times, *, spot_reader=read_coinbase_spot):
+def inspect_external_spot_context(exchange, times, *, spot_reader=None):
     """One independent market REFERENCE only; deterministic no-trade output."""
+    if spot_reader is None:
+        spot_reader = read_coinbase_spot
     report = compare_sources(exchange, times)
     report["independent_market_context"] = "coinbase_exchange_btc_usd_spot"
     report["perpetual_trade_print_verified"] = False
