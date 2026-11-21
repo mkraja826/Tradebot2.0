@@ -39,6 +39,17 @@ commissioning lock must remain intact. No historical checkpoints are created.
   and opening checkpoints are preserved, without inventing transport receipts
   for legacy rows. Duplicate identical readings do not duplicate evidence;
   conflicting / out-of-order observations fail closed.
+- **Pre-commissioning legacy schema diagnosis:** running the staged
+  `python -m tradebot.equity_monitor --check --data-dir /original/VM/data`
+  only reads the original SQLite ledger. On older VMs without
+  `equity_read_receipts`, it reports
+  `legacy_receipt_schema_uncommissioned`, the blocker
+  `equity_receipt_schema_missing`, and a nonzero exit. This is a missing
+  migration prerequisite, **not evidence that SQLite is corrupted**. The
+  probe never creates that table, replaces a missed opening or launches
+  the collector. Actual additive migration is reserved for the independently
+  reviewed supervised deployment; the old opening rows still lack genuine
+  transport receipts afterward.
 - The read-only checkpoint health endpoint now checks the stored original
   transport receipt for the **first daily/weekly opening observation** and
   the **latest observation**. It validates the saved timestamp and equity
