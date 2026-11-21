@@ -4,6 +4,7 @@ from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
+from equity_fixtures import receipt_for
 
 from tradebot.delta import DEMO_API, DeltaError
 from tradebot.fire_leverage import verify_liquidation_clearance
@@ -32,9 +33,9 @@ def seed_demo_equity(path, equity):
     day = now.replace(hour=0, minute=0, second=0, microsecond=0)
     monday = day - timedelta(days=day.weekday())
     guard = PortfolioEquityGuard(Path(path).parent / "fire-equity-risk.sqlite")
-    guard.observe(equity, at=monday)
+    guard.observe_verified_read(equity, receipt_for(equity, monday), now=monday)
     if day != monday:
-        guard.observe(equity, at=day)
+        guard.observe_verified_read(equity, receipt_for(equity, day), now=day)
     return guard
 
 
@@ -78,6 +79,7 @@ class FakeDemo:
 
     def wallet_balances(self):
         return {"meta": {"net_equity": "173.81"},
+                "equity_read_receipt": receipt_for("173.81"),
                 "balances": [{"asset_symbol": "USD", "available_balance": "173.81"}]}
 
     def _request(self, method, path, *, auth=False, payload=None, params=None):
@@ -128,11 +130,11 @@ class FakeDemo:
             self.active_orders = [
                 {"id": 9991, "product_id": 27, "stop_order_type": "stop_loss_order",
                  "bracket_order": True, "side": side, "state": "pending",
-                 "stop_price": payload["bracket_stop_loss_price"],
+                 "stop_price": payload["bracket_stop_loss_price"], "size": payload["size"],
                  "product_symbol": "BTCUSD"},
                 {"id": 9992, "product_id": 27, "stop_order_type": "take_profit_order",
                  "bracket_order": True, "side": side, "state": "pending",
-                 "stop_price": payload["bracket_take_profit_price"],
+                 "stop_price": payload["bracket_take_profit_price"], "size": payload["size"],
                  "product_symbol": "BTCUSD"},
             ]
         return {"result": self.order}
@@ -372,10 +374,60 @@ class FireExecutionTests(unittest.TestCase):
         self.assertEqual(self.calls, [])
         self.assertEqual(self.exchange.requests, [])
 
+    def test_missing_equity_ledger_does_not_reset_peak_on_controller_restart(self):
+        risk = self.path.parent / "fire-equity-risk.sqlite"
+        preserved = risk.with_name("preserved-risk.sqlite")
+        original = risk.read_bytes()
+        risk.rename(preserved)
+        fire = self.make()
+        self.assertFalse(risk.exists())
+        self.assertTrue(fire.start()[0])
+        self.assertEqual(fire.snapshot()["status"], "rejected_no_order")
+        self.assertEqual(fire.snapshot()["reason_code"], "portfolio_equity_limits_failed")
+        self.assertFalse(risk.exists())
+        self.assertEqual(preserved.read_bytes(), original)
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.exchange.requests, [])
+
+    def test_corrupt_equity_ledger_does_not_prevent_diagnostic_startup(self):
+        risk = self.path.parent / "fire-equity-risk.sqlite"
+        risk.write_bytes(b"original corrupt risk evidence")
+        fire = self.make()
+        self.assertEqual(fire.snapshot()["status"], "idle")
+        self.assertTrue(fire.start()[0])
+        self.assertEqual(fire.snapshot()["reason_code"], "portfolio_equity_limits_failed")
+        self.assertEqual(risk.read_bytes(), b"original corrupt risk evidence")
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.exchange.requests, [])
+
+    def test_missing_receipt_blocks_before_paid_model_or_broker_post(self):
+        wallet = self.exchange.wallet_balances()
+        wallet.pop("equity_read_receipt")
+        with patch.object(self.exchange, "wallet_balances", return_value=wallet):
+            fire = self.make()
+            fire.start()
+        self.assertEqual(fire.snapshot()["reason_code"], "portfolio_equity_limits_failed")
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.exchange.requests, [])
+
+    def test_final_equity_recheck_blocks_loss_after_model_and_budget_checks(self):
+        first = self.exchange.wallet_balances()
+        second = self.exchange.wallet_balances()
+        reduced = self.exchange.wallet_balances()
+        reduced["meta"]["net_equity"] = "169"
+        reduced["equity_read_receipt"] = receipt_for("169")
+        with patch.object(self.exchange, "wallet_balances", side_effect=[first,second,reduced]):
+            fire = self.make()
+            fire.start()
+        self.assertEqual(fire.snapshot()["reason_code"], "portfolio_equity_limits_final_failed")
+        self.assertEqual(len(self.calls), 1)
+        self.assertEqual(self.exchange.requests, [])
+
     def test_daily_equity_loss_halts_before_paid_ai(self):
         from unittest.mock import patch
         wallet = self.exchange.wallet_balances()
         reduced = dict(wallet, meta={"net_equity": "169"})
+        reduced["equity_read_receipt"] = receipt_for("169")
         with patch.object(self.exchange, "wallet_balances", return_value=reduced):
             fire = self.make()
             fire.start()
@@ -479,10 +531,10 @@ class FireExecutionTests(unittest.TestCase):
         self.exchange.active_orders = [
             {"id": 11, "product_id": 27, "bracket_order": True,
              "stop_order_type": "stop_loss_order", "state": "pending",
-             "side": "sell", "stop_price": "62950"},
+             "side": "sell", "stop_price": "62950", "size": 1},
             {"id": 12, "product_id": 27, "bracket_order": True,
              "stop_order_type": "take_profit_order", "state": "pending",
-             "side": "sell", "stop_price": "63950"},
+             "side": "sell", "stop_price": "63950", "size": 1},
         ]
         self.assertTrue(protective_orders_verified(self.exchange.active_orders,
                        product_id=27, plan=PLAN))
@@ -491,6 +543,117 @@ class FireExecutionTests(unittest.TestCase):
         self.assertFalse(protective_orders_verified(invalid, product_id=27, plan=PLAN))
         invalid[1] = dict(invalid[1], stop_price="63800")
         self.assertFalse(protective_orders_verified(invalid, product_id=27, plan=PLAN))
+
+    def test_protection_rejects_undersized_oversized_missing_and_ambiguous_children(self):
+        valid = [
+            {"id": 11, "product_id": 27, "bracket_order": True,
+             "stop_order_type": "stop_loss_order", "state": "pending",
+             "side": "sell", "stop_price": "62950", "size": 1},
+            {"id": 12, "product_id": 27, "bracket_order": True,
+             "stop_order_type": "take_profit_order", "state": "pending",
+             "side": "sell", "stop_price": "63950", "size": 1},
+        ]
+        self.assertTrue(protective_orders_verified(valid, product_id=27, plan=PLAN))
+        for field, value in (("size", 0), ("size", 2), ("size", "0.5"),
+                             ("size", "NaN"), ("size", True), ("size", None),
+                             ("id", True), ("id", {})):
+            with self.subTest(field=field, value=value):
+                wrong = [dict(v) for v in valid]
+                wrong[0][field] = value
+                self.assertFalse(protective_orders_verified(
+                    wrong, product_id=27, plan=PLAN))
+        no_size = [dict(v) for v in valid]
+        no_size[1].pop("size")
+        self.assertFalse(protective_orders_verified(no_size, product_id=27, plan=PLAN))
+        # One matching child of each type is required, not two copies of SL.
+        duplicates = [*valid, dict(valid[0], id=13)]
+        self.assertFalse(protective_orders_verified(duplicates, product_id=27, plan=PLAN))
+        repeated = [*valid, dict(valid[1])]
+        self.assertFalse(protective_orders_verified(repeated, product_id=27, plan=PLAN))
+        self.assertFalse(protective_orders_verified(
+            [*valid, dict(valid[0], id=12)], product_id=27, plan=PLAN))
+
+    def test_extra_conflicting_same_product_order_invalidates_bracket_protection(self):
+        valid = [
+            {"id": 11, "product_id": 27, "bracket_order": True,
+             "stop_order_type": "stop_loss_order", "state": "pending",
+             "side": "sell", "stop_price": "62950", "size": 1},
+            {"id": 12, "product_id": 27, "bracket_order": True,
+             "stop_order_type": "take_profit_order", "state": "pending",
+             "side": "sell", "stop_price": "63950", "size": 1},
+        ]
+        self.assertTrue(protective_orders_verified(valid, product_id=27, plan=PLAN))
+        extras = (
+            {"id": 13, "product_id": 27, "stop_order_type": "stop_loss_order",
+             "bracket_order": True, "state": "pending", "side": "sell",
+             "stop_price": "62900", "size": 1},
+            {"id": 13, "product_id": 27, "stop_order_type": "take_profit_order",
+             "bracket_order": True, "state": "pending", "side": "sell",
+             "stop_price": "63950", "size": 2},
+            {"id": 13, "product_id": 27, "stop_order_type": "stop_loss_order",
+             "bracket_order": False, "state": "pending", "side": "sell",
+             "stop_price": "62950", "size": 1},
+            {"id": 13, "product_id": 27, "stop_order_type": "take_profit_order",
+             "bracket_order": True, "state": "pending", "side": "buy",
+             "stop_price": "63950", "size": 1},
+            {"id": 13, "product_id": 27, "state": "pending",
+             "side": "sell", "size": 1},
+            {"id": 13, "product_id": 27, "stop_order_type": "stop_loss_order",
+             "bracket_order": True, "state": "cancelled", "side": "sell",
+             "stop_price": "62950", "size": 1},
+            {"id": "", "product_id": 27, "stop_order_type": "stop_loss_order",
+             "bracket_order": True, "state": "pending", "side": "sell",
+             "stop_price": "62950", "size": 1},
+        )
+        for extra in extras:
+            with self.subTest(extra=extra):
+                self.assertFalse(protective_orders_verified(
+                    [*valid, extra], product_id=27, plan=PLAN))
+        # This verifier deliberately scopes to the selected product; account-
+        # wide pending orders are checked separately by the entry gate.
+        other_product = dict(extras[0], product_id=82)
+        self.assertTrue(protective_orders_verified(
+            [*valid, other_product], product_id=27, plan=PLAN))
+
+    def test_extra_wrong_price_stop_cannot_be_ignored_after_entry_fill(self):
+        original = self.exchange._request
+        def add_wrong_price_stop(method, path, **kwargs):
+            answer = original(method, path, **kwargs)
+            if method == "POST" and path == "/v2/orders":
+                self.exchange.active_orders.append({
+                    "id": 9993, "product_id": 27,
+                    "stop_order_type": "stop_loss_order",
+                    "bracket_order": True, "side": "sell",
+                    "state": "pending", "size": 1,
+                    "stop_price": "62700", "product_symbol": "BTCUSD",
+                })
+            return answer
+        self.exchange._request = add_wrong_price_stop
+        fire = self.make()
+        self.assertTrue(fire.start()[0])
+        state = fire.snapshot()
+        self.assertEqual(state["status"], "flat_verified")
+        self.assertEqual(state["reason_code"], "emergency_flat_verified")
+        self.assertFalse(state["protection_verified"])
+        self.assertEqual(self.exchange.position, 0)
+        self.assertEqual(len(self.exchange.requests), 1)
+
+    def test_undersized_protective_child_is_never_marked_protected(self):
+        original = self.exchange._request
+        def alter_child(method, path, **kwargs):
+            answer = original(method, path, **kwargs)
+            if method == "POST" and path == "/v2/orders":
+                self.exchange.active_orders[0]["size"] = "0"
+            return answer
+        self.exchange._request = alter_child
+        fire = self.make()
+        self.assertTrue(fire.start()[0])
+        state = fire.snapshot()
+        self.assertEqual(state["status"], "flat_verified")
+        self.assertEqual(state["reason_code"], "emergency_flat_verified")
+        self.assertFalse(state["protection_verified"])
+        self.assertEqual(self.exchange.position, 0)
+        self.assertEqual(len(self.exchange.requests), 1)
 
     def test_provider_rejection_is_visible_on_receipt_without_order(self):
         fire = self.make()

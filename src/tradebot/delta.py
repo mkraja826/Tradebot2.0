@@ -3,6 +3,8 @@ import hashlib
 import hmac
 import json
 import time
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
@@ -13,6 +15,14 @@ DEMO_API = "https://cdn-ind.testnet.deltaex.org"
 
 class DeltaError(RuntimeError):
     pass
+
+
+class DeltaReadError(DeltaError):
+    """Sanitized wallet-read failure, without upstream bodies or credentials."""
+
+    def __init__(self, code):
+        self.code = code
+        super().__init__(code)
 
 
 def signature(secret: str, method: str, timestamp: str, path: str,
@@ -45,9 +55,12 @@ class DeltaDemo:
         body = json.dumps(payload, separators=(",", ":")) if payload is not None else ""
         headers = {"Accept": "application/json", "Content-Type": "application/json",
                    "User-Agent": "tradebot2-demo/0.1"}
+        capture_wallet = auth and method.upper() == "GET" and path == "/v2/wallet/balances"
+        if capture_wallet:
+            headers["Cache-Control"] = "no-cache, no-store"
         if auth:
             if not self.api_key or not self.api_secret:
-                raise DeltaError("Demo API key and secret are required")
+                raise DeltaReadError("broker_authentication_failed")
             stamp = str(int(time.time()))
             headers.update({"api-key": self.api_key, "timestamp": stamp,
                             "signature": signature(self.api_secret, method, stamp, path, query, body)})
@@ -55,15 +68,49 @@ class DeltaDemo:
             raise DeltaError("Order mutations disabled. Set ENABLE_DEMO_ORDERS=true only for demo.")
         req = Request(DEMO_API + path + query, headers=headers,
                       data=body.encode() if body else None, method=method.upper())
+        started = datetime.now(timezone.utc)
+        monotonic_start = time.monotonic_ns()
         try:
             with urlopen(req, timeout=8) as response:
-                message = json.load(response)
+                raw = response.read()
+                message = json.loads(raw)
+                received = datetime.now(timezone.utc)
+                elapsed_us = (time.monotonic_ns() - monotonic_start) // 1000
+                date_header = response.headers.get("Date") if capture_wallet else None
+                age_header = response.headers.get("Age", "0") if capture_wallet else "0"
         except (HTTPError, URLError, TimeoutError) as exc:
+            if capture_wallet:
+                code = ("broker_authentication_failed" if isinstance(exc, HTTPError)
+                        and exc.code in (401, 403) else "broker_equity_unavailable")
+                raise DeltaReadError(code) from None
             raise DeltaError(f"Demo exchange request failed: {exc}") from exc
         if not isinstance(message, dict):
             raise DeltaError("Unexpected Delta API response")
         if message.get("success") is not True:
+            if capture_wallet:
+                raise DeltaReadError("broker_equity_rejected")
             raise DeltaError(f"Delta demo API rejected request: {message.get('error')}")
+        if capture_wallet:
+            from tradebot.equity_receipt import SOURCE
+            try:
+                server_date = parsedate_to_datetime(date_header)
+                if server_date.tzinfo is None:
+                    raise ValueError("Missing timezone")
+                cache_age = int(age_header)
+            except (ValueError, TypeError, OverflowError):
+                # Preserve the balance API for existing read-only consumers.
+                # Risk admission independently rejects this incomplete receipt.
+                message["_wallet_read_receipt"] = {"failure": "broker_time_evidence_unavailable"}
+                return message
+            # Overwrite any similarly named body field with local evidence.
+            message["_wallet_read_receipt"] = {
+                "source": SOURCE,
+                "request_started_us": int(started.timestamp() * 1_000_000),
+                "received_us": int(received.timestamp() * 1_000_000),
+                "server_date_us": int(server_date.timestamp() * 1_000_000),
+                "elapsed_us": elapsed_us, "cache_age_seconds": cache_age,
+                "response_sha256": hashlib.sha256(raw).hexdigest(),
+            }
         return message
 
     def products(self, *, limit_pages: int = 100) -> list[dict]:
@@ -219,7 +266,11 @@ class DeltaDemo:
         meta = reply.get("meta") or {}
         if not isinstance(meta, dict):
             raise DeltaError("Malformed wallet meta")
-        return {"balances": reply["result"], "meta": meta}
+        receipt = reply.get("_wallet_read_receipt")
+        if isinstance(receipt, dict) and "failure" not in receipt:
+            receipt = {**receipt, "equity_usd": meta.get("net_equity")}
+        return {"balances": reply["result"], "meta": meta,
+                "equity_read_receipt": receipt}
 
     def wallet_postings(self, start_us, end_us):
         """Read a complete bounded window, deduplicating overlapping pages."""

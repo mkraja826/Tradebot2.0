@@ -52,14 +52,16 @@ class CommissioningPreflightTests(unittest.TestCase):
     def setUp(self):
         self.exchange = FakeReadOnlyDemo()
 
-    def run_gate(self, *, gate=None, services=lambda: True, fire=lambda: True):
+    def run_gate(self, *, gate=None, services=lambda: True, fire=lambda: True,
+                 equity=lambda *_:{"approved":True,"trade_authorized":False}):
         with patch(
             "tradebot.fire_commission_preflight.verify_staging_samples",
             return_value=flat_gate() if gate is None else gate,
         ):
             return commissioning_preflight(
                 self.exchange, "/fake/data",
-                pause=lambda _: None, check_services=services, check_fire=fire
+                pause=lambda _: None, check_services=services, check_fire=fire,
+                check_equity=equity,
             )
 
     def test_ready_is_read_only_and_never_trade_authority(self):
@@ -78,6 +80,54 @@ class CommissioningPreflightTests(unittest.TestCase):
         result = self.run_gate(fire=lambda: False)
         self.assertFalse(result["ready_for_supervised_operator_review"])
         self.assertIn("fire_execution_not_disabled", result["blockers"])
+
+    def test_stopped_equity_collector_blocks_real_service_probe(self):
+        from tradebot.fire_commission_preflight import _services_active
+
+        checked = []
+        def systemctl(args, **_kwargs):
+            checked.append(args[-1])
+            code = 1 if args[-1] == "tradebot2-equity-monitor" else 0
+            return type("Completed", (), {"returncode": code})()
+
+        with patch("tradebot.fire_commission_preflight.subprocess.run",
+                   side_effect=systemctl):
+            self.assertFalse(_services_active())
+        self.assertEqual(checked, ["tradebot2-dashboard", "tradebot2-fire-watchdog",
+                                   "tradebot2-equity-monitor"])
+
+        with patch("tradebot.fire_commission_preflight.subprocess.run",
+                   return_value=type("Completed", (), {"returncode": 0})()):
+            self.assertTrue(_services_active())
+
+    def test_collector_stops_during_equity_readiness_blocks_approval(self):
+        states = iter((True, False))
+        result = self.run_gate(services=lambda: next(states))
+        self.assertFalse(result["ready_for_supervised_operator_review"])
+        self.assertFalse(result["watchdog_and_dashboard_active"])
+        self.assertIn("service_health_changed_during_preflight", result["blockers"])
+        self.assertFalse(result["trade_authorized"])
+
+    def test_fire_endpoint_enabled_during_equity_readiness_blocks_approval(self):
+        states = iter((True, False))
+        result = self.run_gate(fire=lambda: next(states))
+        self.assertFalse(result["ready_for_supervised_operator_review"])
+        self.assertFalse(result["both_fire_endpoints_disabled"])
+        self.assertIn("fire_execution_state_changed_during_preflight", result["blockers"])
+        self.assertFalse(result["trade_authorized"])
+
+    def test_service_recheck_error_fails_closed_without_leaking_details(self):
+        calls = [0]
+        def health():
+            calls[0] += 1
+            if calls[0] == 2:
+                raise OSError("private service information")
+            return True
+        result = self.run_gate(services=health)
+        self.assertFalse(result["ready_for_supervised_operator_review"])
+        self.assertFalse(result["watchdog_and_dashboard_active"])
+        self.assertIn("service_health_recheck_unavailable", result["blockers"])
+        self.assertNotIn("private service information", str(result))
 
     def test_missing_watchdog_blocks_commission_readiness(self):
         result = self.run_gate(services=lambda: False)
@@ -110,6 +160,19 @@ class CommissioningPreflightTests(unittest.TestCase):
         result = self.run_gate(fire=offline)
         self.assertIn("fire_execution_status_unavailable", result["blockers"])
         self.assertNotIn("secret:error", str(result))
+
+    def test_equity_loss_or_missing_checkpoint_prevents_readiness(self):
+        result = self.run_gate(equity=lambda *_:{"approved":False,"trade_authorized":False})
+        self.assertFalse(result["ready_for_supervised_operator_review"])
+        self.assertIn("equity_risk_prerequisites_not_passed", result["blockers"])
+
+    def test_equity_database_error_is_sanitized(self):
+        def fail(*_):
+            raise OSError("secret database details")
+        result = self.run_gate(equity=fail)
+        self.assertFalse(result["ready_for_supervised_operator_review"])
+        self.assertIn("signed_equity_prerequisites_unavailable", result["blockers"])
+        self.assertNotIn("secret database details", str(result))
 
 
 if __name__ == "__main__":

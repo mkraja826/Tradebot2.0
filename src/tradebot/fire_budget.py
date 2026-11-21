@@ -68,6 +68,7 @@ def entry_budget(exchange, symbol, product_id, price, *, planned_leverage=None):
             high = mid - 1
     return {"margin_budget_usd": str(ceiling), "leverage": str(leverage),
             "equity_usd": str(equity), "taker_commission_rate": str(fee),
+            "equity_read_receipt": wallet.get("equity_read_receipt"),
             "risk_policy": "fire-demo-risk-v2-dynamic-leverage",
             "broker_leverage": str(broker_leverage),
             "contract_value": str(multiplier), "max_contracts_per_entry": low,

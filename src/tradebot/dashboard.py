@@ -23,7 +23,7 @@ from tradebot.chart_desk import ChartDesk
 from tradebot.delta import DeltaDemo
 from tradebot.fire_dashboard import FirePreviewController
 from tradebot.fire_execution import FireDemoController
-from tradebot.equity_checkpoint_health import checkpoint_health
+from tradebot.equity_monitor import risk_health
 from tradebot.fire_probe import load_snapshot
 from tradebot.trade_memory import public_learning_summary
 from tradebot.market import _age_seconds, _candles, MarketDataError
@@ -402,7 +402,7 @@ def create_handler(state, *, allowed_hosts=None):
                 mime = "application/json; charset=utf-8"
             elif path == "/api/risk/checkpoints":
                 data = json.dumps(
-                    checkpoint_health(state.root / "fire-equity-risk.sqlite"),
+                    risk_health(state.root / "fire-equity-risk.sqlite"),
                     separators=(",", ":"),
                 ).encode()
                 mime = "application/json; charset=utf-8"

@@ -15,8 +15,7 @@ from tradebot.delta import DEMO_API, DeltaDemo
 from tradebot.execution import DemoExecutor
 from tradebot.fire_market import FireMarket, positions_for_fire
 from tradebot.fire_leverage import verify_liquidation_clearance, LeverageRejected
-from tradebot.portfolio_equity_guard import PortfolioEquityGuard
-from tradebot.equity_checkpoint_health import checkpoint_health
+from tradebot.equity_monitor import MonitorStore
 from tradebot.fire_execution import (
     EXPOSED, FireTradeStore, active_position, protective_orders_verified
 )
@@ -144,45 +143,35 @@ def main(argv=None):
                 api_secret=os.environ.get("DELTA_DEMO_API_SECRET", ""), allow_orders=True))
                for symbol, path in (("BTCUSD", args.database),
                                     ("XAUTUSD", Path(args.database).with_name("fire-xaut.sqlite")))]
-    equity_guard = PortfolioEquityGuard(Path(args.database).parent / "fire-equity-risk.sqlite")
-    last_checkpoint_status = None
-    last_checkpoint_log_at = 0.0
+    monitoring_path = Path(args.database).parent / "fire-monitoring.sqlite"
+    monitoring_started = False
+    last_monitor_error = None
     while True:
-        # Read-only sampling: maintain true UTC day/week opening checkpoints
-        # even while no FIRE trade is requested. Never interrupt SL/TP protection.
-        try:
-            latest = equity_guard.latest_observed_us()
-            if latest is None or time.time()*1000000 - latest >= 60*1000000:
-                equity_guard.observe_signed_demo(markets[0][1])
-        except Exception:
-            print(json.dumps({"status": "equity_evidence_unavailable",
-                              "action": "new_fire_blocked_until_verified"}), flush=True)
-        # Emit an actionable alert immediately when a UTC opening window was
-        # missed. Reduce log noise by printing on state transitions or every
-        # five minutes, not every 15-second broker polling iteration.
-        health = checkpoint_health(equity_guard.path)
-        fingerprint = (health["status"], tuple(health["blocking_conditions"]))
-        tick_at = time.monotonic()
-        if (fingerprint != last_checkpoint_status or
-                tick_at - last_checkpoint_log_at >= 300):
-            print(json.dumps({
-                "event": "equity_checkpoint_health",
-                "status": health["status"],
-                "daily_checkpoint": health["daily_checkpoint"],
-                "weekly_checkpoint": health["weekly_checkpoint"],
-                "latest_observation_age_seconds": health["latest_observation_age_seconds"],
-                "alert_codes": health["alert_codes"],
-                "action": "block_new_fire_until_signed_equity_limits_pass",
-            }), flush=True)
-            last_checkpoint_status = fingerprint
-            last_checkpoint_log_at = tick_at
+        # Protection always runs before optional telemetry. Equity reads run in
+        # their own read-only service; a broken equity DB cannot stop this loop.
+        healthy = True
         for store, exchange in markets:
             try:
                 state = watchdog_tick(exchange, store)
             except Exception:
                 state = {"status": "broker_reconciliation_unavailable",
                          "action": "human_attention_required"}
+            if state["status"] in {"broker_reconciliation_unavailable", "exposure_unknown",
+                                  "manual_reconciliation_required"}:
+                healthy = False
             print(json.dumps({"symbol": exchange.symbol, **state}), flush=True)
+        try:
+            monitoring = MonitorStore(monitoring_path)
+            if not monitoring_started:
+                monitoring.start("watchdog")
+                monitoring_started = True
+            monitoring.heartbeat("watchdog", "healthy" if healthy else "watchdog_protection_unverified")
+        except Exception:
+            tick_at = time.monotonic()
+            if last_monitor_error is None or tick_at - last_monitor_error >= 300:
+                print(json.dumps({"event": "watchdog_telemetry_unavailable",
+                                  "action": "protection_loop_continues"}), flush=True)
+                last_monitor_error = tick_at
         time.sleep(args.interval)
 
 
