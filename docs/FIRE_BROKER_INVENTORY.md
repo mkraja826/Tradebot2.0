@@ -47,6 +47,13 @@ For both sweeps the tool uses authenticated GETs to inspect:
   its receipt/report, entry, and evidence/ownership tables; source device/inode
   is checked before and after. This avoids combining separate table reads
   from different moments within the same SQLite file.
+- Local cross-table integrity checks require each stored ownership claim to
+  reference an existing matching fill/posting evidence ID. Reports claiming
+  net realized reconciliation must list existing fill and wallet-posting IDs
+  owned by that same trade. Orphan claims, missing source events, mismatched
+  embedded IDs, or claims unsupported by such reports block a clean result.
+  These checks establish **local referential consistency only**, not
+  authenticity or completeness of broker statements.
 
 Both observations must be flat, isolated, consistent and stable. A changed
 product ID, mismatch between margined and filtered positions, open unrelated
