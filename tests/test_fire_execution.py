@@ -33,9 +33,9 @@ def seed_demo_equity(path, equity):
     day = now.replace(hour=0, minute=0, second=0, microsecond=0)
     monday = day - timedelta(days=day.weekday())
     guard = PortfolioEquityGuard(Path(path).parent / "fire-equity-risk.sqlite")
-    guard.observe(equity, at=monday)
+    guard.observe_verified_read(equity, receipt_for(equity, monday), now=monday)
     if day != monday:
-        guard.observe(equity, at=day)
+        guard.observe_verified_read(equity, receipt_for(equity, day), now=day)
     return guard
 
 
