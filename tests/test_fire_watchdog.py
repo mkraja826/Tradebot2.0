@@ -21,10 +21,10 @@ class Broker:
         self.orders = [
             {"id": 21, "product_id": 27, "product_symbol": "BTCUSD",
              "bracket_order": True, "state": "pending", "side": "sell",
-             "stop_order_type": "stop_loss_order", "stop_price": "62800"},
+             "stop_order_type": "stop_loss_order", "stop_price": "62800", "size": 1},
             {"id": 22, "product_id": 27, "product_symbol": "BTCUSD",
              "bracket_order": True, "state": "pending", "side": "sell",
-             "stop_order_type": "take_profit_order", "stop_price": "63750"},
+             "stop_order_type": "take_profit_order", "stop_price": "63750", "size": 1},
         ]
         self.closeouts = 0
 
@@ -110,6 +110,25 @@ class WatchdogTests(unittest.TestCase):
         self.assertEqual(self.broker.size, 0)
         self.assertEqual(self.broker.closeouts, 1)
         self.assertEqual(self.store.latest()["status"], "flat_verified")
+        self.assertFalse(self.store.latest()["protection_verified"])
+
+    def test_undersized_bracket_never_recovers_protected_status(self):
+        self.seed()
+        self.broker.orders[0]["size"] = "0"
+        outcome = watchdog_tick(self.broker, self.store, pause=lambda _: None)
+        self.assertEqual(outcome["status"], "emergency_flat_verified")
+        self.assertEqual(self.broker.size, 0)
+        self.assertEqual(self.broker.closeouts, 1)
+        self.assertEqual(self.store.latest()["status"], "flat_verified")
+        self.assertFalse(self.store.latest()["protection_verified"])
+
+    def test_duplicated_bracket_child_requires_emergency_flatness(self):
+        self.seed()
+        self.broker.orders.append(dict(self.broker.orders[1], id=23))
+        outcome = watchdog_tick(self.broker, self.store, pause=lambda _: None)
+        self.assertEqual(outcome["status"], "emergency_flat_verified")
+        self.assertEqual(self.broker.size, 0)
+        self.assertEqual(self.broker.closeouts, 1)
         self.assertFalse(self.store.latest()["protection_verified"])
 
     def test_verified_bracket_exit_allows_immediate_next_manual_press(self):

@@ -130,11 +130,11 @@ class FakeDemo:
             self.active_orders = [
                 {"id": 9991, "product_id": 27, "stop_order_type": "stop_loss_order",
                  "bracket_order": True, "side": side, "state": "pending",
-                 "stop_price": payload["bracket_stop_loss_price"],
+                 "stop_price": payload["bracket_stop_loss_price"], "size": payload["size"],
                  "product_symbol": "BTCUSD"},
                 {"id": 9992, "product_id": 27, "stop_order_type": "take_profit_order",
                  "bracket_order": True, "side": side, "state": "pending",
-                 "stop_price": payload["bracket_take_profit_price"],
+                 "stop_price": payload["bracket_take_profit_price"], "size": payload["size"],
                  "product_symbol": "BTCUSD"},
             ]
         return {"result": self.order}
@@ -531,10 +531,10 @@ class FireExecutionTests(unittest.TestCase):
         self.exchange.active_orders = [
             {"id": 11, "product_id": 27, "bracket_order": True,
              "stop_order_type": "stop_loss_order", "state": "pending",
-             "side": "sell", "stop_price": "62950"},
+             "side": "sell", "stop_price": "62950", "size": 1},
             {"id": 12, "product_id": 27, "bracket_order": True,
              "stop_order_type": "take_profit_order", "state": "pending",
-             "side": "sell", "stop_price": "63950"},
+             "side": "sell", "stop_price": "63950", "size": 1},
         ]
         self.assertTrue(protective_orders_verified(self.exchange.active_orders,
                        product_id=27, plan=PLAN))
@@ -543,6 +543,52 @@ class FireExecutionTests(unittest.TestCase):
         self.assertFalse(protective_orders_verified(invalid, product_id=27, plan=PLAN))
         invalid[1] = dict(invalid[1], stop_price="63800")
         self.assertFalse(protective_orders_verified(invalid, product_id=27, plan=PLAN))
+
+    def test_protection_rejects_undersized_oversized_missing_and_ambiguous_children(self):
+        valid = [
+            {"id": 11, "product_id": 27, "bracket_order": True,
+             "stop_order_type": "stop_loss_order", "state": "pending",
+             "side": "sell", "stop_price": "62950", "size": 1},
+            {"id": 12, "product_id": 27, "bracket_order": True,
+             "stop_order_type": "take_profit_order", "state": "pending",
+             "side": "sell", "stop_price": "63950", "size": 1},
+        ]
+        self.assertTrue(protective_orders_verified(valid, product_id=27, plan=PLAN))
+        for field, value in (("size", 0), ("size", 2), ("size", "0.5"),
+                             ("size", "NaN"), ("size", True), ("size", None),
+                             ("id", True), ("id", {})):
+            with self.subTest(field=field, value=value):
+                wrong = [dict(v) for v in valid]
+                wrong[0][field] = value
+                self.assertFalse(protective_orders_verified(
+                    wrong, product_id=27, plan=PLAN))
+        no_size = [dict(v) for v in valid]
+        no_size[1].pop("size")
+        self.assertFalse(protective_orders_verified(no_size, product_id=27, plan=PLAN))
+        # One matching child of each type is required, not two copies of SL.
+        duplicates = [*valid, dict(valid[0], id=13)]
+        self.assertFalse(protective_orders_verified(duplicates, product_id=27, plan=PLAN))
+        repeated = [*valid, dict(valid[1])]
+        self.assertFalse(protective_orders_verified(repeated, product_id=27, plan=PLAN))
+        self.assertFalse(protective_orders_verified(
+            [*valid, dict(valid[0], id=12)], product_id=27, plan=PLAN))
+
+    def test_undersized_protective_child_is_never_marked_protected(self):
+        original = self.exchange._request
+        def alter_child(method, path, **kwargs):
+            answer = original(method, path, **kwargs)
+            if method == "POST" and path == "/v2/orders":
+                self.exchange.active_orders[0]["size"] = "0"
+            return answer
+        self.exchange._request = alter_child
+        fire = self.make()
+        self.assertTrue(fire.start()[0])
+        state = fire.snapshot()
+        self.assertEqual(state["status"], "flat_verified")
+        self.assertEqual(state["reason_code"], "emergency_flat_verified")
+        self.assertFalse(state["protection_verified"])
+        self.assertEqual(self.exchange.position, 0)
+        self.assertEqual(len(self.exchange.requests), 1)
 
     def test_provider_rejection_is_visible_on_receipt_without_order(self):
         fire = self.make()
