@@ -48,7 +48,13 @@ current flatness, realized account performance or trading authorization.
 All database access uses SQLite read-only mode and `PRAGMA query_only`.
 Missing files are never created; symlinked/untrusted inputs, invalid schemas,
 corruption, invalid receipts and replaced files fail closed with sanitized error
-codes. Each database is read as a transactionally consistent local snapshot;
+codes. Each stored reconciliation report's SHA-256 digest is also checked
+against the exact serialized body and trade ownership key, matching the
+append-only reconciliation writer. A mismatch blocks the inventory rather
+than trusting the row. An ordinary unkeyed digest only detects inconsistencies;
+it is not an exchange-issued signature, proof of broker authenticity, or
+protection against a malicious actor who can rewrite both the report and digest.
+Each database is read as a transactionally consistent local snapshot;
 **the three databases are not one atomic snapshot**, and this command does
 not claim that all broker fills, outside manual trades, earlier FIRE archives
 or currently open positions are represented.
