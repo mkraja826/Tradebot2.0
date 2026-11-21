@@ -27,7 +27,14 @@ For both sweeps the tool uses authenticated GETs to inspect:
 - **All pages** of account-wide open/pending orders with strict cursor and
   order-ID checks; unrelated products are not silently filtered out.
 - Independently identified BTCUSD and XAUTUSD perpetual products and their
-  real-time product-filtered positions.
+  real-time product-filtered positions. For each FIRE product, compare the
+  **exact signed contract quantity** from the account-wide margined response
+  against the real-time filtered response. A same-direction quantity
+  difference (e.g. +5 vs +3), opposite signs, or a nonzero/zero mismatch is
+  inconsistent and blocks a clean result. Even quantities that agree but
+  are nonzero remain blocked as active account exposure. Delta documents
+  that margined data can lag, so equality is a diagnostic consistency check,
+  not proof of synchronized broker snapshots.
 - Existing local FIRE receipt and financial-review *coverage*, using the
   read-only inventory in PR #5. An unresolved or missing local receipt ledger
   remains a blocker even if the broker snapshots look flat.
