@@ -9,6 +9,7 @@ are inspected independently. A zero snapshot does not prove ongoing flatness.
 import argparse
 import hashlib
 from collections import Counter
+from contextlib import closing
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 import json
@@ -21,9 +22,9 @@ import time
 from tradebot.delta import DeltaDemo, DEMO_API
 from tradebot.fire_inventory import (
     read_inventory, InventoryEvidenceError, MARKET_DATABASES,
-    RECONCILIATION_DATABASE, _identity, _read_rows,
+    RECONCILIATION_DATABASE, MAX_ROWS, _identity,
 )
-from tradebot.demo_upgrade_preflight import _receipt_states
+from tradebot.demo_upgrade_preflight import SAFE_TERMINAL
 
 SYMBOLS = ("BTCUSD", "XAUTUSD")
 SAMPLE_INTERVAL_SECONDS = 11
@@ -168,83 +169,108 @@ def _sample(exchange):
     }
 
 
-def _local_evidence_state(data_dir):
-    """Fingerprint actual local rows and verify durable entry intent.
+def _read_local_snapshot(path, name):
+    """One bounded, read-only SQLite transaction per source database.
 
-    An inventory summary of counts alone cannot detect a changed receipt
-    payload or entry state while signed broker reads are in progress.
-    Fingerprints remain internal: never expose raw DB contents or hashes.
+    Check device/inode before and after the transaction. Unlike separate
+    connections for individual tables, all SELECTs share one consistent
+    SQLite read snapshot, including the schema and entry-intent rows.
+    """
+    initial = _identity(path)
+    try:
+        with closing(sqlite3.connect(path.absolute().as_uri() + "?mode=ro",
+                                     uri=True, timeout=5)) as db:
+            if _identity(path) != initial:
+                raise BrokerInventoryError("local_ledger_changed_during_read")
+            db.execute("PRAGMA query_only=ON")
+            db.execute("BEGIN")
+            if db.execute("PRAGMA quick_check(1)").fetchone() != ("ok",):
+                raise BrokerInventoryError("local_ledger_integrity_unverified")
+
+            def select(query):
+                rows = db.execute(query + " LIMIT ?", (MAX_ROWS + 1,)).fetchall()
+                if len(rows) > MAX_ROWS:
+                    raise BrokerInventoryError("local_ledger_too_large")
+                return rows
+
+            if name == RECONCILIATION_DATABASE:
+                reports = select("SELECT digest,trade_key,body FROM reports ORDER BY digest")
+                tables = select("SELECT name FROM sqlite_master WHERE type='table' "
+                                "AND name IN ('evidence','claims') ORDER BY name")
+                present = {row[0] for row in tables}
+                if reports and present != {"evidence", "claims"}:
+                    raise BrokerInventoryError("reconciliation_source_tables_missing")
+                source = [select("SELECT kind,id,body FROM evidence ORDER BY kind,id")
+                          if table == "evidence" else
+                          select("SELECT kind,id,trade_key FROM claims ORDER BY kind,id")
+                          for table in ("evidence", "claims") if table in present]
+                results = [reports, tables, *source]
+            else:
+                requests = select("SELECT press,created_at,updated_at,status,result "
+                                  "FROM fire_requests ORDER BY press")
+                tables = select("SELECT name FROM sqlite_master WHERE type='table' "
+                                "AND name='fire_entries'")
+                entries = (select("SELECT press,status,receipt FROM fire_entries ORDER BY press")
+                           if tables else [])
+                results = [requests, tables, entries]
+            db.commit()
+        if _identity(path) != initial:
+            raise BrokerInventoryError("local_ledger_changed_during_read")
+        return initial, results
+    except sqlite3.Error:
+        raise BrokerInventoryError("local_evidence_or_entry_states_unverified") from None
+
+
+def _local_evidence_state(data_dir):
+    """Fingerprint single-transaction source snapshots and durable entry intent.
+
+    Each database has one consistent local SQLite snapshot, but there is no
+    cross-database or broker/database atomic transaction. Fingerprints stay
+    internal and are never a broker authenticity claim.
     """
     root = Path(data_dir)
     if not root.is_dir() or root.is_symlink():
         raise BrokerInventoryError("local_data_directory_untrusted")
     evidence = hashlib.sha256()
     unresolved = 0
+    valid_parent = SAFE_TERMINAL | {
+        "requested", "reasoning", "preflight", "submitting",
+        "reconciling", "verifying_protection", "protected_active",
+        "exposure_unknown",
+    }
+    valid_entry = {"submitting", "unconfirmed", "accepted",
+                   "filled", "cancelled", "flat_verified"}
     try:
-        names = [*MARKET_DATABASES.values(), RECONCILIATION_DATABASE]
-        for name in names:
-            path = root / name
-            identity = _identity(path)
-            if name == RECONCILIATION_DATABASE:
-                queries = [
-                    "SELECT digest,trade_key,body FROM reports ORDER BY digest",
-                    "SELECT name FROM sqlite_master WHERE type='table' "
-                    "AND name IN ('evidence','claims') ORDER BY name",
-                ]
-            else:
-                queries = [
-                    "SELECT press,created_at,updated_at,status,result "
-                    "FROM fire_requests ORDER BY press",
-                    "SELECT name FROM sqlite_master WHERE type='table' "
-                    "AND name='fire_entries'",
-                ]
-            results = []
-            for query in queries:
-                rows = _read_rows(path, query)
-                if rows is None:
-                    raise BrokerInventoryError("local_ledger_missing")
-                results.append(rows)
-            if name == RECONCILIATION_DATABASE:
-                recorded_tables = {row[0] for row in results[1]}
-                if results[0] and recorded_tables != {"evidence", "claims"}:
-                    # Reports without their original immutable source tables
-                    # cannot support a clean broker evidence observation.
-                    raise BrokerInventoryError("reconciliation_source_tables_missing")
-                for table in ("evidence", "claims"):
-                    if table in recorded_tables:
-                        query = ("SELECT kind,id,body FROM evidence ORDER BY kind,id"
-                                 if table == "evidence" else
-                                 "SELECT kind,id,trade_key FROM claims ORDER BY kind,id")
-                        source_rows = _read_rows(path, query)
-                        if source_rows is None:
-                            raise BrokerInventoryError("reconciliation_source_unavailable")
-                        results.append(source_rows)
-            else:
-                if results[1]:
-                    entries = _read_rows(
-                        path, "SELECT press,status,receipt FROM fire_entries ORDER BY press")
-                    if entries is None:
-                        raise BrokerInventoryError("local_ledger_missing")
-                    # A request recorded as no-order cannot also have a
-                    # durable broker entry, regardless of the entry status.
-                    statuses = {r[0]: r[3] for r in results[0]}
-                    if any(statuses.get(row[0]) == "rejected_no_order" for row in entries):
+        for name in (*MARKET_DATABASES.values(), RECONCILIATION_DATABASE):
+            identity, results = _read_local_snapshot(root / name, name)
+            if name != RECONCILIATION_DATABASE:
+                requests, _, entries = results
+                parents = {}
+                unresolved_presses = set()
+                for press, _, _, status, _ in requests:
+                    if (type(press) is not str or not press
+                            or type(status) is not str or status not in valid_parent):
+                        raise BrokerInventoryError("unverified_parent_fire_state")
+                    parents[press] = status
+                    if status not in SAFE_TERMINAL:
+                        unresolved_presses.add(press)
+                for press, status, _ in entries:
+                    if (type(press) is not str or press not in parents
+                            or type(status) is not str or status not in valid_entry):
+                        raise BrokerInventoryError("orphan_or_unverified_entry_state")
+                    if parents[press] == "rejected_no_order":
                         raise BrokerInventoryError("no_order_receipt_has_durable_entry")
-                    results.append(entries)
-                symbol = next(symbol for symbol, filename
-                              in MARKET_DATABASES.items() if filename == name)
-                unresolved += _receipt_states(root, symbol)
-            if _identity(path) != identity:
-                raise BrokerInventoryError("local_ledger_changed_during_read")
+                    if status in ("submitting", "unconfirmed", "accepted"):
+                        unresolved_presses.add(press)
+                unresolved += len(unresolved_presses)
             encoded = json.dumps([name, identity, results], sort_keys=True,
                                  separators=(",", ":"), allow_nan=False)
             evidence.update(encoded.encode("utf-8"))
         return evidence.digest(), unresolved
     except BrokerInventoryError:
         raise
-    except (InventoryEvidenceError, ValueError, TypeError, sqlite3.Error, OSError, StopIteration):
+    except (InventoryEvidenceError, ValueError, TypeError, OSError):
         raise BrokerInventoryError("local_evidence_or_entry_states_unverified") from None
-
 
 def observe_broker_inventory(exchange, data_dir, *, pause=time.sleep,
                              monotonic=time.monotonic):
