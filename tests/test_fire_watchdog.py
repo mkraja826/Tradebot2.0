@@ -131,6 +131,31 @@ class WatchdogTests(unittest.TestCase):
         self.assertEqual(self.broker.closeouts, 1)
         self.assertFalse(self.store.latest()["protection_verified"])
 
+    def test_extra_same_product_stop_triggers_watchdog_emergency_closeout(self):
+        self.seed()
+        self.broker.orders.append({
+            "id": 23, "product_id": 27, "product_symbol": "BTCUSD",
+            "bracket_order": True, "state": "pending", "side": "sell",
+            "stop_order_type": "stop_loss_order", "stop_price": "62700",
+            "size": 1,
+        })
+        outcome = watchdog_tick(self.broker, self.store, pause=lambda _: None)
+        self.assertEqual(outcome["status"], "emergency_flat_verified")
+        self.assertEqual(self.broker.size, 0)
+        self.assertEqual(self.broker.closeouts, 1)
+        self.assertFalse(self.store.latest()["protection_verified"])
+
+    def test_unrelated_same_product_pending_order_prevents_protected_recovery(self):
+        self.seed()
+        self.broker.orders.append({
+            "id": 23, "product_id": 27, "product_symbol": "BTCUSD",
+            "state": "pending", "side": "sell", "size": 1,
+        })
+        outcome = watchdog_tick(self.broker, self.store, pause=lambda _: None)
+        self.assertEqual(outcome["status"], "emergency_flat_verified")
+        self.assertEqual(self.broker.size, 0)
+        self.assertFalse(self.store.latest()["protection_verified"])
+
     def test_verified_bracket_exit_allows_immediate_next_manual_press(self):
         previous = self.seed()
         self.broker.size = 0
