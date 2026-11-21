@@ -62,6 +62,55 @@ class CommissioningEquityTests(unittest.TestCase):
         self.assertEqual(self.check()["reason"], report["reason"])  # restart/repeat safe
         self.assertEqual(self.snapshot(), before)
 
+    def test_unsigned_opening_cannot_pass_commissioning_even_if_health_looks_green(self):
+        open_at = self.now.replace(minute=1)
+        latest_at = self.now - timedelta(seconds=1)
+        self.guard.observe("1000", at=open_at)  # legacy origin label, no receipt
+        self.guard.observe_verified_read("1000", receipt_for("1000", latest_at),
+                                         now=latest_at)
+        self.assertTrue(risk_health(self.path, at=self.now)["checkpoint_prerequisites_met"])
+        before = self.snapshot()
+        with self.assertRaisesRegex(EquityRiskError, "equity_checkpoint_receipt_missing"):
+            self.check()
+        self.exchange.wallet_balances.assert_not_called()
+        self.assertEqual(self.snapshot(), before)
+
+    def test_unsigned_latest_sample_cannot_pass_commissioning(self):
+        open_at = self.now.replace(minute=1)
+        self.guard.observe_verified_read("1000", receipt_for("1000", open_at),
+                                         now=open_at)
+        self.guard.observe("1000", at=self.now - timedelta(seconds=1))
+        self.assertTrue(risk_health(self.path, at=self.now)["checkpoint_prerequisites_met"])
+        with self.assertRaisesRegex(EquityRiskError, "equity_checkpoint_receipt_missing"):
+            self.check()
+        self.exchange.wallet_balances.assert_not_called()
+
+    def test_forged_historical_receipt_equity_does_not_validate_anchor(self):
+        open_at = self.now.replace(minute=1)
+        latest_at = self.now - timedelta(seconds=1)
+        self.guard.observe("1000", at=open_at)
+        forged = receipt_for("2000", open_at)
+        with closing(sqlite3.connect(self.path)) as db, db:
+            db.execute("INSERT INTO equity_read_receipts VALUES (?,?)",
+                       (int(open_at.timestamp() * 1_000_000),
+                        __import__("json").dumps(forged)))
+        self.guard.observe_verified_read("1000", receipt_for("1000", latest_at),
+                                         now=latest_at)
+        with self.assertRaisesRegex(EquityRiskError, "equity_checkpoint_receipt_unverified"):
+            self.check()
+        self.exchange.wallet_balances.assert_not_called()
+
+    def test_missing_receipt_inserted_during_wallet_read_blocks_final_snapshot(self):
+        self.seed()
+        wallet = self.exchange.wallet_balances.return_value
+        def append_unreceipted_equity():
+            self.guard.observe("1000", at=self.now - timedelta(milliseconds=100))
+            return wallet
+        self.exchange.wallet_balances.side_effect = append_unreceipted_equity
+        with self.assertRaisesRegex(EquityRiskError, "equity_checkpoint_receipt_missing"):
+            self.check()
+        self.exchange.wallet_balances.assert_called_once_with()
+
     def test_exact_daily_limit_blocks_before_consuming_commissioning_attempt(self):
         self.seed()
         self.wallet("980")
@@ -81,7 +130,9 @@ class CommissioningEquityTests(unittest.TestCase):
 
     def test_weekly_limit_not_rebased_by_todays_opening(self):
         self.now += timedelta(days=1)
-        self.guard.observe("1100", at=datetime(2026, 11, 23, 0, 1, tzinfo=timezone.utc))
+        monday_open = datetime(2026, 11, 23, 0, 1, tzinfo=timezone.utc)
+        self.guard.observe_verified_read("1100", receipt_for("1100", monday_open),
+                                         now=monday_open)
         self.seed(opening="1050", latest="1050")
         self.wallet("1045")
         for service in ("watchdog", "equity_collector"):
