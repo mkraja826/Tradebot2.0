@@ -17,6 +17,7 @@ from tradebot.equity_receipt import EquityReadError, validate_receipt
 
 DAY = 86400
 ANCHOR_WINDOW = 300  # a signed snapshot from the first 5m of a UTC period
+DEFAULT_LIMITS = (Decimal("0.02"), Decimal("0.05"), Decimal("0.08"))
 
 
 class EquityRiskError(ValueError):
@@ -38,6 +39,48 @@ def stamp(value):
             or value.utcoffset() is None):
         raise EquityRiskError("Timezone-aware observation is required")
     return int(value.astimezone(timezone.utc).timestamp() * 1_000_000)
+
+
+def assess_equity(current, daily, weekly, peak, instant, limits):
+    """Pure loss calculation shared by ingestion and read-only commissioning."""
+    status = {
+        "policy": "delta-demo-equity-loss-v1",
+        "source": "delta_demo_signed_wallet",
+        "period_timezone": "UTC",
+        "as_of": instant.astimezone(timezone.utc).isoformat(),
+        "equity_usd": str(current),
+        "daily_open_equity_usd": str(daily) if daily is not None else None,
+        "weekly_open_equity_usd": str(weekly) if weekly is not None else None,
+        "observed_high_watermark_usd": str(peak),
+        "high_watermark_scope": "since_observation_started",
+        "is_reconciled_realized_pnl": False,
+        "approved": False,
+    }
+    if daily is None or weekly is None:
+        status["reason"] = "missing_opening_equity_checkpoint"
+        return status
+    losses = tuple(
+        max(Decimal("0"), (reference-current)/reference)
+        for reference in (daily, weekly, peak)
+    )
+    status.update({
+        "daily_equity_decline": str(losses[0]),
+        "weekly_equity_decline": str(losses[1]),
+        "observed_peak_drawdown": str(losses[2]),
+        "limits": {
+            "daily": str(limits[0]), "weekly": str(limits[1]),
+            "drawdown": str(limits[2])
+        },
+    })
+    violations = [name for name, loss, bound in zip(
+        ("daily", "weekly", "drawdown"), losses, limits)
+        if loss >= bound]
+    if violations:
+        status["reason"] = "loss_limit_" + "_".join(violations)
+    else:
+        status["reason"] = "within_observed_equity_limits"
+        status["approved"] = True
+    return status
 
 
 def validated_watermark(db):
@@ -127,8 +170,8 @@ def require_receipt_backed_history(db, instant):
 class PortfolioEquityGuard:
     """One persistent loss budget shared by BTC and gold FIRE controllers."""
 
-    def __init__(self, path, *, max_daily=Decimal("0.02"),
-                 max_weekly=Decimal("0.05"), max_drawdown=Decimal("0.08"),
+    def __init__(self, path, *, max_daily=DEFAULT_LIMITS[0],
+                 max_weekly=DEFAULT_LIMITS[1], max_drawdown=DEFAULT_LIMITS[2],
                  require_existing=False):
         self.path = Path(path)
         self.require_existing = require_existing
@@ -309,44 +352,7 @@ class PortfolioEquityGuard:
             db.commit()
         self._check_identity()
 
-        status = {
-            "policy": "delta-demo-equity-loss-v1",
-            "source": "delta_demo_signed_wallet",
-            "period_timezone": "UTC",
-            "as_of": instant.astimezone(timezone.utc).isoformat(),
-            "equity_usd": str(current),
-            "daily_open_equity_usd": str(daily) if daily is not None else None,
-            "weekly_open_equity_usd": str(weekly) if weekly is not None else None,
-            "observed_high_watermark_usd": str(peak),
-            "high_watermark_scope": "since_observation_started",
-            "is_reconciled_realized_pnl": False,
-            "approved": False,
-        }
-        if daily is None or weekly is None:
-            status["reason"] = "missing_opening_equity_checkpoint"
-            return status
-        losses = tuple(
-            max(Decimal("0"), (reference-current)/reference)
-            for reference in (daily, weekly, peak)
-        )
-        status.update({
-            "daily_equity_decline": str(losses[0]),
-            "weekly_equity_decline": str(losses[1]),
-            "observed_peak_drawdown": str(losses[2]),
-            "limits": {
-                "daily": str(self.limits[0]), "weekly": str(self.limits[1]),
-                "drawdown": str(self.limits[2])
-            },
-        })
-        violations = [name for name, loss, bound in zip(
-            ("daily", "weekly", "drawdown"), losses, self.limits)
-            if loss >= bound]
-        if violations:
-            status["reason"] = "loss_limit_" + "_".join(violations)
-        else:
-            status["reason"] = "within_observed_equity_limits"
-            status["approved"] = True
-        return status
+        return assess_equity(current, daily, weekly, peak, instant, self.limits)
 
     def observe_verified_read(self, equity, receipt, *, now=None):
         instant = validate_receipt(equity, receipt, now=now)

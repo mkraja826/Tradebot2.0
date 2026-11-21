@@ -15,6 +15,12 @@ alerts, watchdog heartbeat visibility and rollback/migration tests. Deployment,
 authentic next daily/weekly openings and off-machine alert commissioning remain
 open. No historical opening was recovered or fabricated by this change.
 
+Milestone 2A candidate: [signed Gold recovery planning](GOLD_RECOVERY_REVIEW.md).
+Adds read-only equity-loss prerequisites to the commissioning gate and separate
+capture/operator signatures for the prior rejected attempt. It preserves the
+consumed lock and has no recovery execution or unlock operation. This is a
+review prerequisite, not completion of broker commissioning.
+
 The connector queried during inspection reported both FIRE endpoints disabled
 and the Gold attempt rejected with `orders_submitted=false`. Quote data carried
 an older timestamp, so these responses were **not accepted as fresh account-wide
@@ -26,7 +32,7 @@ No VM shell, credentials, services or broker settings were modified.
 | Milestone | Existing foundations inspected | Remaining acceptance work |
 | --- | --- | --- |
 | 1. Checkpoints | `portfolio_equity_guard.py`, `equity_checkpoint_health.py`, watchdog and risk banner | Review/deploy the candidate safely; verify receipt headers, authentic UTC openings, reboot recovery and independent external alert delivery. |
-| 2. Commissioning | `fire_entry.py`, `fire_execution.py`, `fire_watchdog.py`, account/portfolio/leverage guards, one-shot Gold command | Add reviewed signed reconciliation/recovery authorization for the consumed Gold attempt; preserve its lock. Commission BTC/Gold lifecycles only after prerequisites and separate explicit operator authorization. No trial ordered by this increment. |
+| 2. Commissioning | `fire_entry.py`, `fire_execution.py`, `fire_watchdog.py`, account/portfolio/leverage guards, one-shot Gold command; candidate adds equity preflight and signed recovery-planning review | Review/stage the read-only capture and distinct operator signatures. Separately approve a recovery procedure for the consumed Gold lock; preserve it until then. Commission BTC/Gold lifecycles only after prerequisites and separate explicit operator authorization. No trial ordered by this increment. |
 | 3. Accounting | `trade_fill_evidence.py`, `fire_reconciliation.py`, `fire_performance.py`, immutable broker-evidence ledgers | Complete trade inventory and all requested attribution/latency/MFE/MAE/R fields; validate manual/emergency/multi-exit evidence and realized financial reporting against existing broker receipts. Preserve verified-subset exclusions. |
 | 4. Decision review | Saved FIRE model inputs, indicators and outcome receipts | Reproducible review schema and mistake taxonomy; predefined no-trade comparison; separate process quality from losing outcomes. |
 | 5. Kimi research | `kimi_learning.py`, `trade_memory.py`, event watcher and durable review reservations | Verified accounting-driven review events, held-out lesson tests, contradiction/deduplication/expiry, explicit advisory approvals and rollback; token/currency budgets. Candidates must not influence GPT-6 automatically. |
