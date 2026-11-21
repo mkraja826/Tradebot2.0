@@ -33,7 +33,7 @@ def _number(value):
     return number
 
 
-def _read(exchange, symbol, resolution, first, step, count):
+def _read(exchange, symbol, resolution, first, step, count, *, mark_price=False):
     response = exchange._request(
         "GET", "/v2/history/candles", auth=False,
         params={"symbol": symbol, "resolution": resolution,
@@ -52,13 +52,20 @@ def _read(exchange, symbol, resolution, first, step, count):
             raise CandleReadError("candle_timestamp_unverified")
         if t % step or t in rows:
             raise CandleReadError("candle_duplicate_or_alignment_error")
-        numbers = tuple(_number(raw.get(k)) for k in
-                        ("open", "high", "low", "close", "volume"))
-        o, h, l, c, v = numbers
+        # Mark-price OHLC is a reference series, not traded volume.
+        # Delta's mark candlesticks can omit volume. Never relax traded
+        # candle volume validation: 1m aggregation needs genuine numeric v.
+        o, h, l, c = tuple(_number(raw.get(k)) for k in
+                            ("open", "high", "low", "close"))
+        volume = raw.get("volume")
+        if mark_price and volume is None:
+            v = None
+        else:
+            v = _number(volume)
         if not (o > 0 and l > 0 and l <= min(o, c)
-                and h >= max(o, c) and v >= 0):
+                and h >= max(o, c) and (v is None or v >= 0)):
             raise CandleReadError("candle_ohlcv_invalid")
-        rows[t] = numbers
+        rows[t] = (o, h, l, c, v)
     expected = [first + i * step for i in range(count)]
     if set(rows) != set(expected):
         raise CandleReadError("candle_window_incomplete")
@@ -114,7 +121,8 @@ def compare_sources(exchange, times):
         readings = {}
         for name, symbol, resolution, step, count in sources:
             try:
-                readings[name] = _read(exchange, symbol, resolution, t, step, count)
+                readings[name] = _read(exchange, symbol, resolution, t, step, count,
+                                       mark_price=(name == "mark_5m"))
                 result["source_checks"][name] = "complete"
             except CandleReadError as exc:
                 code = str(exc)
@@ -147,6 +155,7 @@ def compare_sources(exchange, times):
                 "aggregated_1m_low": str(aggregate[2]),
                 "mark_5m_high": str(mark[1]),
                 "mark_5m_low": str(mark[2]),
+                "mark_5m_volume": "not_provided" if mark[4] is None else "provided",
                 "five_minute_ohlc_matches_one_minute": five[:4] == aggregate[:4],
                 "five_minute_volume_matches_one_minute": five[4] == aggregate[4],
                 "mark_reference_is_independent": False,
