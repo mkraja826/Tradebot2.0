@@ -1,6 +1,8 @@
 """FIRE systemd scripts keep execution testnet-only and opt-in."""
 from pathlib import Path
+import os
 import subprocess
+import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -41,6 +43,66 @@ class FireServiceTests(unittest.TestCase):
                         script.index('sudo install -m 0644'))
         self.assertNotIn("sudo systemctl start", script)
         self.assertNotIn("sudo systemctl enable", script)
+
+    def test_watchdog_launcher_discards_inherited_old_python_package(self):
+        # A protected VM keys.env may be carrying a stale PYTHONPATH.
+        # Execute the launcher against a fake Python binary, not the broker.
+        # Both the preflight and final daemon exec must see deployed /src.
+        with tempfile.TemporaryDirectory(prefix="watchdog-launch-") as tmp:
+            root = Path(tmp)
+            project = root / "project"
+            (project / "ops").mkdir(parents=True)
+            (project / ".venv/bin").mkdir(parents=True)
+            (project / "src/tradebot").mkdir(parents=True)
+            launcher = project / "ops/run_fire_watchdog.sh"
+            launcher.write_text((ROOT / "ops/run_fire_watchdog.sh").read_text())
+
+            home = root / "home"
+            keys = home / ".config/tradebot2/keys.env"
+            keys.parent.mkdir(parents=True)
+            keys.write_text(
+                "export PYTHONPATH=/tmp/old-stale-package\\n"
+                "export PYTHONHOME=/tmp/old-stale-home\\n"
+                "export PYTHONUSERBASE=/tmp/old-stale-userbase\\n"
+            )
+            keys.chmod(0o600)
+
+            interpreter = project / ".venv/bin/python"
+            interpreter.write_text(
+                "#!/usr/bin/env bash\\n"
+                'printf "%s|%s|%s|%s|%s\\n" "$PYTHONPATH" '
+                '"${PYTHONHOME:-unset}" "${PYTHONUSERBASE:-unset}" '
+                '"${PYTHONSAFEPATH:-unset}" "$*" >> "$CAPTURE_FILE"\\n'
+            )
+            interpreter.chmod(0o700)
+            log = root / "capture.txt"
+            proc = subprocess.run(
+                ["bash", str(launcher)],
+                env={**os.environ, "HOME": str(home), "CAPTURE_FILE": str(log),
+                     "PYTHONPATH": "/tmp/inherited-untrusted-path"},
+                capture_output=True, text=True, timeout=10,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            rows = [line.split("|", 4) for line in log.read_text().splitlines()]
+            self.assertEqual(len(rows), 2)
+            for path, pyhome, userbase, safepath, _ in rows:
+                self.assertEqual(path, str(project / "src"))
+                self.assertEqual(pyhome, "unset")
+                self.assertEqual(userbase, "unset")
+                self.assertEqual(safepath, "1")
+            self.assertIn("src/tradebot/fire_watchdog.py", rows[0][-1])
+            self.assertIn("-m tradebot.fire_watchdog", rows[1][-1])
+            self.assertIn("--interval 15", rows[1][-1])
+
+    def test_watchdog_import_guard_never_calls_broker(self):
+        launcher = (ROOT / "ops/run_fire_watchdog.sh").read_text()
+        self.assertIn('export PYTHONPATH="$PROJECT/src"', launcher)
+        self.assertIn("WATCHDOG_RUNTIME_VERSION", launcher)
+        self.assertIn("watchdog-telemetry-v2-20261122", launcher)
+        self.assertLess(launcher.index('export PYTHONPATH="$PROJECT/src"'),
+                        launcher.index('import tradebot.fire_watchdog as watchdog'))
+        self.assertLess(launcher.index('import tradebot.fire_watchdog as watchdog'),
+                        launcher.index('exec "$PROJECT/.venv/bin/python" -m'))
 
     def test_fire_demo_cannot_be_enabled_without_active_watchdog(self):
         active = (ROOT / "ops/enable_fire_demo.sh").read_text()
