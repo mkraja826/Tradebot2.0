@@ -77,7 +77,7 @@ class DemoAccount(FireMarket):
             self.gold_size = payload["size"]
             self.parent = dict(payload,id=3,state="closed",unfilled_size=0)
             self.orders.extend({"id":i, "product_id":82, "side":"sell", "state":"pending",
-                                "bracket_order":True, "stop_order_type":kind, "stop_price":price}
+                                "bracket_order":True, "stop_order_type":kind, "stop_price":price, "size":1}
                                for i,kind,price in [(4,"stop_loss_order","3700"),(5,"take_profit_order","4000")])
         return {"result":self.parent}
 
