@@ -573,6 +573,71 @@ class FireExecutionTests(unittest.TestCase):
         self.assertFalse(protective_orders_verified(
             [*valid, dict(valid[0], id=12)], product_id=27, plan=PLAN))
 
+    def test_extra_conflicting_same_product_order_invalidates_bracket_protection(self):
+        valid = [
+            {"id": 11, "product_id": 27, "bracket_order": True,
+             "stop_order_type": "stop_loss_order", "state": "pending",
+             "side": "sell", "stop_price": "62950", "size": 1},
+            {"id": 12, "product_id": 27, "bracket_order": True,
+             "stop_order_type": "take_profit_order", "state": "pending",
+             "side": "sell", "stop_price": "63950", "size": 1},
+        ]
+        self.assertTrue(protective_orders_verified(valid, product_id=27, plan=PLAN))
+        extras = (
+            {"id": 13, "product_id": 27, "stop_order_type": "stop_loss_order",
+             "bracket_order": True, "state": "pending", "side": "sell",
+             "stop_price": "62900", "size": 1},
+            {"id": 13, "product_id": 27, "stop_order_type": "take_profit_order",
+             "bracket_order": True, "state": "pending", "side": "sell",
+             "stop_price": "63950", "size": 2},
+            {"id": 13, "product_id": 27, "stop_order_type": "stop_loss_order",
+             "bracket_order": False, "state": "pending", "side": "sell",
+             "stop_price": "62950", "size": 1},
+            {"id": 13, "product_id": 27, "stop_order_type": "take_profit_order",
+             "bracket_order": True, "state": "pending", "side": "buy",
+             "stop_price": "63950", "size": 1},
+            {"id": 13, "product_id": 27, "state": "pending",
+             "side": "sell", "size": 1},
+            {"id": 13, "product_id": 27, "stop_order_type": "stop_loss_order",
+             "bracket_order": True, "state": "cancelled", "side": "sell",
+             "stop_price": "62950", "size": 1},
+            {"id": "", "product_id": 27, "stop_order_type": "stop_loss_order",
+             "bracket_order": True, "state": "pending", "side": "sell",
+             "stop_price": "62950", "size": 1},
+        )
+        for extra in extras:
+            with self.subTest(extra=extra):
+                self.assertFalse(protective_orders_verified(
+                    [*valid, extra], product_id=27, plan=PLAN))
+        # This verifier deliberately scopes to the selected product; account-
+        # wide pending orders are checked separately by the entry gate.
+        other_product = dict(extras[0], product_id=82)
+        self.assertTrue(protective_orders_verified(
+            [*valid, other_product], product_id=27, plan=PLAN))
+
+    def test_extra_wrong_price_stop_cannot_be_ignored_after_entry_fill(self):
+        original = self.exchange._request
+        def add_wrong_price_stop(method, path, **kwargs):
+            answer = original(method, path, **kwargs)
+            if method == "POST" and path == "/v2/orders":
+                self.exchange.active_orders.append({
+                    "id": 9993, "product_id": 27,
+                    "stop_order_type": "stop_loss_order",
+                    "bracket_order": True, "side": "sell",
+                    "state": "pending", "size": 1,
+                    "stop_price": "62700", "product_symbol": "BTCUSD",
+                })
+            return answer
+        self.exchange._request = add_wrong_price_stop
+        fire = self.make()
+        self.assertTrue(fire.start()[0])
+        state = fire.snapshot()
+        self.assertEqual(state["status"], "flat_verified")
+        self.assertEqual(state["reason_code"], "emergency_flat_verified")
+        self.assertFalse(state["protection_verified"])
+        self.assertEqual(self.exchange.position, 0)
+        self.assertEqual(len(self.exchange.requests), 1)
+
     def test_undersized_protective_child_is_never_marked_protected(self):
         original = self.exchange._request
         def alter_child(method, path, **kwargs):
