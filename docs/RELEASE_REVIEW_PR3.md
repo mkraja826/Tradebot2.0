@@ -55,3 +55,25 @@ Do not roll back by deleting or replacing evidence. Earlier runtime code can
 create missing ledgers: if original history is unavailable, keep FIRE disabled
 and equity ingestion stopped until approved recovery preserves the original
 history. See [the deployment and rollback procedure](EQUITY_CHECKPOINT_RECOVERY.md).
+
+## Independent agent review follow-up
+
+A separate reviewer agent reproduced a second blocking defect in the published
+`73c4d552faa71ae75e17f2c7b1121bad4fe7033c` candidate: lowering the mutable
+watermark from 1100 to 1000 left older immutable equity of 1100 intact, yet
+runtime and health checks accepted a later 1000 observation. The resulting
+9.09% historical drawdown should exceed the unchanged 8% limit.
+
+The correction validates the watermark against **all** immutable observations
+using exact Decimal comparisons, both on existing-only startup and inside
+every observation transaction. Read-only checkpoint health uses the same
+check. Lowered peaks are rejected without repairing or rewriting evidence;
+higher stored watermarks are preserved conservatively. New fixture tests
+cover restart, cached guards, precision and text ordering, genuine new-period
+openings, attempted wallet-based repair and rejection before legacy migration.
+
+The existing production-shaped monthly-history performance check is retained.
+Rollback to code without this check is not a recovery method for inconsistent
+watermarks: keep FIRE disabled and preserve the original ledger for separately
+approved reconciliation. This record documents the finding and implementation;
+the final independent review result is recorded on the pull request.
