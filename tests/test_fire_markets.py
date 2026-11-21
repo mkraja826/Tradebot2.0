@@ -54,7 +54,7 @@ class DemoAccount(FireMarket):
                 return {"result": {"product_id": 27, "entry_price":"0","size":0}}
             return {"result":{"entry_price":"3800","size": self.gold_size}}
         if method == "GET" and path == "/v2/orders":
-            return {"result":self.orders[:]}
+            return {"result": self.orders[:], "meta": {"after": None}}
         if method == "GET" and path == "/v2/profile":
             return {"result": {"margin_mode": "isolated"}}
         if method == "GET" and path == "/v2/positions/margined":
