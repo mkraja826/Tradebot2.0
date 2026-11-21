@@ -39,6 +39,15 @@ commissioning lock must remain intact. No historical checkpoints are created.
   and opening checkpoints are preserved, without inventing transport receipts
   for legacy rows. Duplicate identical readings do not duplicate evidence;
   conflicting / out-of-order observations fail closed.
+- The read-only checkpoint health endpoint now checks the stored original
+  transport receipt for the **first daily/weekly opening observation** and
+  the **latest observation**. It validates the saved timestamp and equity
+  value against the corresponding row at its original observation time,
+  never using a current wallet reading to attest old history. Missing or
+  malformed historical receipts produce `unverified_receipt` status and
+  an `equity_read_receipt_invalid` alert, not a green opening/observation.
+  This preserves older SQLite rows and diagnoses their missing provenance
+  without backfilling or repairing them. An origin label alone is insufficient.
 - Operational heartbeats, start history and a durable incident outbox live in
   a separate private `fire-monitoring.sqlite`. Active alerts are recorded on
   transition and reminded no more than once per five minutes. Alert state and
