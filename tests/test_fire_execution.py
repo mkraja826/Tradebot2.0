@@ -130,11 +130,11 @@ class FakeDemo:
             self.active_orders = [
                 {"id": 9991, "product_id": 27, "stop_order_type": "stop_loss_order",
                  "bracket_order": True, "side": side, "state": "pending",
-                 "stop_price": payload["bracket_stop_loss_price"],
+                 "stop_price": payload["bracket_stop_loss_price"], "size": payload["size"],
                  "product_symbol": "BTCUSD"},
                 {"id": 9992, "product_id": 27, "stop_order_type": "take_profit_order",
                  "bracket_order": True, "side": side, "state": "pending",
-                 "stop_price": payload["bracket_take_profit_price"],
+                 "stop_price": payload["bracket_take_profit_price"], "size": payload["size"],
                  "product_symbol": "BTCUSD"},
             ]
         return {"result": self.order}
@@ -531,10 +531,10 @@ class FireExecutionTests(unittest.TestCase):
         self.exchange.active_orders = [
             {"id": 11, "product_id": 27, "bracket_order": True,
              "stop_order_type": "stop_loss_order", "state": "pending",
-             "side": "sell", "stop_price": "62950"},
+             "side": "sell", "stop_price": "62950", "size": 1},
             {"id": 12, "product_id": 27, "bracket_order": True,
              "stop_order_type": "take_profit_order", "state": "pending",
-             "side": "sell", "stop_price": "63950"},
+             "side": "sell", "stop_price": "63950", "size": 1},
         ]
         self.assertTrue(protective_orders_verified(self.exchange.active_orders,
                        product_id=27, plan=PLAN))
