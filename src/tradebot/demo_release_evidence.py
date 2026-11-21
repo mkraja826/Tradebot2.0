@@ -55,6 +55,7 @@ def observe_demo_release(
             "equity_checkpoint_prerequisites_met": False,
             "two_flat_broker_samples_observed": False,
             "historical_order_fields_match": False,
+            "final_host_and_equity_still_healthy": False,
         },
         "broker_summary": {
             "samples_checked": 0, "positions_last": None,
@@ -161,6 +162,29 @@ def observe_demo_release(
         checks["historical_order_fields_match"] = False
     if not checks["historical_order_fields_match"]:
         blockers.append("historical_btc_bracket_fields_unverified")
+
+    # The broker inventory deliberately waits between observations. Host
+    # services, dashboard FIRE permission or checkpoint freshness can change
+    # during that interval or the subsequent archived order GETs. Recheck
+    # immediately before reporting even *limited* read-only consistency.
+    # This remains diagnostic evidence only, never execution authorization.
+    if not blockers:
+        try:
+            final_health = health_check(root / "fire-equity-risk.sqlite")
+            checks["final_host_and_equity_still_healthy"] = (
+                clock_check() is True
+                and service_check() is True
+                and fire_disabled_check() is True
+                and type(final_health) is dict
+                and final_health.get("status") == "healthy"
+                and final_health.get("checkpoint_prerequisites_met") is True
+                and final_health.get("trade_authorized") is False
+                and final_health.get("blocking_conditions") == []
+            )
+        except Exception:
+            checks["final_host_and_equity_still_healthy"] = False
+        if not checks["final_host_and_equity_still_healthy"]:
+            blockers.append("host_or_equity_changed_during_broker_observation")
 
     report["blockers"] = sorted(set(blockers))
     if not report["blockers"]:
