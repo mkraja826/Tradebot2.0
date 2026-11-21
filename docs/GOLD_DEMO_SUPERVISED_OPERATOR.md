@@ -3,7 +3,8 @@
 The `tradebot.fire_supervised_commission` module defaults to **read-only**.
 It first runs the two-sample account-wide broker gate and verifies that
 BTC and Gold dashboard FIRE endpoints are disabled and both services healthy.
-It also requires current collector/watchdog telemetry, authentic daily/weekly
+It additionally requires the equity collector service to be active, and
+current collector/watchdog telemetry, authentic daily/weekly
 equity checkpoints and a fresh signed-wallet loss assessment before consuming
 the one-shot marker. A missing opening cannot be reconstructed by this command.
 
