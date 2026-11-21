@@ -220,7 +220,7 @@ class BrokerInventoryTests(unittest.TestCase):
         self.assertIn("local_evidence_changed_during_broker_observation",
                       report["blockers"])
 
-    def test_unconfirmed_entry_blocks_even_if_parent_receipt_says_no_order(self):
+    def test_unconfirmed_entry_blocks_even_if_parent_receipt_says_flat(self):
         fireid = "a" * 32
         with sqlite3.connect(self.root / "fire-ops.sqlite") as db:
             db.execute("INSERT INTO fire_requests VALUES (?,?,?,?,?)",
@@ -265,8 +265,7 @@ class BrokerInventoryTests(unittest.TestCase):
                            ('{"orders_submitted":false,"reason_code":"modified"}', fireid))
         self.exchange.second_sample_hook = replace_payload
         report = self.check()
-        self.assertEqual(report["total_local_receipts"] if "total_local_receipts" in report
-                         else report["local_receipts_total"], 1)
+        self.assertEqual(report["local_receipts_total"], 1)
         self.assertEqual(report["samples_checked"], 2)
         self.assertIn("local_evidence_changed_during_broker_observation",
                       report["blockers"])
