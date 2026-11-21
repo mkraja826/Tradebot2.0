@@ -66,9 +66,63 @@ class CandleSourceDiagnosticTests(unittest.TestCase):
         self.assertTrue(r["results"][0]["five_minute_ohlc_matches_one_minute"])
         self.assertTrue(r["results"][0]["five_minute_volume_matches_one_minute"])
         self.assertEqual(r["results"][0]["mark_5m_low"], "60250")
+        self.assertEqual(r["results"][0]["mark_5m_volume"], "provided")
         self.assertEqual(r["results"][0]["source_checks"],
                          {"trade_5m": "complete", "trade_1m": "complete",
                           "mark_5m": "complete"})
+
+    def test_mark_ohlc_without_traded_volume_is_valid_reference_only(self):
+        original = self.broker._request
+
+        def no_mark_volume(method, path, *, auth, params):
+            data = original(method, path, auth=auth, params=params)
+            if params["symbol"] == "MARK:BTCUSD":
+                del data["result"][0]["volume"]
+            return data
+
+        self.broker._request = no_mark_volume
+        result = compare_sources(self.broker, [FIRST])
+        self.assertEqual(result["results"][0]["source_checks"]["mark_5m"],
+                         "complete")
+        self.assertEqual(result["results"][0]["mark_5m_volume"], "not_provided")
+        self.assertEqual(result["status"],
+                         "source_crosscheck_complete_review_still_required")
+        self.assertFalse(result["trade_authorized"])
+        self.assertFalse(result["independent_price_validation"])
+
+    def test_traded_candles_without_volume_still_block(self):
+        original = self.broker._request
+
+        def no_trade_volume(method, path, *, auth, params):
+            data = original(method, path, auth=auth, params=params)
+            if params["symbol"] == "BTCUSD":
+                del data["result"][0]["volume"]
+            return data
+
+        self.broker._request = no_trade_volume
+        result = compare_sources(self.broker, [FIRST])
+        checks = result["results"][0]["source_checks"]
+        self.assertEqual(checks["trade_5m"], "candle_numeric_field_unverified")
+        self.assertEqual(checks["trade_1m"], "candle_numeric_field_unverified")
+        self.assertEqual(checks["mark_5m"], "complete")
+        self.assertEqual(result["status"], "review_required")
+        self.assertFalse(result["safe_to_enable_fire"])
+
+    def test_mark_ohlc_still_requires_valid_numbers_and_ranges(self):
+        original = self.broker._request
+
+        def bad_mark(method, path, *, auth, params):
+            data = original(method, path, auth=auth, params=params)
+            if params["symbol"] == "MARK:BTCUSD":
+                data["result"][0].pop("volume", None)
+                data["result"][0]["low"] = "NaN"
+            return data
+
+        self.broker._request = bad_mark
+        result = compare_sources(self.broker, [FIRST])
+        self.assertEqual(result["results"][0]["source_checks"]["mark_5m"],
+                         "candle_numeric_field_unverified")
+        self.assertEqual(result["status"], "review_required")
 
     def test_crossresolution_mismatch_fails_closed(self):
         self.broker.mismatch = True
