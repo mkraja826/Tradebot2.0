@@ -141,8 +141,12 @@ def _financial_reviews(rows):
             continue
         latest = max(cutoffs)
         newest = [r for r in reports if r["reconciliation_as_of_us"] == latest]
-        canonical = {json.dumps(r, sort_keys=True, separators=(",", ":"),
-                                allow_nan=False) for r in newest}
+        try:
+            canonical = {json.dumps(r, sort_keys=True, separators=(",", ":"),
+                                    allow_nan=False) for r in newest}
+        except (ValueError, TypeError):
+            statuses[key] = "invalid_latest_report"
+            continue
         if len(canonical) != 1:
             statuses[key] = "conflicting_latest_reports"
             continue
@@ -191,12 +195,8 @@ def read_inventory(data_dir, *, limit=100):
             continue
         items = [_receipt(symbol, row) for row in rows]
         receipts.extend(items)
-        count = Counter(item["category"] for item in items)
         by_market[symbol] = {
             "receipt_database": "present", "total_receipts": len(items),
-            "locally_reported_no_order": count["locally_reported_no_order"],
-            "locally_reported_flat": count["locally_reported_flat"],
-            "requires_broker_review": count["requires_broker_review"],
         }
 
     report_rows = _read_rows(root / RECONCILIATION_DATABASE,
@@ -216,6 +216,18 @@ def read_inventory(data_dir, *, limit=100):
             # A no-submission claim with a financial report is contradictory,
             # even when the report's own financial evidence is inconclusive.
             item["category"] = "requires_broker_review"
+
+    # Recalculate after resolving cross-database contradictions; counts
+    # collected before report inspection would otherwise undercount incidents.
+    for symbol in MARKET_DATABASES:
+        if by_market[symbol]["receipt_database"] != "present":
+            continue
+        counts = Counter(r["category"] for r in receipts if r["symbol"] == symbol)
+        by_market[symbol].update({
+            "locally_reported_no_order": counts["locally_reported_no_order"],
+            "locally_reported_flat": counts["locally_reported_flat"],
+            "requires_broker_review": counts["requires_broker_review"],
+        })
 
     flat = [r for r in receipts if r["category"] == "locally_reported_flat"]
     missing_reviews = [r for r in flat if not r["local_financial_report_present"]]
