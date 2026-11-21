@@ -31,6 +31,15 @@ For both sweeps the tool uses authenticated GETs to inspect:
 - Existing local FIRE receipt and financial-review *coverage*, using the
   read-only inventory in PR #5. An unresolved or missing local receipt ledger
   remains a blocker even if the broker snapshots look flat.
+- Durable `fire_entries` entry-intent states, independently checked even when
+  their parent FIRE request claims `flat_verified` or `rejected_no_order`.
+  An unconfirmed, accepted or submitting entry prevents a clean observation;
+  a no-order request with **any** linked durable entry is contradictory.
+- An internal SHA-256 fingerprint of all local receipt rows, entry-intent rows,
+  reconciliation report rows and source file identities before and after both
+  broker reads. This catches equal-count, equal-status changes that the
+  summary view cannot distinguish, but does not provide broker authenticity
+  or guarantee atomicity across databases or intermediate states.
 
 Both observations must be flat, isolated, consistent and stable. A changed
 product ID, mismatch between margined and filtered positions, open unrelated
