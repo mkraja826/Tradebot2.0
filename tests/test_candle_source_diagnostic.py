@@ -66,6 +66,9 @@ class CandleSourceDiagnosticTests(unittest.TestCase):
         self.assertTrue(r["results"][0]["five_minute_ohlc_matches_one_minute"])
         self.assertTrue(r["results"][0]["five_minute_volume_matches_one_minute"])
         self.assertEqual(r["results"][0]["mark_5m_low"], "60250")
+        self.assertEqual(r["results"][0]["source_checks"],
+                         {"trade_5m": "complete", "trade_1m": "complete",
+                          "mark_5m": "complete"})
 
     def test_crossresolution_mismatch_fails_closed(self):
         self.broker.mismatch = True
@@ -80,6 +83,10 @@ class CandleSourceDiagnosticTests(unittest.TestCase):
         self.assertIn("candle_source_comparison_unverified", r["blockers"])
         self.assertNotIn("SECRET_API_KEY_DO_NOT_LOG", json.dumps(r))
         self.assertEqual(r["results"][0]["comparison"], "unverified")
+        self.assertEqual(r["results"][0]["source_checks"]["trade_5m"], "complete")
+        self.assertEqual(r["results"][0]["source_checks"]["trade_1m"], "complete")
+        self.assertEqual(r["results"][0]["source_checks"]["mark_5m"],
+                         "candle_source_unavailable")
 
     def test_malformed_list_and_duplicate_or_missing_minute_fails(self):
         original = self.broker._request
@@ -94,6 +101,44 @@ class CandleSourceDiagnosticTests(unittest.TestCase):
         r = compare_sources(self.broker, [FIRST])
         self.assertEqual(r["status"], "review_required")
         self.assertIn("candle_source_comparison_unverified", r["blockers"])
+
+    def test_missing_minute_series_is_attributed_not_silently_accepted(self):
+        original = self.broker._request
+
+        def minute_missing(method, path, *, auth, params):
+            if params["resolution"] == "1m":
+                return {"result": []}
+            return original(method, path, auth=auth, params=params)
+
+        self.broker._request = minute_missing
+        result = compare_sources(self.broker, [FIRST])
+        checks = result["results"][0]["source_checks"]
+        self.assertEqual(checks, {
+            "trade_5m": "complete", "trade_1m": "candle_window_incomplete",
+            "mark_5m": "complete",
+        })
+        self.assertEqual(result["results"][0]["comparison"], "unverified")
+        self.assertIn("candle_source_comparison_unverified", result["blockers"])
+        self.assertFalse(result["trade_authorized"])
+
+    def test_malformed_5m_source_cannot_be_masked_by_other_succeeded_reads(self):
+        original = self.broker._request
+
+        def bad_traded_5m(method, path, *, auth, params):
+            if params["symbol"] == "BTCUSD" and params["resolution"] == "5m":
+                return {"result": [{"time": params["start"], "open": "NOPE",
+                                    "high": "1", "low": "1", "close": "1",
+                                    "volume": "1"}]}
+            return original(method, path, auth=auth, params=params)
+
+        self.broker._request = bad_traded_5m
+        result = compare_sources(self.broker, [FIRST])
+        self.assertEqual(result["results"][0]["source_checks"], {
+            "trade_5m": "candle_numeric_field_unverified",
+            "trade_1m": "complete", "mark_5m": "complete",
+        })
+        self.assertEqual(result["status"], "review_required")
+        self.assertFalse(result["safe_to_enable_fire"])
 
     def test_order_enabled_or_wrong_broker_endpoint_rejected_before_reads(self):
         for field, value in (("allow_orders", True),
