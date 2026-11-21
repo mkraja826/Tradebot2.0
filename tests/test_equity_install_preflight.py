@@ -74,6 +74,24 @@ class EquityInstallPreflightTests(unittest.TestCase):
         self.assertEqual(result["reason"], "immutable_evidence_triggers_missing")
         self.assertFalse(result["unit_schema_prerequisites_met"])
 
+    def test_missing_evidence_delete_trigger_blocks_installation(self):
+        guard = PortfolioEquityGuard(self.db_path)
+        guard.observe("1000", at=datetime(2026, 11, 20, tzinfo=timezone.utc))
+        with sqlite3.connect(self.db_path) as db:
+            db.execute("DROP TRIGGER reject_equity_evidence_delete")
+        result = self.inspect()
+        self.assertEqual(result["reason"], "immutable_evidence_triggers_missing")
+        self.assertFalse(result["unit_schema_prerequisites_met"])
+
+    def test_missing_receipt_delete_trigger_blocks_installation(self):
+        guard = PortfolioEquityGuard(self.db_path)
+        guard.observe("1000", at=datetime(2026, 11, 20, tzinfo=timezone.utc))
+        with sqlite3.connect(self.db_path) as db:
+            db.execute("DROP TRIGGER reject_equity_receipt_delete")
+        result = self.inspect()
+        self.assertEqual(result["reason"], "immutable_evidence_triggers_missing")
+        self.assertFalse(result["unit_schema_prerequisites_met"])
+
     def test_lowered_peak_blocks_installation(self):
         guard = PortfolioEquityGuard(self.db_path)
         guard.observe("1000", at=datetime(2026, 11, 20, tzinfo=timezone.utc))
