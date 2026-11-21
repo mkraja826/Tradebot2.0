@@ -132,6 +132,7 @@ def _sample(exchange):
         raise BrokerInventoryError("account_positions_pagination_unverified")
     active = []
     by_product = Counter()
+    signed_margined_sizes = {}
     for row in rows:
         if not isinstance(row, dict):
             raise BrokerInventoryError("account_positions_unverified")
@@ -140,6 +141,7 @@ def _sample(exchange):
         if size:
             active.append(pid)
             by_product[pid] += 1
+            signed_margined_sizes[pid] = size
     if any(count > 1 for count in by_product.values()):
         raise BrokerInventoryError("multiple_margined_positions")
 
@@ -163,8 +165,12 @@ def _sample(exchange):
         "realtime_fire_sizes": realtime,
         "fire_product_ids": product_ids,
         # Do not expose raw account/order IDs or individual balances in output.
+        # Both Delta endpoints report signed contract sizes for the same
+        # product IDs. Presence alone misses disagreements such as +5 vs +3
+        # (or +5 vs -5) when both endpoints show an active position.
+        # The margined endpoint may lag, so mismatch blocks observation.
         "margined_fire_consistency": all(
-            (product_ids[symbol] in active) == (Decimal(size) != 0)
+            signed_margined_sizes.get(product_ids[symbol], Decimal(0)) == Decimal(size)
             for symbol, size in realtime.items()),
     }
 
