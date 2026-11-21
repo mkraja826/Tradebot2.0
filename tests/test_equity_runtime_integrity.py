@@ -10,17 +10,7 @@ import unittest
 from unittest.mock import patch
 
 from equity_fixtures import receipt_for
-from tradebot.delta import DEMO_API
 from tradebot.portfolio_equity_guard import EquityRiskError, PortfolioEquityGuard, RuntimeEquityGuard
-
-
-class MockDemoWallet:
-    base_url = DEMO_API
-    def __init__(self, equity, at):
-        self.equity, self.at = equity, at
-    def wallet_balances(self):
-        return {"meta": {"net_equity": self.equity},
-                "equity_read_receipt": receipt_for(self.equity, self.at)}
 
 
 class RuntimeIntegrityTests(unittest.TestCase):
@@ -164,8 +154,10 @@ class RuntimeIntegrityTests(unittest.TestCase):
         guard = PortfolioEquityGuard(self.path)
         guard.observe("2000", at=self.now)
         instant = self.now + timedelta(seconds=1)
-        report = RuntimeEquityGuard(self.path).observe_signed_demo(
-            MockDemoWallet("2000", instant))
+        # Collector uses observe_verified_read; pass the deterministic fixture
+        # clock rather than the actual current time for this offline scenario.
+        report = guard.observe_verified_read("2000", receipt_for("2000", instant),
+                                             now=instant)
         self.assertTrue(report["approved"])  # diagnostic arithmetic only
         requested = self.now + timedelta(seconds=2)
         with self.assertRaisesRegex(EquityRiskError, "equity_checkpoint_receipt_missing"):
