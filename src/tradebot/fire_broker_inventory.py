@@ -221,6 +221,70 @@ def _read_local_snapshot(path, name):
         raise BrokerInventoryError("local_evidence_or_entry_states_unverified") from None
 
 
+def _check_reconciliation_links(results):
+    """Reject dangling source/claim references in one SQLite read snapshot.
+
+    This is a structural check against the local append-only writer's layout,
+    not exchange authentication or proof that source events are complete.
+    """
+    reports, tables, *source = results
+    present = {row[0] for row in tables}
+    if present != {"evidence", "claims"}:
+        if reports or source:
+            raise BrokerInventoryError("reconciliation_source_tables_missing")
+        return
+
+    if len(source) != 2:
+        raise BrokerInventoryError("reconciliation_source_tables_missing")
+    evidence_rows, claim_rows = source
+    available = set()
+    for kind, identifier, body in evidence_rows:
+        if (kind not in ("fill", "posting") or type(identifier) is not str
+                or not identifier or type(body) is not str):
+            raise BrokerInventoryError("invalid_reconciliation_source_identity")
+        try:
+            parsed = json.loads(body)
+        except (TypeError, ValueError):
+            raise BrokerInventoryError("invalid_reconciliation_source_body") from None
+        if (not isinstance(parsed, dict) or
+                type(parsed.get("id")) not in (str, int) or
+                str(parsed["id"]) != identifier):
+            raise BrokerInventoryError("reconciliation_source_id_mismatch")
+        available.add((kind, identifier))
+
+    claims = {}
+    for kind, identifier, trade_key in claim_rows:
+        if ((kind, identifier) not in available or
+                type(trade_key) is not str or not trade_key):
+            raise BrokerInventoryError("dangling_reconciliation_claim")
+        claims[(kind, identifier)] = trade_key
+
+    verified_claims = set()
+    for _, trade_key, body in reports:
+        try:
+            report = json.loads(body)
+        except (ValueError, TypeError):
+            raise BrokerInventoryError("invalid_reconciliation_report_body") from None
+        if not isinstance(report, dict):
+            raise BrokerInventoryError("invalid_reconciliation_report_body")
+        if report.get("is_net_realized_pnl") is not True:
+            continue
+        for kind, field in (("fill", "matched_fill_ids"),
+                            ("posting", "matched_posting_ids")):
+            ids = report.get(field)
+            if (not isinstance(ids, list) or not ids or
+                    any(type(v) not in (str, int) or not str(v) for v in ids)):
+                raise BrokerInventoryError("verified_report_source_ids_missing")
+            for identifier in ids:
+                key = (kind, str(identifier))
+                if key not in available or claims.get(key) != trade_key:
+                    raise BrokerInventoryError("verified_report_claim_unmatched")
+                verified_claims.add(key)
+
+    if set(claims) - verified_claims:
+        raise BrokerInventoryError("orphan_reconciliation_claim")
+
+
 def _local_evidence_state(data_dir):
     """Fingerprint single-transaction source snapshots and durable entry intent.
 
@@ -243,7 +307,9 @@ def _local_evidence_state(data_dir):
     try:
         for name in (*MARKET_DATABASES.values(), RECONCILIATION_DATABASE):
             identity, results = _read_local_snapshot(root / name, name)
-            if name != RECONCILIATION_DATABASE:
+            if name == RECONCILIATION_DATABASE:
+                _check_reconciliation_links(results)
+            else:
                 requests, _, entries = results
                 parents = {}
                 unresolved_presses = set()
