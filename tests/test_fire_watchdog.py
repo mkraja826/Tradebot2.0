@@ -21,10 +21,10 @@ class Broker:
         self.orders = [
             {"id": 21, "product_id": 27, "product_symbol": "BTCUSD",
              "bracket_order": True, "state": "pending", "side": "sell",
-             "stop_order_type": "stop_loss_order", "stop_price": "62800"},
+             "stop_order_type": "stop_loss_order", "stop_price": "62800", "size": 1},
             {"id": 22, "product_id": 27, "product_symbol": "BTCUSD",
              "bracket_order": True, "state": "pending", "side": "sell",
-             "stop_order_type": "take_profit_order", "stop_price": "63750"},
+             "stop_order_type": "take_profit_order", "stop_price": "63750", "size": 1},
         ]
         self.closeouts = 0
 
