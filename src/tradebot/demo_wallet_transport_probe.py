@@ -9,7 +9,7 @@ import argparse
 import json
 import os
 
-from tradebot.delta import DEMO_API, DeltaDemo
+from tradebot.delta import DEMO_API, DeltaDemo, DeltaReadError
 from tradebot.equity_receipt import EquityReadError, validate_receipt
 
 
@@ -45,6 +45,13 @@ def probe_wallet_transport(exchange, *, validator=validate_receipt):
         report["status"] = "transport_receipt_verified_not_trade_authority"
         report["reason"] = "none"
         report["transport_receipt_verified"] = True
+    except DeltaReadError as exc:
+        # Broker adapter exposes fixed failures for the signed wallet GET.
+        report["reason"] = (exc.code if exc.code in {
+            "broker_authentication_failed",
+            "broker_equity_unavailable",
+            "broker_equity_rejected",
+        } else "wallet_read_unavailable")
     except EquityReadError as exc:
         # Preserve *only* known validated reason codes; do not leak arbitrary
         # message content from injected clients.
