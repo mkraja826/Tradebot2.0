@@ -34,7 +34,10 @@ class FireServiceTests(unittest.TestCase):
         self.assertIn("tradebot2-fire-watchdog.service", script)
         self.assertIn('deployed_dir" != "$PROJECT"', script)
         self.assertIn('! -f "$PROJECT/data/fire-equity-risk.sqlite"', script)
+        self.assertIn('tradebot.equity_install_preflight', script)
         self.assertLess(script.index('systemctl show "$service"'),
+                        script.index('tradebot.equity_install_preflight'))
+        self.assertLess(script.index('tradebot.equity_install_preflight'),
                         script.index('sudo install -m 0644'))
         self.assertNotIn("sudo systemctl start", script)
         self.assertNotIn("sudo systemctl enable", script)
