@@ -81,6 +81,25 @@ class CommissioningPreflightTests(unittest.TestCase):
         self.assertFalse(result["ready_for_supervised_operator_review"])
         self.assertIn("fire_execution_not_disabled", result["blockers"])
 
+    def test_stopped_equity_collector_blocks_real_service_probe(self):
+        from tradebot.fire_commission_preflight import _services_active
+
+        checked = []
+        def systemctl(args, **_kwargs):
+            checked.append(args[-1])
+            code = 1 if args[-1] == "tradebot2-equity-monitor" else 0
+            return type("Completed", (), {"returncode": code})()
+
+        with patch("tradebot.fire_commission_preflight.subprocess.run",
+                   side_effect=systemctl):
+            self.assertFalse(_services_active())
+        self.assertEqual(checked, ["tradebot2-dashboard", "tradebot2-fire-watchdog",
+                                   "tradebot2-equity-monitor"])
+
+        with patch("tradebot.fire_commission_preflight.subprocess.run",
+                   return_value=type("Completed", (), {"returncode": 0})()):
+            self.assertTrue(_services_active())
+
     def test_missing_watchdog_blocks_commission_readiness(self):
         result = self.run_gate(services=lambda: False)
         self.assertIn("dashboard_or_watchdog_not_active", result["blockers"])
