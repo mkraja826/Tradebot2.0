@@ -210,11 +210,10 @@ class FireServiceTests(unittest.TestCase):
                        for line in log.read_text().splitlines()]
             self.assertEqual(len(entries), 2)
             for fire_flag, contract_cap, _ in entries:
-                # Import preflight runs before FIRE environment normalization;
-                # only the actual daemon invocation must be fail closed.
-                if "-m tradebot.dashboard" in _:
-                    self.assertEqual(fire_flag, "false")
-                    self.assertEqual(contract_cap, "1")
+                # Both the read-only import probe and the daemon exec must
+                # see explicit fail-closed execution and max-one-contract.
+                self.assertEqual(fire_flag, "false")
+                self.assertEqual(contract_cap, "1")
             self.assertIn("-m tradebot.dashboard", entries[-1][-1])
 
     def test_dashboard_launcher_requires_explicit_root_demo_opt_in(self):
@@ -227,6 +226,8 @@ class FireServiceTests(unittest.TestCase):
         self.assertIn('export TRADEBOT_FIRE_MAX_CONTRACTS=1', script)
         self.assertLess(script.index('source "$KEY_FILE"'),
                         script.index('export TRADEBOT_FIRE_DEMO_EXECUTION=false'))
+        self.assertLess(script.index('export TRADEBOT_FIRE_DEMO_EXECUTION=false'),
+                        script.index('import tradebot.dashboard as dashboard'))
         self.assertLess(script.index('export TRADEBOT_FIRE_DEMO_EXECUTION=false'),
                         script.index('exec "$PROJECT/.venv/bin/python" -m'))
 
