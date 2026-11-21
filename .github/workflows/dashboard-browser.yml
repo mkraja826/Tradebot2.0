@@ -7,6 +7,14 @@ on:
       - 'tests/market_chart_browser.py'
       - 'tests/equity_checkpoint_browser.py'
       - '.github/workflows/dashboard-browser.yml'
+  pull_request:
+    paths:
+      - 'src/tradebot/dashboard_static/**'
+      - 'tests/dashboard_browser.py'
+      - 'tests/market_chart_browser.py'
+      - 'tests/equity_checkpoint_browser.py'
+      - '.github/workflows/dashboard-browser.yml'
+  workflow_dispatch:
 permissions:
   contents: read
 jobs:
