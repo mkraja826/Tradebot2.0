@@ -5,6 +5,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import json
 import sqlite3
+import subprocess
 import unittest
 
 from tradebot.equity_monitor import MonitorStore
@@ -34,6 +35,30 @@ class OffHostAlertTests(unittest.TestCase):
             return db.execute(
                 "SELECT last_event,last_ping_us FROM delivery_cursor WHERE id=1"
             ).fetchone()
+
+    def test_service_scripts_are_no_trade_and_installer_stages_only(self):
+        root = Path(__file__).resolve().parents[1]
+        launcher_path = root / "ops/run_offhost_alerts.sh"
+        installer_path = root / "ops/install_offhost_alerts_service.sh"
+        for path in (launcher_path, installer_path):
+            with self.subTest(script=path.name):
+                result = subprocess.run(
+                    ["bash", "-n", str(path)], capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+        launcher = launcher_path.read_text()
+        installer = installer_path.read_text()
+        self.assertIn("unset DELTA_DEMO_API_KEY DELTA_DEMO_API_SECRET TB_API_KEY",
+                      launcher)
+        self.assertIn("export ENABLE_DEMO_ORDERS=false", launcher)
+        self.assertIn("export TRADEBOT_FIRE_DEMO_EXECUTION=false", launcher)
+        self.assertIn("export TRADEBOT_GOLD_FIRE_DEMO_EXECUTION=false", launcher)
+        self.assertIn('export PYTHONPATH="$PROJECT/src"', launcher)
+        self.assertIn('tradebot.offhost_alerts', launcher)
+        self.assertIn("--check", installer)
+        self.assertIn("sudo install -m 0644", installer)
+        self.assertNotIn("sudo systemctl enable", installer)
+        self.assertNotIn("sudo systemctl start", installer)
+        self.assertNotIn("sudo systemctl restart", installer)
 
     def test_destinations_require_public_https_and_no_userinfo(self):
         for url in ("", "http://alerts.example.org/notify",
