@@ -78,6 +78,12 @@ def _timestamp(raw):
     return instant.timestamp()
 
 
+def _valid_broker_order_id(value):
+    """An explicit, nonempty broker order reference; never bool or container."""
+    return ((type(value) is str and bool(value.strip()))
+            or (type(value) is int and value > 0))
+
+
 def _receipt(symbol, row):
     press, created, updated, status, body = row
     if (not isinstance(press, str) or not re.fullmatch("[a-f0-9]{32}", press)
@@ -93,7 +99,10 @@ def _receipt(symbol, row):
     if not isinstance(evidence, dict):
         raise InventoryEvidenceError("invalid_receipt_payload")
     submitted = evidence.get("orders_submitted")
-    broker_refs = any(evidence.get(key) for key in (
+    # An empty or malformed *present* reference is still an attempt to
+    # link this receipt with broker activity. Do not treat false-y containers,
+    # whitespace-only strings or zero-valued identifiers as proof of no order.
+    broker_refs = any(key in evidence and evidence[key] is not None for key in (
         "broker_order_id", "entry", "exit_order_ids", "order_state", "protected_at"))
     protection_claimed = (evidence.get("protection_verified") is True
                           or evidence.get("liquidation_verified") is True)
@@ -101,7 +110,7 @@ def _receipt(symbol, row):
             and not broker_refs and not protection_claimed):
         category = "locally_reported_no_order"
     elif (status in CLOSED_RECEIPT_STATUSES and submitted is True
-          and evidence.get("broker_order_id")):
+          and _valid_broker_order_id(evidence.get("broker_order_id"))):
         category = "locally_reported_flat"
     else:
         # Contradictory no-order claims or closed receipts without a linked
