@@ -22,6 +22,22 @@ unset PYTHONHOME PYTHONUSERBASE
 export PYTHONNOUSERSITE=1
 export PYTHONSAFEPATH=1
 export PYTHONPATH="$PROJECT/src"
+# No module, including the import-only preflight, can receive a stale
+# credentials-file FIRE toggle before this fail-closed guard takes effect.
+export ENABLE_DEMO_ORDERS=false
+# keys.env is sourced INSIDE this launcher, after systemd UnsetEnvironment.
+# It could accidentally reintroduce TRADEBOT_FIRE_DEMO_EXECUTION=true.
+# Allow DEMO entry mode only with the reviewed root-owned explicit opt-in
+# drop-in, and never while the fail-closed disable marker is present.
+FIRE_UNIT_DIR=/etc/systemd/system/tradebot2-dashboard.service.d
+FIRE_OPT_IN="$FIRE_UNIT_DIR/fire-demo.conf"
+FIRE_DISABLED="$FIRE_UNIT_DIR/99-fire-disabled.conf"
+if [[ -e "$FIRE_DISABLED" || ! -f "$FIRE_OPT_IN" || -L "$FIRE_OPT_IN" ]] ||
+   ! grep -Fxq 'Environment=TRADEBOT_FIRE_DEMO_EXECUTION=true' "$FIRE_OPT_IN"; then
+  export TRADEBOT_FIRE_DEMO_EXECUTION=false
+fi
+# Never accept contract-count overrides inherited from keys.env.
+export TRADEBOT_FIRE_MAX_CONTRACTS=1
 
 # Import-only, no service startup, no broker requests and no ledger writes.
 "$PROJECT/.venv/bin/python" - "$PROJECT/src/tradebot/dashboard.py" <<'PY'
