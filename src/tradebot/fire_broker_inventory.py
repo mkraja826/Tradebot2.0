@@ -99,7 +99,16 @@ def _all_open_orders(exchange):
 
 
 def _positions_for_product(exchange, pid):
-    rows = _get(exchange, "/v2/positions", params={"product_id": pid}).get("result")
+    reply = _get(exchange, "/v2/positions", params={"product_id": pid})
+    # Filtering to one product does not waive completeness. The first page
+    # can be zero/empty while an uninspected continuation contains exposure.
+    # Delta may omit meta on this endpoint; but any *present* meta must be
+    # well formed and must not advertise additional pages.
+    meta = reply.get("meta")
+    if meta is not None and (
+            not isinstance(meta, dict) or meta.get("after") not in (None, "")):
+        raise BrokerInventoryError("realtime_positions_pagination_unverified")
+    rows = reply.get("result")
     if isinstance(rows, dict):
         rows = [rows]
     if not isinstance(rows, list):
