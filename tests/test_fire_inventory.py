@@ -31,7 +31,9 @@ class FireInventoryTests(unittest.TestCase):
 
     def add_receipt(self, market, fireid, status, submitted, *, body=None):
         name = "fire-ops.sqlite" if market == "BTCUSD" else "fire-xaut.sqlite"
-        result = {"orders_submitted": submitted} if body is None else body
+        result = ({"orders_submitted": submitted, **(
+            {"broker_order_id": "confirmed-order-123"} if submitted is True else {})}
+            if body is None else body)
         with sqlite3.connect(self.root / name) as db:
             db.execute("INSERT INTO fire_requests VALUES (?,?,?,?,?)",
                        (fireid, UTC, UTC, status, json.dumps(result)))
@@ -65,6 +67,21 @@ class FireInventoryTests(unittest.TestCase):
         report = read_inventory(self.root)
         self.assertEqual(report["requires_broker_review_count"], 2)
         self.assertEqual(report["evidence_status"], "incomplete_or_ambiguous")
+
+    def test_rejected_no_order_with_broker_references_is_ambiguous(self):
+        self.add_receipt("XAUTUSD", GOLD, "rejected_no_order", False,
+                         body={"orders_submitted": False,
+                               "broker_order_id": "unexpected-entry"})
+        report = read_inventory(self.root)
+        self.assertEqual(report["locally_reported_no_order_count"], 0)
+        self.assertEqual(report["requires_broker_review_count"], 1)
+
+    def test_flat_claim_without_broker_order_identity_is_unresolved(self):
+        self.add_receipt("BTCUSD", BTC, "flat_verified", True,
+                         body={"orders_submitted": True})
+        report = read_inventory(self.root)
+        self.assertEqual(report["locally_reported_flat_count"], 0)
+        self.assertEqual(report["requires_broker_review_count"], 1)
 
     def test_closed_receipt_missing_financial_review_is_not_profit(self):
         self.add_receipt("BTCUSD", BTC, "flat_verified", True)
