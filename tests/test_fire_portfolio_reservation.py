@@ -6,7 +6,7 @@ from tempfile import TemporaryDirectory
 import unittest
 from uuid import uuid4
 
-from tradebot.fire_execution import FireTradeStore
+from tradebot.fire_execution import FireTradeError, FireTradeStore
 from tradebot.fire_portfolio_reservation import FirePortfolioReservation
 
 
@@ -55,6 +55,24 @@ class FirePortfolioReservationTests(unittest.TestCase):
         gold = self.gold_store.reserve()
         self.btc_store.update(btc, "exposure_unknown")
         self.assertFalse(self.gate.claim("XAUTUSD", gold, self.gold_store.path))
+
+    def test_market_reserve_blocks_hidden_older_unresolved_even_after_flat_latest(self):
+        newest = self.btc_store.reserve()
+        self.btc_store.update(newest, "flat_verified")
+        hidden = self.inject_older_receipt(self.btc_store, "exposure_unknown")
+        with self.assertRaisesRegex(FireTradeError, "broker reconciliation"):
+            self.btc_store.reserve()
+        self.btc_store.update(hidden, "flat_verified")
+        self.assertIsNotNone(self.btc_store.reserve())
+
+    def test_market_reserve_unknown_legacy_status_also_blocks(self):
+        newest = self.gold_store.reserve()
+        self.gold_store.update(newest, "flat_verified")
+        hidden = self.inject_older_receipt(self.gold_store, "legacy_unrecognized")
+        with self.assertRaisesRegex(FireTradeError, "broker reconciliation"):
+            self.gold_store.reserve()
+        self.gold_store.update(hidden, "flat_verified")
+        self.assertIsNotNone(self.gold_store.reserve())
 
     def test_older_exposed_btc_blocks_new_gold_despite_newer_terminal_receipt(self):
         newest = self.btc_store.reserve()
