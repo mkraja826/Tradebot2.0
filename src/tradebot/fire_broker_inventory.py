@@ -186,7 +186,11 @@ def _local_evidence_state(data_dir):
             path = root / name
             identity = _identity(path)
             if name == RECONCILIATION_DATABASE:
-                queries = ["SELECT digest,trade_key,body FROM reports ORDER BY digest"]
+                queries = [
+                    "SELECT digest,trade_key,body FROM reports ORDER BY digest",
+                    "SELECT name FROM sqlite_master WHERE type='table' "
+                    "AND name IN ('evidence','claims') ORDER BY name",
+                ]
             else:
                 queries = [
                     "SELECT press,created_at,updated_at,status,result "
@@ -200,7 +204,22 @@ def _local_evidence_state(data_dir):
                 if rows is None:
                     raise BrokerInventoryError("local_ledger_missing")
                 results.append(rows)
-            if name != RECONCILIATION_DATABASE:
+            if name == RECONCILIATION_DATABASE:
+                recorded_tables = {row[0] for row in results[1]}
+                if results[0] and recorded_tables != {"evidence", "claims"}:
+                    # Reports without their original immutable source tables
+                    # cannot support a clean broker evidence observation.
+                    raise BrokerInventoryError("reconciliation_source_tables_missing")
+                for table in ("evidence", "claims"):
+                    if table in recorded_tables:
+                        query = ("SELECT kind,id,body FROM evidence ORDER BY kind,id"
+                                 if table == "evidence" else
+                                 "SELECT kind,id,trade_key FROM claims ORDER BY kind,id")
+                        source_rows = _read_rows(path, query)
+                        if source_rows is None:
+                            raise BrokerInventoryError("reconciliation_source_unavailable")
+                        results.append(source_rows)
+            else:
                 if results[1]:
                     entries = _read_rows(
                         path, "SELECT press,status,receipt FROM fire_entries ORDER BY press")
