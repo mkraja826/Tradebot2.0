@@ -97,6 +97,63 @@ class FireInventoryTests(unittest.TestCase):
         self.assertEqual(report["locally_reported_no_order_count"], 0)
         self.assertEqual(report["requires_broker_review_count"], 1)
 
+    def test_no_order_with_present_but_falsey_broker_reference_requires_review(self):
+        # False-y reference fields are not proof that no submission happened.
+        cases = (
+            {"broker_order_id": ""},
+            {"broker_order_id": 0},
+            {"entry": {}},
+            {"exit_order_ids": []},
+            {"order_state": False},
+            {"protected_at": " "},
+        )
+        self.add_receipt("XAUTUSD", GOLD, "rejected_no_order", False)
+        for extras in cases:
+            with self.subTest(reference=extras):
+                body = {"orders_submitted": False, **extras}
+                with sqlite3.connect(self.root / "fire-xaut.sqlite") as db:
+                    db.execute("UPDATE fire_requests SET result=? WHERE press=?",
+                               (json.dumps(body), GOLD))
+                report = read_inventory(self.root)
+                self.assertEqual(report["locally_reported_no_order_count"], 0)
+                self.assertEqual(report["requires_broker_review_count"], 1)
+                self.assertEqual(report["evidence_status"], "incomplete_or_ambiguous")
+                self.assertFalse(report["trade_authorized"])
+
+    def test_no_order_with_explicit_null_optional_broker_ref_is_local_only(self):
+        self.add_receipt("XAUTUSD", GOLD, "rejected_no_order", False,
+                         body={"orders_submitted": False, "broker_order_id": None})
+        report = read_inventory(self.root)
+        self.assertEqual(report["locally_reported_no_order_count"], 1)
+        self.assertFalse(report["is_account_flatness_verified"])
+
+    def test_closed_receipt_requires_valid_scalar_broker_order_id(self):
+        self.add_receipt("BTCUSD", BTC, "flat_verified", True)
+        invalid = (True, False, {}, {"id": "123"}, ["123"], 0, -1, "", "  ")
+        for value in invalid:
+            with self.subTest(broker_order_id=value):
+                body = {"orders_submitted": True, "broker_order_id": value}
+                with sqlite3.connect(self.root / "fire-ops.sqlite") as db:
+                    db.execute("UPDATE fire_requests SET result=? WHERE press=?",
+                               (json.dumps(body), BTC))
+                report = read_inventory(self.root)
+                self.assertEqual(report["locally_reported_flat_count"], 0)
+                self.assertEqual(report["requires_broker_review_count"], 1)
+                self.assertFalse(report["trade_authorized"])
+
+    def test_closed_receipt_accepts_usable_string_or_positive_integer_id(self):
+        self.add_receipt("BTCUSD", BTC, "flat_verified", True)
+        for order_id in ("broker-123", 123):
+            with self.subTest(broker_order_id=order_id):
+                body = {"orders_submitted": True, "broker_order_id": order_id}
+                with sqlite3.connect(self.root / "fire-ops.sqlite") as db:
+                    db.execute("UPDATE fire_requests SET result=? WHERE press=?",
+                               (json.dumps(body), BTC))
+                report = read_inventory(self.root)
+                self.assertEqual(report["locally_reported_flat_count"], 1)
+                self.assertEqual(report["flat_receipts_missing_financial_review_count"], 1)
+                self.assertEqual(report["evidence_status"], "incomplete_or_ambiguous")
+
     def test_flat_claim_without_broker_order_identity_is_unresolved(self):
         self.add_receipt("BTCUSD", BTC, "flat_verified", True,
                          body={"orders_submitted": True})

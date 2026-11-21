@@ -13,10 +13,16 @@ The output explicitly distinguishes:
 
 - `locally_reported_no_order`: the durable FIRE receipt records both
   `rejected_no_order` and `orders_submitted=false`. This is a local statement,
-  **not** proof that an exchange order does not exist.
+  **not** proof that an exchange order does not exist. Any explicitly
+  present non-null broker-reference field, even if empty, zero or false, is
+  treated as contradictory and requires broker review; a truly absent or
+  null optional field is not itself a submitted-order claim.
 - `locally_reported_flat`: a terminal flat receipt with
-  `orders_submitted=true`. This does **not** prove current signed broker
-  positions or absence of open orders.
+  `orders_submitted=true` and a nonempty scalar broker order ID (nonblank
+  string or positive integer). Boolean, container, blank or nonpositive
+  identifiers do not establish a usable broker reference and instead require
+  broker review. This does **not** prove current signed broker positions or
+  absence of open orders.
 - `requires_broker_review`: unknown, inconsistent or potentially open state.
 - `local_financial_report_present`: at least one historical report for that
   FIRE key exists in the reconciliation ledger; presence is **not verification**.
