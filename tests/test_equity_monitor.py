@@ -155,7 +155,8 @@ class MonitorTests(unittest.TestCase):
 
     def test_healthy_checkpoints_do_not_hide_missing_watchdog(self):
         path = self.root / "fire-equity-risk.sqlite"
-        PortfolioEquityGuard(path).observe("1000", at=self.now)
+        PortfolioEquityGuard(path).observe_verified_read(
+            "1000", receipt_for(at=self.now), now=self.now)
         self.store.heartbeat("equity_collector", at=self.now)
         health = risk_health(path, at=self.now)
         self.assertEqual(health["status"], "monitoring_degraded")
