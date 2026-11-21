@@ -44,6 +44,20 @@ def _size(raw):
     return value
 
 
+def _remaining_size(raw):
+    """Validate a nonnegative integer unfilled size, including decimal zeros."""
+    if type(raw) not in (str, int):
+        raise BracketEvidenceError("invalid_remaining_contract_size")
+    try:
+        value = Decimal(str(raw))
+    except (ValueError, InvalidOperation):
+        raise BracketEvidenceError("invalid_remaining_contract_size") from None
+    if (not value.is_finite() or value < 0
+            or value != value.to_integral_value()):
+        raise BracketEvidenceError("invalid_remaining_contract_size")
+    return value
+
+
 def _price(raw):
     if type(raw) not in (str, int):
         raise BracketEvidenceError("invalid_plan_price")
@@ -230,9 +244,27 @@ def audit_bracket_fields(exchange, data_dir, *, symbol, fire_id):
     entry_side = "buy" if saved["direction"] == "LONG" else "sell"
     exit_side = "sell" if entry_side == "buy" else "buy"
     if (parent.get("product_id") != pid or parent.get("client_order_id") != fire_id
-            or parent.get("side") != entry_side or parent.get("state") != "closed"
-            or str(parent.get("unfilled_size")) not in ("0", "0.0", "0.00")):
+            or parent.get("side") != entry_side or parent.get("state") != "closed"):
         problems.append("broker_parent_fill_identity_or_state_unverified")
+    # Delta's order state 'closed' represents a fully filled order. The
+    # remaining quantity is independently checked without accepting a bool,
+    # negative, nonfinite or fractional value; decimal zero encodings are OK.
+    try:
+        if _remaining_size(parent.get("unfilled_size")) != 0:
+            problems.append("broker_parent_unfilled_quantity_not_zero")
+    except BracketEvidenceError:
+        problems.append("broker_parent_unfilled_quantity_unverified")
+    # FIRE submits a market *entry*, never a reduce-only position close.
+    # Nominal order size and closed state alone do not establish that intent.
+    if (parent.get("order_type") != "market_order"
+            or parent.get("reduce_only") is not False):
+        problems.append("broker_parent_entry_instruction_unverified")
+    try:
+        if (_price(parent.get("bracket_stop_loss_price")) != saved["stop_loss"]
+                or _price(parent.get("bracket_take_profit_price")) != saved["take_profit"]):
+            problems.append("broker_parent_bracket_echo_mismatch")
+    except BracketEvidenceError:
+        problems.append("broker_parent_bracket_echo_unverified")
     try:
         if _size(parent.get("size")) != saved["contracts"]:
             problems.append("broker_parent_contract_size_mismatch")
@@ -259,6 +291,16 @@ def audit_bracket_fields(exchange, data_dir, *, symbol, fire_id):
                 problems.append(kind + "_broker_trigger_mismatch")
         except BracketEvidenceError:
             problems.append(kind + "_broker_trigger_unverified")
+        # FIRE requests mark-price triggered position protection. A child
+        # using last-traded-price or spot-price would change liquidation-risk
+        # behavior even with identical SL/TP price and quantity fields.
+        if order.get("stop_trigger_method") != "mark_price":
+            problems.append(kind + "_broker_trigger_method_unverified")
+        # A protective child must not reopen or increase an exposure after
+        # its parent position has already closed. Bracket provenance by
+        # itself is not a safe substitute for confirmed reduce-only behavior.
+        if order.get("reduce_only") is not True:
+            problems.append(kind + "_broker_reduce_only_unverified")
         if child_states[kind] == "unknown":
             problems.append(kind + "_broker_state_unverified")
     result["historical_child_states"] = child_states
