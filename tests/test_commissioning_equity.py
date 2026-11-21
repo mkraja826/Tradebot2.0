@@ -62,16 +62,20 @@ class CommissioningEquityTests(unittest.TestCase):
         self.assertEqual(self.check()["reason"], report["reason"])  # restart/repeat safe
         self.assertEqual(self.snapshot(), before)
 
-    def test_unsigned_opening_cannot_pass_commissioning_even_if_health_looks_green(self):
+    def test_unsigned_opening_is_blocked_by_hardened_health_before_wallet(self):
         open_at = self.now.replace(minute=1)
         latest_at = self.now - timedelta(seconds=1)
         self.guard.observe("1000", at=open_at)  # legacy origin label, no receipt
         self.guard.observe_verified_read("1000", receipt_for("1000", latest_at),
                                          now=latest_at)
-        self.assertTrue(risk_health(self.path, at=self.now)["checkpoint_prerequisites_met"])
+        health = risk_health(self.path, at=self.now)
+        self.assertFalse(health["checkpoint_prerequisites_met"])
+        self.assertEqual(health["daily_checkpoint"], "unverified_receipt")
         before = self.snapshot()
-        with self.assertRaisesRegex(EquityRiskError, "equity_checkpoint_receipt_missing"):
-            self.check()
+        result = self.check()
+        self.assertFalse(result["approved"])
+        self.assertFalse(result["trade_authorized"])
+        self.assertEqual(result["reason"], "equity_or_monitoring_prerequisites_missing")
         self.exchange.wallet_balances.assert_not_called()
         self.assertEqual(self.snapshot(), before)
 
@@ -80,9 +84,12 @@ class CommissioningEquityTests(unittest.TestCase):
         self.guard.observe_verified_read("1000", receipt_for("1000", open_at),
                                          now=open_at)
         self.guard.observe("1000", at=self.now - timedelta(seconds=1))
-        self.assertTrue(risk_health(self.path, at=self.now)["checkpoint_prerequisites_met"])
-        with self.assertRaisesRegex(EquityRiskError, "equity_checkpoint_receipt_missing"):
-            self.check()
+        health = risk_health(self.path, at=self.now)
+        self.assertFalse(health["checkpoint_prerequisites_met"])
+        self.assertEqual(health["latest_receipt_status"], "missing")
+        result = self.check()
+        self.assertFalse(result["approved"])
+        self.assertFalse(result["trade_authorized"])
         self.exchange.wallet_balances.assert_not_called()
 
     def test_forged_historical_receipt_equity_does_not_validate_anchor(self):
@@ -96,8 +103,12 @@ class CommissioningEquityTests(unittest.TestCase):
                         __import__("json").dumps(forged)))
         self.guard.observe_verified_read("1000", receipt_for("1000", latest_at),
                                          now=latest_at)
-        with self.assertRaisesRegex(EquityRiskError, "equity_checkpoint_receipt_unverified"):
-            self.check()
+        health = risk_health(self.path, at=self.now)
+        self.assertFalse(health["checkpoint_prerequisites_met"])
+        self.assertEqual(health["daily_checkpoint"], "unverified_receipt")
+        result = self.check()
+        self.assertFalse(result["approved"])
+        self.assertFalse(result["trade_authorized"])
         self.exchange.wallet_balances.assert_not_called()
 
     def test_missing_receipt_inserted_during_wallet_read_blocks_final_snapshot(self):
@@ -107,8 +118,15 @@ class CommissioningEquityTests(unittest.TestCase):
             self.guard.observe("1000", at=self.now - timedelta(milliseconds=100))
             return wallet
         self.exchange.wallet_balances.side_effect = append_unreceipted_equity
-        with self.assertRaisesRegex(EquityRiskError, "equity_checkpoint_receipt_missing"):
-            self.check()
+        # Pretend a cached health read stays green across the wallet network
+        # operation: the final independent SQLite transaction must still
+        # reject the newly introduced unsigned observation.
+        initially_healthy = risk_health(self.path, at=self.now)
+        self.assertTrue(initially_healthy["checkpoint_prerequisites_met"])
+        with patch("tradebot.commissioning_equity.risk_health",
+                   return_value=initially_healthy):
+            with self.assertRaisesRegex(EquityRiskError, "equity_checkpoint_receipt_missing"):
+                self.check()
         self.exchange.wallet_balances.assert_called_once_with()
 
     def test_exact_daily_limit_blocks_before_consuming_commissioning_attempt(self):
