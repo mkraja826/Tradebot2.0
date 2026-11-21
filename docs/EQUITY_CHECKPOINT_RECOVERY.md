@@ -72,6 +72,21 @@ commissioning lock must remain intact. No historical checkpoints are created.
   reject stale or contradictory healthy responses. Healthy evidence never
   enables a FIRE button.
 
+## FIRE protective-order exclusivity
+
+The FIRE controller and independent watchdog treat a signed broker response
+containing *any* unexpected open order for the selected FIRE product as
+**unverified bracket protection**. Even when the expected SL/TP pair has the
+correct triggers, unique order IDs and full filled contract size, an
+additional same-product order with a different trigger, missing or malformed
+metadata, wrong side, cancelled state, or ordinary/non-bracket type blocks a
+protected state and invokes the existing bounded emergency-closeout path.
+The verifier only scopes this rule to the selected product; account-wide
+pending orders require the separate account-exposure gate. Offline broker
+mocks do not establish the exact response semantics for Delta DEMO: operator
+verification is required before commissioning. No automated release or
+permission is granted by the audit.
+
 ## Evidence limits and commissioning prerequisites
 
 Delta's [wallet schema](https://docs.delta.exchange/#get-wallet-balances) does

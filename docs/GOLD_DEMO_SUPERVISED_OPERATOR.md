@@ -58,8 +58,11 @@ product, opposite side, expected trigger and **full filled contract size**,
 selected leverage, isolated account margin mode and real liquidation price
 at least 1% of entry beyond SL. Missing or malformed child `size`, a
 short/oversized protective child, duplicate matching child, or missing child
-identity cannot establish a protected trade; the existing bounded check
-takes the emergency closeout path. Delta bracket sizes may automatically
+identity cannot establish a protected trade. Any additional same-product
+open order—even if it is a different-priced protective trigger, ordinary
+manual order, wrong-side child, or malformed row—also invalidates protected
+status instead of being silently ignored; the existing bounded check takes
+the emergency closeout path. Delta bracket sizes may automatically
 adjust with the net position; verify the actual DEMO API response semantics
 with the operator before any execution. This check is intentionally
 fail-closed and could exit a legitimate position if broker metadata is
