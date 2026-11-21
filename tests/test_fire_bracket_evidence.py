@@ -79,8 +79,16 @@ class BracketEvidenceTests(unittest.TestCase):
                         "2026-11-20T06:00:00+00:00", "flat_verified",
                         json.dumps(self.saved if body is None else body)))
             if entry_id is not None:
+                entry = {
+                    "press": FIRE, "symbol": "BTCUSD", "product_id": 27,
+                    "order_id": entry_id, "status": "filled",
+                    "plan": {
+                        "direction": "LONG", "contracts": 2,
+                        "stop_loss": "95", "take_profit": "110",
+                    },
+                }
                 db.execute("INSERT INTO fire_entries VALUES (?,?,?)",
-                           (FIRE, "filled", json.dumps({"order_id": entry_id})))
+                           (FIRE, "filled", json.dumps(entry)))
 
     def run_check(self, *, symbol="BTCUSD", fire_id=FIRE):
         return audit_bracket_fields(self.exchange, self.root,
@@ -219,6 +227,91 @@ class BracketEvidenceTests(unittest.TestCase):
         result = self.run_check()
         self.assertIn("local_parent_order_identity_conflict", result["blockers"])
         self.assertEqual(self.exchange.calls, [])
+
+    def test_original_entry_plan_conflicts_block_before_any_broker_request(self):
+        # The initial entry plan is independently persisted by FireEntries.
+        # Matching only the parent order ID would miss each inconsistency.
+        changes = (
+            ("direction", "SHORT"),
+            ("contracts", 3),
+            ("stop_loss", "94"),
+            ("take_profit", "111"),
+        )
+        for key, value in changes:
+            with self.subTest(plan_field=key):
+                self.write_saved()
+                with sqlite3.connect(self.dbpath) as db:
+                    row = json.loads(db.execute(
+                        "SELECT receipt FROM fire_entries WHERE press=?", (FIRE,)
+                    ).fetchone()[0])
+                    row["plan"][key] = value
+                    db.execute("UPDATE fire_entries SET receipt=? WHERE press=?",
+                               (json.dumps(row), FIRE))
+                self.exchange.calls.clear()
+                result = self.run_check()
+                self.assertIn("local_entry_trade_plan_conflict", result["blockers"])
+                self.assertEqual(result["authenticated_order_gets"], 0)
+                self.assertEqual(self.exchange.calls, [])
+                self.assertFalse(result["trade_authorized"])
+
+    def test_incomplete_original_entry_plan_blocks_before_broker_read(self):
+        self.write_saved()
+        with sqlite3.connect(self.dbpath) as db:
+            row = json.loads(db.execute(
+                "SELECT receipt FROM fire_entries WHERE press=?", (FIRE,)
+            ).fetchone()[0])
+            del row["plan"]["take_profit"]
+            db.execute("UPDATE fire_entries SET receipt=? WHERE press=?",
+                       (json.dumps(row), FIRE))
+        report = self.run_check()
+        self.assertIn("local_entry_trade_plan_unverified", report["blockers"])
+        self.assertEqual(self.exchange.calls, [])
+
+    def test_durable_entry_identity_and_status_contradictions_block(self):
+        edits = (
+            ("press", "d" * 32, "local_entry_market_identity_conflict"),
+            ("symbol", "XAUTUSD", "local_entry_market_identity_conflict"),
+            ("product_id", 82, "local_entry_broker_product_identity_conflict"),
+            ("product_id", True, "local_entry_market_identity_conflict"),
+            ("status", "cancelled", "local_entry_filled_state_unverified"),
+        )
+        for key, value, expected in edits:
+            with self.subTest(entry_field=key, value=value):
+                self.write_saved()
+                with sqlite3.connect(self.dbpath) as db:
+                    row = json.loads(db.execute(
+                        "SELECT receipt FROM fire_entries WHERE press=?", (FIRE,)
+                    ).fetchone()[0])
+                    row[key] = value
+                    db.execute("UPDATE fire_entries SET receipt=? WHERE press=?",
+                               (json.dumps(row), FIRE))
+                self.exchange.calls.clear()
+                report = self.run_check()
+                self.assertIn(expected, report["blockers"])
+                self.assertFalse(report["trade_authorized"])
+                if key != "product_id" or value is True:
+                    self.assertEqual(self.exchange.calls, [])
+                else:
+                    self.assertEqual(len(self.exchange.calls), 1)
+                    self.assertEqual(report["authenticated_order_gets"], 0)
+
+    def test_durable_entry_row_state_disagrees_with_body_and_blocks(self):
+        self.write_saved()
+        with sqlite3.connect(self.dbpath) as db:
+            db.execute("UPDATE fire_entries SET status='accepted' WHERE press=?", (FIRE,))
+        report = self.run_check()
+        self.assertIn("local_entry_filled_state_unverified", report["blockers"])
+        self.assertEqual(self.exchange.calls, [])
+
+    def test_historical_local_no_entry_still_yields_limited_broker_diagnostic(self):
+        # Some legacy receipts predate durable entry intent; a matching
+        # broker comparison still cannot establish historical protection.
+        self.write_saved(entry_id=None)
+        report = self.run_check()
+        self.assertEqual(report["observation_status"],
+                         "historical_order_fields_match_not_protection_proof")
+        self.assertFalse(report["is_historical_protection_proven"])
+        self.assertFalse(report["trade_authorized"])
 
     def test_no_order_or_unknown_fire_receipt_never_contacts_broker(self):
         self.saved["orders_submitted"] = False
