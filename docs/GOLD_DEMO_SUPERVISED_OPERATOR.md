@@ -9,7 +9,15 @@ equity checkpoints and a fresh signed-wallet loss assessment before consuming
 the one-shot marker. Dashboard/watchdog/collector activity and both disabled
 FIRE endpoints are rechecked after the broker and equity reads, so changes
 during preflight fail closed. A missing opening cannot be reconstructed by
-this command.
+this command. The commissioning risk review independently checks that the
+daily and weekly opening observations and the latest equity observation have
+stored authenticated-wallet transport receipts, with matching observation
+timestamps and equity values. Legacy/synthetic observations containing only
+an origin label but no transport receipt cannot approve commissioning, even
+if the general checkpoint dashboard reports an opening. These receipts prove
+local HTTPS request provenance checks, **not an exchange-signed valuation**.
+The check runs before the wallet network read and again against the final
+read-only SQLite snapshot; it never creates missing receipts.
 
 ```bash
 # Read-only readiness; never submits an order.
