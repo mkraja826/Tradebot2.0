@@ -83,6 +83,51 @@ feature. Before interpreting actual operator results, independently confirm
 the VM SHA, broker credentials/endpoint, operations watchdog, runtime equity
 checkpoints, clock synchronization, and complete trade/lifecycle records.
 
+## Historical protective-child field check (one saved FIRE ID)
+
+A separate **read-only**, bounded operator diagnostic is available to inspect
+the actual Delta DEMO order fields for one *previously submitted* FIRE request.
+It is not part of the order-enabled FIRE path and does not unlock anything.
+
+```bash
+python -m tradebot.fire_bracket_evidence \
+  --data-dir data --symbol BTCUSD --fire-id <32-character-lowercase-hex-FIRE-ID>
+```
+
+For Gold, use `--symbol XAUTUSD`. This command first loads the selected
+existing per-market SQLite store with a bounded read-only transaction and
+device/inode checks; it never creates or edits a ledger. The stored receipt
+must contain a submitted broker parent ID and two distinct saved child IDs,
+a valid contract size, trade direction, and planned stop/take-profit triggers.
+Any durable entry-order identity, if present, must agree before contacting
+the broker.
+
+Only with a **DEMO read-only** client (`allow_orders=False`) does the diagnostic
+make one authenticated `GET /v2/products/{symbol}` and **three**
+`GET /v2/orders/{order_id}` lookups. Delta documents the by-ID endpoint and
+the child order `size`, `stop_price`, `stop_order_type`, `bracket_order`,
+`state`, `side`, and `product_id` fields:
+https://docs.delta.exchange/
+
+The command compares historical parent product/client ID, buy/sell direction,
+full filled quantity and closed state, and checks that both child orders
+reference the same product, opposite side, saved trigger, correct bracket
+type, and **matching contract size**. Child states are summarized (open,
+pending, closed, cancelled, unknown), without exposing broker account or order
+identifiers. Malformed, missing, changed or conflicting fields produce
+sanitized blockers. Missing credentials or network access also block; errors
+are not treated as negative broker responses.
+
+Even a result of `historical_order_fields_match_not_protection_proof` is
+**not** proof that both children were simultaneously active, that they
+covered the position at every point in time, that any exit filled, that
+the account is currently flat, or that the FIRE engine can be enabled.
+Bracket quantities may change automatically with net positions. A separate
+timestamped broker timeline, executed fill/cancel history, current account-wide
+reconciliation, and independent operator approval remain necessary. Running
+the command never submits, cancels or changes an order and never grants any
+trade or recovery permission.
+
 ## Development state
 
 This source-only increment is intentionally based on PR #5 and should be
