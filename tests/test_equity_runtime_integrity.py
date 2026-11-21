@@ -10,11 +10,12 @@ import unittest
 from unittest.mock import patch
 
 from equity_fixtures import receipt_for
+from tradebot.delta import DEMO_API
 from tradebot.portfolio_equity_guard import EquityRiskError, PortfolioEquityGuard, RuntimeEquityGuard
 
 
 class MockDemoWallet:
-    base_url = "https://cdn-ind.testnet.deltaex.org"
+    base_url = DEMO_API
     def __init__(self, equity, at):
         self.equity, self.at = equity, at
     def wallet_balances(self):
