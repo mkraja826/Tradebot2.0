@@ -27,6 +27,10 @@ MAX_RESPONSE_BYTES = 16_384
 class IndependentSpotError(ValueError):
     """Fixed diagnostic codes; no remote response bodies or URL errors."""
 
+    def __init__(self, code):
+        self.code = code
+        super().__init__(code)
+
 
 class _NoRedirects(request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
