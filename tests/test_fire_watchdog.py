@@ -5,10 +5,11 @@ from pathlib import Path
 import sqlite3
 import tempfile
 import unittest
+from unittest.mock import Mock, patch
 
 from tradebot.delta import DEMO_API
 from tradebot.fire_execution import FireTradeStore
-from tradebot.fire_watchdog import watchdog_tick
+from tradebot.fire_watchdog import watchdog_tick, main
 
 
 class Broker:
@@ -20,10 +21,10 @@ class Broker:
         self.orders = [
             {"id": 21, "product_id": 27, "product_symbol": "BTCUSD",
              "bracket_order": True, "state": "pending", "side": "sell",
-             "stop_order_type": "stop_loss_order", "stop_price": "62800"},
+             "stop_order_type": "stop_loss_order", "stop_price": "62800", "size": 1},
             {"id": 22, "product_id": 27, "product_symbol": "BTCUSD",
              "bracket_order": True, "state": "pending", "side": "sell",
-             "stop_order_type": "take_profit_order", "stop_price": "63750"},
+             "stop_order_type": "take_profit_order", "stop_price": "63750", "size": 1},
         ]
         self.closeouts = 0
 
@@ -111,6 +112,50 @@ class WatchdogTests(unittest.TestCase):
         self.assertEqual(self.store.latest()["status"], "flat_verified")
         self.assertFalse(self.store.latest()["protection_verified"])
 
+    def test_undersized_bracket_never_recovers_protected_status(self):
+        self.seed()
+        self.broker.orders[0]["size"] = "0"
+        outcome = watchdog_tick(self.broker, self.store, pause=lambda _: None)
+        self.assertEqual(outcome["status"], "emergency_flat_verified")
+        self.assertEqual(self.broker.size, 0)
+        self.assertEqual(self.broker.closeouts, 1)
+        self.assertEqual(self.store.latest()["status"], "flat_verified")
+        self.assertFalse(self.store.latest()["protection_verified"])
+
+    def test_duplicated_bracket_child_requires_emergency_flatness(self):
+        self.seed()
+        self.broker.orders.append(dict(self.broker.orders[1], id=23))
+        outcome = watchdog_tick(self.broker, self.store, pause=lambda _: None)
+        self.assertEqual(outcome["status"], "emergency_flat_verified")
+        self.assertEqual(self.broker.size, 0)
+        self.assertEqual(self.broker.closeouts, 1)
+        self.assertFalse(self.store.latest()["protection_verified"])
+
+    def test_extra_same_product_stop_triggers_watchdog_emergency_closeout(self):
+        self.seed()
+        self.broker.orders.append({
+            "id": 23, "product_id": 27, "product_symbol": "BTCUSD",
+            "bracket_order": True, "state": "pending", "side": "sell",
+            "stop_order_type": "stop_loss_order", "stop_price": "62700",
+            "size": 1,
+        })
+        outcome = watchdog_tick(self.broker, self.store, pause=lambda _: None)
+        self.assertEqual(outcome["status"], "emergency_flat_verified")
+        self.assertEqual(self.broker.size, 0)
+        self.assertEqual(self.broker.closeouts, 1)
+        self.assertFalse(self.store.latest()["protection_verified"])
+
+    def test_unrelated_same_product_pending_order_prevents_protected_recovery(self):
+        self.seed()
+        self.broker.orders.append({
+            "id": 23, "product_id": 27, "product_symbol": "BTCUSD",
+            "state": "pending", "side": "sell", "size": 1,
+        })
+        outcome = watchdog_tick(self.broker, self.store, pause=lambda _: None)
+        self.assertEqual(outcome["status"], "emergency_flat_verified")
+        self.assertEqual(self.broker.size, 0)
+        self.assertFalse(self.store.latest()["protection_verified"])
+
     def test_verified_bracket_exit_allows_immediate_next_manual_press(self):
         previous = self.seed()
         self.broker.size = 0
@@ -156,6 +201,21 @@ class WatchdogTests(unittest.TestCase):
         self.broker.base_url = "https://api.india.delta.exchange"
         with self.assertRaises(ValueError):
             watchdog_tick(self.broker, self.store)
+
+    def test_corrupt_equity_and_failed_telemetry_do_not_interrupt_protection_loop(self):
+        (self.root / "fire-equity-risk.sqlite").write_bytes(b"broken equity db")
+        fake_market = Mock(symbol="BTCUSD")
+        with (patch("tradebot.fire_watchdog.FireMarket", return_value=fake_market),
+              patch("tradebot.fire_watchdog.watchdog_tick", return_value={"status":"protected_active"}) as tick,
+              patch("tradebot.fire_watchdog.MonitorStore", side_effect=OSError("private failure")),
+              patch("tradebot.fire_watchdog.time.sleep", side_effect=KeyboardInterrupt),
+              patch("builtins.print") as output):
+            with self.assertRaises(KeyboardInterrupt):
+                main(["--database",str(self.store.path)])
+        self.assertEqual(tick.call_count, 2)
+        self.assertIn("protection_loop_continues", str(output.call_args_list))
+        self.assertNotIn("private failure", str(output.call_args_list))
+        self.assertEqual((self.root / "fire-equity-risk.sqlite").read_bytes(), b"broken equity db")
 
 
 if __name__ == "__main__":

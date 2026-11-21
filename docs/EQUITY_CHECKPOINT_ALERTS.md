@@ -1,5 +1,10 @@
 # UTC equity opening checkpoint health alerts
 
+**Milestone 1 candidate:** collection moves to a dedicated read-only service.
+Deploy the collector together with the watchdog changes; see
+[recovery, validation and rollback instructions](EQUITY_CHECKPOINT_RECOVERY.md).
+The description below records the original PR #2 behavior.
+
 The independent watchdog collects a **signed Delta DEMO wallet equity**
 observation roughly once per minute. The FIRE portfolio equity guard requires
 an *actual observation in the first 5 minutes* of both the current UTC day and
@@ -13,6 +18,14 @@ New diagnostic `checkpoint_health` reads the existing SQLite evidence in
 - `checkpoint_missed`: one or both opening windows expired without evidence
 - `evidence_stale`: no recent observation, even if opening anchors are valid
 - `evidence_unavailable`: risk ledger absent, corrupt or unreadable
+
+A legacy opening observation without its original authenticated-wallet
+transport receipt is **not** considered verified. The daily/weekly field
+reports `unverified_receipt`; a recent latest observation without that
+receipt also uses `observation_status=unverified_receipt`. Both block
+`checkpoint_prerequisites_met` and publish the sanitized
+`equity_read_receipt_invalid` alert. This is distinct from a missing
+opening window and does not cause data repair, backfill or trade execution.
 
 The read-only dashboard `GET /api/risk/checkpoints` exposes the status,
 UTC opening-window boundaries, freshness, `blocking_conditions` and

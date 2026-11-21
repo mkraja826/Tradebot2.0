@@ -1,0 +1,344 @@
+"""Bounded, read-only historic bracket-field audit for one Delta India DEMO FIRE.
+
+Compares saved FIRE order IDs with authenticated broker GET-by-ID responses.
+This is NOT proof that the brackets were simultaneously active, that the
+trade exited safely, that the account is flat, or authority to place orders.
+"""
+import argparse
+import hashlib
+from decimal import Decimal, InvalidOperation
+import json
+import os
+from pathlib import Path
+import re
+
+from tradebot.delta import DeltaDemo, DEMO_API
+from tradebot.fire_broker_inventory import _read_local_snapshot, BrokerInventoryError
+from tradebot.fire_inventory import MARKET_DATABASES, _receipt, InventoryEvidenceError
+
+VALID_FIRE_ID = re.compile(r"[0-9a-f]{32}\Z")
+
+
+class BracketEvidenceError(ValueError):
+    """Only fixed failure codes, never private exchange payloads."""
+
+
+def _id(raw):
+    if type(raw) is int and raw > 0:
+        return str(raw)
+    if (type(raw) is str and 0 < len(raw) <= 32 and raw.isascii()
+            and raw.isdecimal() and int(raw) > 0):
+        return str(int(raw))
+    raise BracketEvidenceError("invalid_local_broker_order_id")
+
+
+def _size(raw):
+    if type(raw) not in (str, int):
+        raise BracketEvidenceError("invalid_contract_size")
+    try:
+        value = Decimal(str(raw))
+    except (ValueError, InvalidOperation):
+        raise BracketEvidenceError("invalid_contract_size") from None
+    if not value.is_finite() or value != value.to_integral_value() or value <= 0:
+        raise BracketEvidenceError("invalid_contract_size")
+    return value
+
+
+def _remaining_size(raw):
+    """Validate a nonnegative integer unfilled size, including decimal zeros."""
+    if type(raw) not in (str, int):
+        raise BracketEvidenceError("invalid_remaining_contract_size")
+    try:
+        value = Decimal(str(raw))
+    except (ValueError, InvalidOperation):
+        raise BracketEvidenceError("invalid_remaining_contract_size") from None
+    if (not value.is_finite() or value < 0
+            or value != value.to_integral_value()):
+        raise BracketEvidenceError("invalid_remaining_contract_size")
+    return value
+
+
+def _price(raw):
+    if type(raw) not in (str, int):
+        raise BracketEvidenceError("invalid_plan_price")
+    try:
+        value = Decimal(str(raw))
+    except (ValueError, InvalidOperation):
+        raise BracketEvidenceError("invalid_plan_price") from None
+    if not value.is_finite() or value <= 0:
+        raise BracketEvidenceError("invalid_plan_price")
+    return value
+
+
+def _source_snapshot(data_dir, symbol):
+    """Fingerprint the *entire* bounded local FIRE ledger and file identity.
+
+    The two read-only transactions cannot prevent concurrent writes, but a
+    changed source must never produce a clean historical broker comparison.
+    This ordinary SHA-256 is a local change detector, not a broker signature.
+    """
+    root = Path(data_dir)
+    if not root.is_dir() or root.is_symlink():
+        raise BracketEvidenceError("untrusted_local_data_directory")
+    name = MARKET_DATABASES[symbol]
+    try:
+        identity, sections = _read_local_snapshot(root / name, name)
+        encoded = json.dumps([identity, sections], sort_keys=True,
+                             separators=(",", ":"), allow_nan=False)
+        fingerprint = hashlib.sha256(encoded.encode("utf-8")).digest()
+    except (BrokerInventoryError, OSError, ValueError, TypeError):
+        raise BracketEvidenceError("local_fire_ledger_unverified") from None
+    requests, _, entries = sections
+    return requests, entries, fingerprint
+
+
+def _saved(data_dir, symbol, fire_id):
+    if (type(symbol) is not str or symbol not in MARKET_DATABASES
+            or type(fire_id) is not str
+            or VALID_FIRE_ID.fullmatch(fire_id) is None):
+        raise BracketEvidenceError("invalid_fire_identity")
+    requests, entries, fingerprint = _source_snapshot(data_dir, symbol)
+    found = [row for row in requests if row[0] == fire_id]
+    if len(found) != 1:
+        raise BracketEvidenceError("fire_receipt_not_found")
+    try:
+        data = json.loads(found[0][4])
+    except (TypeError, ValueError):
+        raise BracketEvidenceError("invalid_fire_receipt") from None
+    if not isinstance(data, dict) or data.get("orders_submitted") is not True:
+        raise BracketEvidenceError("no_submitted_order_receipt")
+    # A diagnostic scoped to historic completed orders must not present an
+    # unresolved FIRE (or a forged terminal status) as a clean retrospective
+    # match. Reuse the local inventory's strict receipt chronology and status
+    # classification rather than accepting order identifiers alone.
+    try:
+        local = _receipt(symbol, found[0])
+    except InventoryEvidenceError:
+        raise BracketEvidenceError("invalid_local_fire_receipt_chronology_or_identity") from None
+    if local["category"] != "locally_reported_flat":
+        raise BracketEvidenceError("historical_fire_receipt_not_locally_flat")
+    if data.get("direction") not in ("LONG", "SHORT"):
+        raise BracketEvidenceError("invalid_saved_direction")
+    size = _size(data.get("contracts"))
+    ids = data.get("exit_order_ids")
+    if not isinstance(ids, dict) or set(ids) != {"stop_loss_order", "take_profit_order"}:
+        raise BracketEvidenceError("missing_saved_protective_ids")
+    parent = _id(data.get("broker_order_id"))
+    stop, target = _id(ids["stop_loss_order"]), _id(ids["take_profit_order"])
+    if len({parent, stop, target}) != 3:
+        raise BracketEvidenceError("duplicate_saved_order_identity")
+    # The entry-writer saves a separate immutable-intent candidate before
+    # order submission. An entry present for this FIRE must agree with the
+    # parent receipt on ALL known original plan fields, not just order ID.
+    # Otherwise a later rewritten parent plan could appear to match a
+    # broker order despite contradicting its own durable entry intent.
+    matching_entries = [row for row in entries if row[0] == fire_id]
+    if len(matching_entries) > 1:
+        raise BracketEvidenceError("conflicting_local_entry_receipts")
+    entry_product_id = None
+    if matching_entries:
+        entry_row = matching_entries[0]
+        try:
+            entry = json.loads(entry_row[2])
+        except (TypeError, ValueError):
+            raise BracketEvidenceError("invalid_local_entry_receipt") from None
+        if not isinstance(entry, dict):
+            raise BracketEvidenceError("invalid_local_entry_receipt")
+        if _id(entry.get("order_id")) != parent:
+            raise BracketEvidenceError("local_parent_order_identity_conflict")
+        if (entry.get("press") != fire_id or entry.get("symbol") != symbol
+                or type(entry.get("product_id")) is not int
+                or entry["product_id"] <= 0):
+            raise BracketEvidenceError("local_entry_market_identity_conflict")
+        entry_product_id = entry["product_id"]
+        if (entry_row[1] != "filled" or entry.get("status") != entry_row[1]):
+            raise BracketEvidenceError("local_entry_filled_state_unverified")
+        plan = entry.get("plan")
+        if not isinstance(plan, dict):
+            raise BracketEvidenceError("local_entry_trade_plan_unverified")
+        try:
+            consistent_plan = (
+                plan.get("direction") == data["direction"]
+                and _size(plan.get("contracts")) == size
+                and _price(plan.get("stop_loss")) == _price(data.get("stop_loss"))
+                and _price(plan.get("take_profit")) == _price(data.get("take_profit"))
+            )
+        except BracketEvidenceError:
+            raise BracketEvidenceError("local_entry_trade_plan_unverified") from None
+        if not consistent_plan:
+            raise BracketEvidenceError("local_entry_trade_plan_conflict")
+    return ({
+        "direction": data["direction"], "contracts": size,
+        "stop_loss": _price(data.get("stop_loss")),
+        "take_profit": _price(data.get("take_profit")),
+        "parent": parent, "stop_loss_order": stop, "take_profit_order": target,
+        "entry_product_id": entry_product_id,
+    }, fingerprint)
+
+
+def _fetch_order(exchange, order_id):
+    # Strict decimal ID: never interpolate an untrusted path fragment.
+    reply = exchange._request("GET", "/v2/orders/" + order_id, auth=True)
+    if not isinstance(reply, dict) or not isinstance(reply.get("result"), dict):
+        raise BracketEvidenceError("broker_order_lookup_unverified")
+    row = reply["result"]
+    try:
+        actual_id = _id(row.get("id"))
+    except BracketEvidenceError:
+        raise BracketEvidenceError("broker_order_identity_unverified") from None
+    if actual_id != order_id:
+        raise BracketEvidenceError("broker_order_identity_mismatch")
+    return row
+
+
+def audit_bracket_fields(exchange, data_dir, *, symbol, fire_id):
+    """Never trades; a matching historical response is not a protection proof."""
+    result = {
+        "environment": "delta-india-demo", "mode": "read_only",
+        "symbol": symbol if type(symbol) is str and symbol in MARKET_DATABASES else None,
+        "trade_authorized": False, "safe_to_enable_fire": False,
+        "is_historical_protection_proven": False,
+        "is_current_account_flatness_proven": False,
+        "order_mutations": False, "ai_calls": 0,
+        "authenticated_order_gets": 0,
+        "local_evidence_stable_across_order_reads": False,
+        "observation_status": "review_required", "blockers": [],
+    }
+    problems = result["blockers"]
+    if getattr(exchange, "base_url", None) != DEMO_API or \
+            getattr(exchange, "allow_orders", None) is not False:
+        problems.append("read_only_delta_demo_client_required")
+        return result
+    try:
+        saved, source_fingerprint = _saved(data_dir, symbol, fire_id)
+    except BracketEvidenceError as exc:
+        problems.append(str(exc))
+        return result
+    try:
+        product_reply = exchange._request("GET", "/v2/products/" + symbol, auth=True)
+        product = product_reply.get("result") if isinstance(product_reply, dict) else None
+        pid = product.get("id") if isinstance(product, dict) else None
+        if (not isinstance(product, dict) or product.get("symbol") != symbol
+                or product.get("contract_type") != "perpetual_futures"
+                or type(pid) is not int or pid <= 0):
+            raise BracketEvidenceError("broker_product_unverified")
+        if (saved["entry_product_id"] is not None
+                and saved["entry_product_id"] != pid):
+            raise BracketEvidenceError("local_entry_broker_product_identity_conflict")
+        parent = _fetch_order(exchange, saved["parent"])
+        result["authenticated_order_gets"] += 1
+        stop = _fetch_order(exchange, saved["stop_loss_order"])
+        result["authenticated_order_gets"] += 1
+        target = _fetch_order(exchange, saved["take_profit_order"])
+        result["authenticated_order_gets"] += 1
+    except BracketEvidenceError as exc:
+        problems.append(str(exc))
+        return result
+    except Exception:
+        # Never surface request errors (possibly containing API credentials).
+        problems.append("authenticated_broker_order_read_unavailable")
+        return result
+
+    # Re-read the same original ledger after all four broker GETs. Without
+    # this check, a changed FIRE receipt (or a replaced SQLite database)
+    # could be compared against obsolete values yet reported as matching.
+    try:
+        _, _, after_fingerprint = _source_snapshot(data_dir, symbol)
+    except BracketEvidenceError:
+        problems.append("local_fire_evidence_changed_or_unavailable")
+    else:
+        if source_fingerprint != after_fingerprint:
+            problems.append("local_fire_evidence_changed_during_broker_reads")
+        else:
+            result["local_evidence_stable_across_order_reads"] = True
+
+    entry_side = "buy" if saved["direction"] == "LONG" else "sell"
+    exit_side = "sell" if entry_side == "buy" else "buy"
+    if (parent.get("product_id") != pid or parent.get("client_order_id") != fire_id
+            or parent.get("side") != entry_side or parent.get("state") != "closed"):
+        problems.append("broker_parent_fill_identity_or_state_unverified")
+    # Delta's order state 'closed' represents a fully filled order. The
+    # remaining quantity is independently checked without accepting a bool,
+    # negative, nonfinite or fractional value; decimal zero encodings are OK.
+    try:
+        if _remaining_size(parent.get("unfilled_size")) != 0:
+            problems.append("broker_parent_unfilled_quantity_not_zero")
+    except BracketEvidenceError:
+        problems.append("broker_parent_unfilled_quantity_unverified")
+    # FIRE submits a market *entry*, never a reduce-only position close.
+    # Nominal order size and closed state alone do not establish that intent.
+    if (parent.get("order_type") != "market_order"
+            or parent.get("reduce_only") is not False):
+        problems.append("broker_parent_entry_instruction_unverified")
+    try:
+        if (_price(parent.get("bracket_stop_loss_price")) != saved["stop_loss"]
+                or _price(parent.get("bracket_take_profit_price")) != saved["take_profit"]):
+            problems.append("broker_parent_bracket_echo_mismatch")
+    except BracketEvidenceError:
+        problems.append("broker_parent_bracket_echo_unverified")
+    try:
+        if _size(parent.get("size")) != saved["contracts"]:
+            problems.append("broker_parent_contract_size_mismatch")
+    except BracketEvidenceError:
+        problems.append("broker_parent_contract_size_unverified")
+
+    child_states = {}
+    for kind, order in (("stop_loss_order", stop), ("take_profit_order", target)):
+        child_states[kind] = order.get("state") if order.get("state") in \
+            ("open", "pending", "closed", "cancelled") else "unknown"
+        expected_price = saved["stop_loss" if kind == "stop_loss_order"
+                               else "take_profit"]
+        if (order.get("product_id") != pid or order.get("side") != exit_side
+                or order.get("stop_order_type") != kind
+                or order.get("bracket_order") is not True):
+            problems.append(kind + "_broker_identity_unverified")
+        try:
+            if _size(order.get("size")) != saved["contracts"]:
+                problems.append(kind + "_broker_contract_size_mismatch")
+        except BracketEvidenceError:
+            problems.append(kind + "_broker_contract_size_unverified")
+        try:
+            if _price(order.get("stop_price")) != expected_price:
+                problems.append(kind + "_broker_trigger_mismatch")
+        except BracketEvidenceError:
+            problems.append(kind + "_broker_trigger_unverified")
+        # FIRE requests mark-price triggered position protection. A child
+        # using last-traded-price or spot-price would change liquidation-risk
+        # behavior even with identical SL/TP price and quantity fields.
+        if order.get("stop_trigger_method") != "mark_price":
+            problems.append(kind + "_broker_trigger_method_unverified")
+        # A protective child must not reopen or increase an exposure after
+        # its parent position has already closed. Bracket provenance by
+        # itself is not a safe substitute for confirmed reduce-only behavior.
+        if order.get("reduce_only") is not True:
+            problems.append(kind + "_broker_reduce_only_unverified")
+        if child_states[kind] == "unknown":
+            problems.append(kind + "_broker_state_unverified")
+    result["historical_child_states"] = child_states
+    result["blockers"] = sorted(set(problems))
+    if not result["blockers"]:
+        result["observation_status"] = "historical_order_fields_match_not_protection_proof"
+    return result
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--data-dir", default=os.getenv("TRADEBOT_DASHBOARD_DATA", "data"))
+    parser.add_argument("--symbol", required=True, choices=sorted(MARKET_DATABASES))
+    parser.add_argument("--fire-id", required=True)
+    args = parser.parse_args(argv)
+    exchange = DeltaDemo(
+        api_key=os.getenv("DELTA_DEMO_API_KEY", ""),
+        api_secret=os.getenv("DELTA_DEMO_API_SECRET", ""),
+        allow_orders=False,
+    )
+    report = audit_bracket_fields(
+        exchange, args.data_dir, symbol=args.symbol, fire_id=args.fire_id
+    )
+    print(json.dumps(report, sort_keys=True, separators=(",", ":")))
+    return 0 if report["observation_status"] == \
+        "historical_order_fields_match_not_protection_proof" else 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -4,6 +4,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import Mock
+from equity_fixtures import receipt_for
 from tradebot.portfolio_equity_guard import PortfolioEquityGuard, EquityRiskError
 
 
@@ -20,8 +21,8 @@ class PortfolioEquityGuardTests(unittest.TestCase):
 
     def seed(self):
         # Nov 16, 2026 is Monday. Opening readings must be actual observations.
-        self.guard.observe("1000", at=dt(16,0,1))
-        self.guard.observe("1000", at=dt(19,0,1))
+        for when in (dt(16,0,1), dt(19,0,1)):
+            self.guard.observe_verified_read("1000", receipt_for("1000", when), now=when)
 
     def test_missing_opening_checkpoint_blocks_new_entries(self):
         result = self.guard.observe("1000",at=dt(19,14,0))
@@ -31,7 +32,8 @@ class PortfolioEquityGuardTests(unittest.TestCase):
     def test_verified_openings_and_restart_allow_provisional_admission(self):
         self.seed()
         new = PortfolioEquityGuard(self.path)
-        report = new.require_approved("998",at=dt(19,14,0))
+        at = dt(19,14,0)
+        report = new.require_approved("998", receipt=receipt_for("998", at), now=at)
         self.assertTrue(report["approved"])
         self.assertEqual(report["daily_open_equity_usd"],"1000")
         self.assertEqual(report["weekly_open_equity_usd"],"1000")
@@ -40,13 +42,15 @@ class PortfolioEquityGuardTests(unittest.TestCase):
     def test_daily_two_percent_limit_blocks(self):
         self.seed()
         with self.assertRaisesRegex(EquityRiskError,"loss_limit_daily"):
-            self.guard.require_approved("979",at=dt(19,14))
+            at = dt(19,14)
+            self.guard.require_approved("979", receipt=receipt_for("979", at), now=at)
 
     def test_weekly_five_percent_limit_blocks_without_daily_loss(self):
-        self.guard.observe("1100",at=dt(16,0,1))
-        self.guard.observe("1000",at=dt(19,0,1))
+        for value, at in (("1100", dt(16,0,1)), ("1000", dt(19,0,1))):
+            self.guard.observe_verified_read(value, receipt_for(value, at), now=at)
         with self.assertRaisesRegex(EquityRiskError,"loss_limit_weekly"):
-            self.guard.require_approved("999",at=dt(19,14))
+            at = dt(19,14)
+            self.guard.require_approved("999", receipt=receipt_for("999", at), now=at)
 
     def test_eight_percent_peak_drawdown_blocks_even_if_weekly_open_is_low(self):
         self.guard.observe("1320",at=dt(16,0,1))
@@ -62,6 +66,15 @@ class PortfolioEquityGuardTests(unittest.TestCase):
             self.guard.observe("500",at=dt(16,0,1))
         self.assertEqual(PortfolioEquityGuard(self.path).latest_observed_us(),
                          int(dt(16,0,1).timestamp()*1000000))
+
+    def test_legacy_unsigned_equity_approval_helper_cannot_issue_permission(self):
+        self.seed()
+        before = self.guard.latest_observed_us()
+        with self.assertRaisesRegex(EquityRiskError, "verified_equity_receipt_required"):
+            self.guard.require_approved("999", at=dt(19,14))
+        with self.assertRaisesRegex(EquityRiskError, "verified_equity_receipt_required"):
+            self.guard.require_approved("999")
+        self.assertEqual(self.guard.latest_observed_us(), before)
 
     def test_signed_demo_only(self):
         fake=Mock(base_url="https://api.india.delta.exchange")

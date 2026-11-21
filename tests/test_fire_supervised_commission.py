@@ -2,6 +2,8 @@
 import tempfile
 from pathlib import Path
 import unittest
+from unittest.mock import patch
+from concurrent.futures import ThreadPoolExecutor
 
 from tradebot.fire_supervised_commission import (
     APPROVAL_PHRASE, ATTEMPT_FILE, run_operator_commission,
@@ -14,6 +16,7 @@ def gate():
         "broker_flat_two_samples": True,
         "both_fire_endpoints_disabled": True,
         "watchdog_and_dashboard_active": True,
+        "equity_prerequisites_verified": True,
         "trade_authorized": False,
         "broker_liquidation_price_verified": False,
         "blockers": [],
@@ -79,6 +82,14 @@ class CommissioningOperatorTests(unittest.TestCase):
         self.assertFalse((self.root / ATTEMPT_FILE).exists())
         self.assertNotIn("controller", self.calls)
 
+    def test_missing_equity_approval_does_not_consume_attempt(self):
+        result = gate()
+        result.pop("equity_prerequisites_verified")
+        with self.assertRaises(ValueError):
+            self.run_trial(execute=True, approval=APPROVAL_PHRASE, result=result)
+        self.assertFalse((self.root / ATTEMPT_FILE).exists())
+        self.assertNotIn("controller", self.calls)
+
     def test_existing_one_shot_blocks_second_execution(self):
         first = self.run_trial(execute=True, approval=APPROVAL_PHRASE)
         self.assertTrue(first["request_accepted"])
@@ -95,6 +106,45 @@ class CommissioningOperatorTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             run_operator_commission(self.root / "nope",
                                     broker_factory=self.broker)
+        self.assertEqual(self.calls, [])
+
+    def test_consumed_or_broken_symlink_lock_never_offers_approval(self):
+        marker = self.root / ATTEMPT_FILE
+        marker.symlink_to(self.root / "absent")
+        report = self.run_trial()
+        self.assertTrue(report["one_shot_consumed"])
+        self.assertFalse(report["can_request_operator_approval"])
+        self.assertIn("gold_commissioning_lock_consumed", report["blockers"])
+        with self.assertRaises(FileExistsError):
+            self.run_trial(execute=True, approval=APPROVAL_PHRASE)
+        self.assertTrue(marker.is_symlink())
+        self.assertNotIn("controller", self.calls)
+
+    def test_directory_sync_failure_preserves_lock_without_starting_controller(self):
+        with patch("tradebot.fire_supervised_commission.os.fsync", side_effect=[None, OSError("disk failure")]):
+            with self.assertRaises(OSError):
+                self.run_trial(execute=True, approval=APPROVAL_PHRASE)
+        self.assertTrue((self.root / ATTEMPT_FILE).exists())
+        self.assertNotIn("controller", self.calls)
+        with self.assertRaises(FileExistsError):
+            self.run_trial(execute=True, approval=APPROVAL_PHRASE)
+
+    def test_concurrent_operator_calls_cannot_both_consume_one_shot(self):
+        def invoke(_):
+            try:
+                self.run_trial(execute=True, approval=APPROVAL_PHRASE)
+                return 1
+            except FileExistsError:
+                return 0
+        with ThreadPoolExecutor(max_workers=4) as workers:
+            self.assertEqual(sum(workers.map(invoke, range(8))), 1)
+        self.assertEqual(self.calls.count("start"), 1)
+
+    def test_symlinked_data_directory_rejected_before_broker_or_controller(self):
+        alias = self.root / "alias"
+        alias.symlink_to(self.root, target_is_directory=True)
+        with self.assertRaises(ValueError):
+            run_operator_commission(alias, broker_factory=self.broker)
         self.assertEqual(self.calls, [])
 
 

@@ -8,19 +8,21 @@ import argparse
 import json
 import os
 import subprocess
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 from urllib.request import urlopen
 
 from tradebot.delta import DEMO_API, DeltaDemo
 from tradebot.fire_release_gate import verify_staging_samples
+from tradebot.commissioning_equity import signed_equity_readiness
 
 
 def _services_active():
     return all(
         subprocess.run(
-            ["systemctl", "is-active", "--quiet", name], check=False
+            ["systemctl", "is-active", "--quiet", name], check=False, timeout=3
         ).returncode == 0
-        for name in ("tradebot2-dashboard", "tradebot2-fire-watchdog")
+        for name in ("tradebot2-dashboard", "tradebot2-fire-watchdog",
+                     "tradebot2-equity-monitor")
     )
 
 
@@ -37,10 +39,11 @@ def commissioning_preflight(
     exchange, data_dir, *, pause=None,
     check_services=_services_active,
     check_fire=_fire_disabled,
+    check_equity=signed_equity_readiness,
 ):
     """Fail shut if any signed exchange or local process evidence is missing.
 
-    check_services/check_fire are injectable for offline unit tests only.
+    check_services/check_fire/check_equity are injectable for offline tests only.
     All broker access is through a client that prohibits mutations.
     """
     blockers = []
@@ -57,9 +60,11 @@ def commissioning_preflight(
         "watchdog_and_dashboard_active": False,
         "both_fire_endpoints_disabled": False,
         "broker_liquidation_price_verified": False,
+        "equity_prerequisites_verified": False,
+        "equity_assessment": None,
         "blockers": blockers,
     }
-    if getattr(exchange, "base_url", None) != DEMO_API or exchange.allow_orders is not False:
+    if getattr(exchange, "base_url", None) != DEMO_API or getattr(exchange, "allow_orders", None) is not False:
         blockers.append("read_only_delta_demo_client_required")
         return report
 
@@ -98,27 +103,62 @@ def commissioning_preflight(
     try:
         product = exchange._request("GET", "/v2/products/XAUTUSD")["result"]
         ticker = exchange.ticker("XAUTUSD")
-        assert isinstance(product, dict) and isinstance(ticker, dict)
-        assert product.get("symbol") == ticker.get("symbol") == "XAUTUSD"
-        assert product.get("contract_type") == "perpetual_futures"
+        if (not isinstance(product, dict) or not isinstance(ticker, dict)
+                or product.get("symbol") != "XAUTUSD" or ticker.get("symbol") != "XAUTUSD"
+                or product.get("contract_type") != "perpetual_futures"):
+            raise ValueError("Gold product identity not verified")
         product_id = product.get("id")
-        assert type(product_id) is int and product_id > 0
-        assert product_id == ticker.get("product_id")
+        if (type(product_id) is not int or product_id <= 0
+                or type(ticker.get("product_id")) is not int or product_id != ticker["product_id"]):
+            raise ValueError("Gold product identity mismatch")
         tick = Decimal(str(product.get("tick_size")))
         tick_ticker = Decimal(str(ticker.get("tick_size")))
-        assert tick.is_finite() and tick > 0 and tick == tick_ticker
+        if not tick.is_finite() or tick <= 0 or tick != tick_ticker:
+            raise ValueError("Gold tick size not verified")
         leverage_result = exchange._request(
             "GET", f"/v2/products/{product_id}/orders/leverage", auth=True
         )["result"]
-        assert isinstance(leverage_result, dict)
-        assert str(leverage_result.get("product_id")) == str(product_id)
+        if not isinstance(leverage_result, dict) or str(leverage_result.get("product_id")) != str(product_id):
+            raise ValueError("Gold leverage identity not verified")
         lev = Decimal(str(leverage_result.get("leverage")))
-        assert lev.is_finite() and lev == lev.to_integral_value() and 1 <= lev <= 20
+        if not lev.is_finite() or lev != lev.to_integral_value() or not 1 <= lev <= 20:
+            raise ValueError("Gold leverage outside safety policy")
         report["gold_tick_size"] = str(tick)
         report["gold_leverage"] = int(lev)
     except Exception:
         # Never leak exchange response content or credentials into public logs.
         blockers.append("gold_product_or_leverage_not_verified")
+
+    try:
+        assessment = check_equity(exchange, data_dir)
+        report["equity_assessment"] = assessment
+        report["equity_prerequisites_verified"] = (
+            isinstance(assessment, dict) and assessment.get("approved") is True
+            and assessment.get("trade_authorized") is False)
+        if not report["equity_prerequisites_verified"]:
+            blockers.append("equity_risk_prerequisites_not_passed")
+    except Exception:
+        blockers.append("signed_equity_prerequisites_unavailable")
+
+    # A service can stop, or an endpoint can become enabled, while signed
+    # broker/equity reads are in progress. Recheck immediately before declaring
+    # readiness; a previously healthy result must not authorize a stale gate.
+    if report["watchdog_and_dashboard_active"]:
+        try:
+            if check_services() is not True:
+                report["watchdog_and_dashboard_active"] = False
+                blockers.append("service_health_changed_during_preflight")
+        except Exception:
+            report["watchdog_and_dashboard_active"] = False
+            blockers.append("service_health_recheck_unavailable")
+    if report["both_fire_endpoints_disabled"]:
+        try:
+            if check_fire() is not True:
+                report["both_fire_endpoints_disabled"] = False
+                blockers.append("fire_execution_state_changed_during_preflight")
+        except Exception:
+            report["both_fire_endpoints_disabled"] = False
+            blockers.append("fire_execution_recheck_unavailable")
 
     report["ready_for_supervised_operator_review"] = not blockers
     return report

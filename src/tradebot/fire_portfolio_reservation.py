@@ -59,6 +59,30 @@ class FirePortfolioReservation:
         # A missing owner-specific receipt is NOT safe to release.
         return ("", "empty") if press is None and row is None else row
 
+    @staticmethod
+    def _has_other_unresolved(path, *, allowed_press=None):
+        """Search all historical receipts, not just the latest visible one.
+
+        Read-only against each per-market ledger. Missing, replaced or corrupt
+        stores fail closed; the active request is the only permitted exception
+        and is checked separately in claim().
+        """
+        path = Path(path)
+        if not path.is_file() or path.is_symlink():
+            return True
+        terminal = tuple(sorted(TERMINAL_SAFE))
+        placeholders = ",".join("?" for _ in terminal)
+        sql = ("SELECT 1 FROM fire_requests WHERE status NOT IN ("
+               + placeholders + ")")
+        params = terminal
+        if allowed_press is not None:
+            sql += " AND press!=?"
+            params += (allowed_press,)
+        with closing(sqlite3.connect(path.as_uri() + "?mode=ro",
+                                     timeout=10, uri=True)) as db:
+            db.execute("PRAGMA query_only=ON")
+            return db.execute(sql + " LIMIT 1", params).fetchone() is not None
+
     def claim(self, symbol, press, current_store):
         if symbol not in MARKETS:
             raise PortfolioReservationError("Unrecognized FIRE market")
@@ -96,6 +120,13 @@ class FirePortfolioReservation:
                     continue
                 if latest[1] not in TERMINAL_SAFE | {"empty"} and not (
                     name == symbol and latest[0] == press
+                ):
+                    return False
+                # A later terminal receipt can mask an older pending, exposed
+                # or unknown-status FIRE. Inspect every row and only exempt
+                # the exact current request, which is validated below.
+                if self._has_other_unresolved(
+                    store_path, allowed_press=press if name == symbol else None
                 ):
                     return False
             request = self._receipt(current_store, press=press)

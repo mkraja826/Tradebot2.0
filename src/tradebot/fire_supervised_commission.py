@@ -32,10 +32,11 @@ def run_operator_commission(
     """Return a sanitized summary. Only execute=True AND typed confirmation
     can create the one-shot marker and call the existing FIRE controller.
     """
-    root = Path(data_dir).resolve()
+    root = Path(data_dir)
     # Never create or migrate the receipt folder during a read-only check.
     if not root.is_dir() or root.is_symlink():
         raise ValueError("Existing trusted receipt directory required")
+    root = root.resolve()
     broker = broker_factory(
         api_key=os.getenv("DELTA_DEMO_API_KEY", ""),
         api_secret=os.getenv("DELTA_DEMO_API_SECRET", ""),
@@ -49,23 +50,30 @@ def run_operator_commission(
         and report.get("broker_flat_two_samples") is True
         and report.get("both_fire_endpoints_disabled") is True
         and report.get("watchdog_and_dashboard_active") is True
+        and report.get("equity_prerequisites_verified") is True
         and report.get("trade_authorized") is False
         and report.get("broker_liquidation_price_verified") is False
         and report.get("blockers") == []
     )
+    marker = root / ATTEMPT_FILE
+    # lexists also treats a broken symlink as a consumed, untrusted marker.
+    consumed = os.path.lexists(marker)
     if not execute:
         return dict(
-            mode="read_only", can_request_operator_approval=allowed,
+            mode="read_only", can_request_operator_approval=allowed and not consumed,
+            one_shot_consumed=consumed,
             trade_authorized=False, order_submitted=False,
-            blockers=list(report.get("blockers") or []),
+            blockers=list(report.get("blockers") or []) +
+                (["gold_commissioning_lock_consumed"] if consumed else []),
         )
+    if consumed:
+        raise FileExistsError("Gold commissioning lock already consumed")
     if not allowed:
         raise ValueError("Commission readiness gate not passed")
     if approval != APPROVAL_PHRASE:
         raise ValueError("Exact operator confirmation not supplied")
     # Exclusive, permanent marker: never automatically repeat after a
     # crash, disconnect, timeout, ambiguity or a GPT-6 WAIT.
-    marker = root / ATTEMPT_FILE
     flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0)
     fd = os.open(marker, flags, 0o600)
     try:
@@ -73,6 +81,13 @@ def run_operator_commission(
         os.fsync(fd)
     finally:
         os.close(fd)
+    # Persist the directory entry before any model/controller work. If this
+    # fails, keep the consumed marker and do not attempt execution.
+    directory = os.open(root, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
     # Use the exact production FIRE receipt DB watched independently.
     # Running inline keeps the CLI attached through the first protection check.
     desk = controller_factory(
