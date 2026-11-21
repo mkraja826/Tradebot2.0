@@ -19,6 +19,8 @@ IMMUTABLE_TRIGGERS = frozenset((
     "reject_equity_evidence_replace",
     "reject_equity_receipt_replace",
     "reject_equity_receipt_update",
+    "reject_equity_receipt_delete",
+    "reject_equity_evidence_delete",
 ))
 
 
