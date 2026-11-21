@@ -295,6 +295,48 @@ class FireExecutionTests(unittest.TestCase):
         self.assertEqual(self.calls, [])
         self.assertEqual(self.exchange.requests, [])
 
+    def test_missing_order_pagination_metadata_never_proves_flat(self):
+        original = self.exchange._request
+        def missing_meta(method, path, **kwargs):
+            if method == "GET" and path == "/v2/orders":
+                return {"result": []}
+            return original(method, path, **kwargs)
+        self.exchange._request = missing_meta
+        fire = self.make()
+        fire.start()
+        self.assertEqual(fire.snapshot()["reason_code"],
+                         "account_exposure_preflight_failed")
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.exchange.requests, [])
+
+    def test_global_position_continuation_never_proves_flat(self):
+        original = self.exchange._request
+        def partial(method, path, **kwargs):
+            if method == "GET" and path == "/v2/positions/margined":
+                return {"result": [], "meta": {"after": "next-page"}}
+            return original(method, path, **kwargs)
+        self.exchange._request = partial
+        fire = self.make()
+        fire.start()
+        self.assertEqual(fire.snapshot()["reason_code"],
+                         "account_exposure_preflight_failed")
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.exchange.requests, [])
+
+    def test_realtime_position_continuation_never_proves_flat(self):
+        original = self.exchange._request
+        def partial(method, path, **kwargs):
+            if method == "GET" and path == "/v2/positions":
+                return {"result": [], "meta": {"after": "next-page"}}
+            return original(method, path, **kwargs)
+        self.exchange._request = partial
+        fire = self.make()
+        fire.start()
+        self.assertEqual(fire.snapshot()["reason_code"],
+                         "account_exposure_preflight_failed")
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.exchange.requests, [])
+
     def test_portfolio_change_after_model_blocks_order(self):
         original = self.exchange._request
         count = [0]
