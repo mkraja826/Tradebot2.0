@@ -1,5 +1,6 @@
 """No-network, no-order tests for local FIRE receipt inventory coverage."""
 from datetime import datetime, timezone
+import hashlib
 import json
 from pathlib import Path
 import sqlite3
@@ -55,9 +56,13 @@ class FireInventoryTests(unittest.TestCase):
                        (fireid, UTC, UTC, status, json.dumps(result)))
 
     def add_report(self, key, body=None, *, marker="1"):
+        # Reproduce the production ledger's digest of the exact stored JSON.
+        # The legacy marker argument identifies fixture scenarios only.
+        payload = json.dumps(body or {"is_net_realized_pnl": False})
+        digest = hashlib.sha256((key + "\n" + payload).encode()).hexdigest()
         with sqlite3.connect(self.root / "fire-reconciliation.sqlite") as db:
             db.execute("INSERT INTO reports VALUES (?,?,?)",
-                       (marker, key, json.dumps(body or {"is_net_realized_pnl": False})))
+                       (digest, key, payload))
 
     def test_empty_local_inventory_never_claims_account_profit_or_flatness(self):
         report = read_inventory(self.root)
@@ -246,6 +251,32 @@ class FireInventoryTests(unittest.TestCase):
         with self.assertRaises(InventoryEvidenceError):
             read_inventory(self.root)
         self.assertEqual(path.read_bytes(), before)
+
+    def test_changed_report_body_is_not_accepted_as_verified(self):
+        self.add_receipt("BTCUSD", BTC, "flat_verified", True)
+        self.add_report("BTCUSD:" + BTC, verified_report("btc"))
+        with sqlite3.connect(self.root / "fire-reconciliation.sqlite") as db:
+            db.execute("UPDATE reports SET body=?",
+                       (json.dumps(verified_report("btc", net="500")),))
+        with self.assertRaisesRegex(InventoryEvidenceError,
+                                    "reconciliation_report_digest_mismatch"):
+            read_inventory(self.root)
+
+    def test_report_reassigned_to_another_fire_id_is_rejected(self):
+        self.add_report("BTCUSD:" + BTC, verified_report("btc"))
+        with sqlite3.connect(self.root / "fire-reconciliation.sqlite") as db:
+            db.execute("UPDATE reports SET trade_key=?", ("BTCUSD:" + GOLD,))
+        with self.assertRaisesRegex(InventoryEvidenceError,
+                                    "reconciliation_report_digest_mismatch"):
+            read_inventory(self.root)
+
+    def test_invalid_report_digest_is_rejected(self):
+        self.add_report("BTCUSD:" + BTC, verified_report("btc"))
+        with sqlite3.connect(self.root / "fire-reconciliation.sqlite") as db:
+            db.execute("UPDATE reports SET digest=?", ("f" * 64,))
+        with self.assertRaisesRegex(InventoryEvidenceError,
+                                    "reconciliation_report_digest_mismatch"):
+            read_inventory(self.root)
 
     def test_invalid_financial_ownership_fails_closed(self):
         self.add_report("OTHER:" + BTC)
