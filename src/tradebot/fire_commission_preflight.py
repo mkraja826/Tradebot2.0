@@ -140,6 +140,26 @@ def commissioning_preflight(
     except Exception:
         blockers.append("signed_equity_prerequisites_unavailable")
 
+    # A service can stop, or an endpoint can become enabled, while signed
+    # broker/equity reads are in progress. Recheck immediately before declaring
+    # readiness; a previously healthy result must not authorize a stale gate.
+    if report["watchdog_and_dashboard_active"]:
+        try:
+            if check_services() is not True:
+                report["watchdog_and_dashboard_active"] = False
+                blockers.append("service_health_changed_during_preflight")
+        except Exception:
+            report["watchdog_and_dashboard_active"] = False
+            blockers.append("service_health_recheck_unavailable")
+    if report["both_fire_endpoints_disabled"]:
+        try:
+            if check_fire() is not True:
+                report["both_fire_endpoints_disabled"] = False
+                blockers.append("fire_execution_state_changed_during_preflight")
+        except Exception:
+            report["both_fire_endpoints_disabled"] = False
+            blockers.append("fire_execution_recheck_unavailable")
+
     report["ready_for_supervised_operator_review"] = not blockers
     return report
 
