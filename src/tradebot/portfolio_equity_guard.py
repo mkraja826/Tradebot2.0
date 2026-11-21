@@ -13,7 +13,7 @@ import sqlite3
 import json
 import stat
 
-from tradebot.equity_receipt import validate_receipt
+from tradebot.equity_receipt import EquityReadError, validate_receipt
 
 DAY = 86400
 ANCHOR_WINDOW = 300  # a signed snapshot from the first 5m of a UTC period
@@ -59,6 +59,69 @@ def validated_watermark(db):
     if not seen:
         raise EquityRiskError("equity_history_or_watermark_missing")
     return peak
+
+
+def require_receipt_backed_history(db, instant):
+    """Fail closed before trade admission using one locked ledger snapshot.
+
+    Historical opening and latest observations must carry their original
+    authenticated-HTTPS transport receipts. This is not broker-signed proof.
+    Missing first-of-period observations may be supplied by the *incoming*
+    verified read only within their real UTC opening window. Existing
+    receiptless opening records can never be silently superseded.
+    """
+    current_us = stamp(instant)
+    utc = instant.astimezone(timezone.utc)
+    today = utc.replace(hour=0, minute=0, second=0, microsecond=0)
+    week = today - timedelta(days=today.weekday())
+    latest = db.execute(
+        "SELECT observed_us,equity_usd FROM equity_evidence "
+        "ORDER BY observed_us DESC LIMIT 1").fetchone()
+    checked = set()
+
+    def validate_historical(row):
+        observed_us, equity = row
+        if type(observed_us) is not int or observed_us <= 0:
+            raise EquityRiskError("equity_checkpoint_receipt_unverified")
+        if observed_us in checked:
+            return
+        saved = db.execute(
+            "SELECT receipt FROM equity_read_receipts WHERE observed_us=?",
+            (observed_us,)).fetchone()
+        if saved is None or type(saved[0]) is not str:
+            raise EquityRiskError("equity_checkpoint_receipt_missing")
+        try:
+            receipt = json.loads(saved[0])
+            if (not isinstance(receipt, dict) or
+                    type(receipt.get("received_us")) is not int or
+                    receipt["received_us"] != observed_us):
+                raise EquityRiskError("equity_checkpoint_receipt_unverified")
+            origin = datetime.fromtimestamp(observed_us / 1_000_000, timezone.utc)
+            verified = validate_receipt(equity, receipt, now=origin)
+            if stamp(verified) != observed_us:
+                raise EquityRiskError("equity_checkpoint_receipt_unverified")
+        except (ValueError, TypeError, OverflowError) as exc:
+            if isinstance(exc, EquityRiskError):
+                raise
+            raise EquityRiskError("equity_checkpoint_receipt_unverified") from None
+        checked.add(observed_us)
+
+    for period in (today, week):
+        period_us = stamp(period)
+        row = db.execute(
+            "SELECT observed_us,equity_usd FROM equity_evidence "
+            "WHERE observed_us>=? AND observed_us<=? AND observed_us<=? "
+            "ORDER BY observed_us LIMIT 1",
+            (period_us, period_us + ANCHOR_WINDOW * 1_000_000, current_us)
+        ).fetchone()
+        if row is not None:
+            validate_historical(row)
+        elif not period_us <= current_us <= period_us + ANCHOR_WINDOW * 1_000_000:
+            raise EquityRiskError("missing_opening_equity_checkpoint")
+    if latest is not None:
+        if type(latest[0]) is not int or latest[0] > current_us:
+            raise EquityRiskError("equity_observation_out_of_order_or_clock_reversed")
+        validate_historical(latest)
 
 
 class PortfolioEquityGuard:
@@ -186,7 +249,7 @@ class PortfolioEquityGuard:
             raise EquityRiskError("Unverified opening equity origin")
         return amount(rows[0]) if rows else None
 
-    def observe(self, equity, *, at=None, receipt=None):
+    def observe(self, equity, *, at=None, receipt=None, enforce_receipt_history=False):
         """Persist exactly one signed-wallet derived equity reading.
 
         Internal persistence helper, also used by offline fixtures. Runtime
@@ -214,6 +277,10 @@ class PortfolioEquityGuard:
                 raise EquityRiskError("equity_watermark_missing")
             if latest is not None:
                 validated_watermark(db)
+            if enforce_receipt_history:
+                if receipt is None:
+                    raise EquityRiskError("equity_read_receipt_missing")
+                require_receipt_backed_history(db, instant)
             old = db.execute("SELECT equity_usd FROM equity_evidence WHERE observed_us=?",
                              (current_us,)).fetchone()
             if old is not None:
@@ -286,7 +353,12 @@ class PortfolioEquityGuard:
         return self.observe(equity, at=instant, receipt=receipt)
 
     def require_verified_read(self, equity, receipt, *, now=None):
-        report = self.observe_verified_read(equity, receipt, now=now)
+        # Admission checks historical receipts under the same write lock as
+        # the fresh observation. The collector uses observe_verified_read and
+        # can still record diagnostics when legacy history is incomplete.
+        instant = validate_receipt(equity, receipt, now=now)
+        report = self.observe(equity, at=instant, receipt=receipt,
+                              enforce_receipt_history=True)
         if not report["approved"]:
             raise EquityRiskError(report["reason"])
         return report
@@ -300,11 +372,11 @@ class PortfolioEquityGuard:
         return self.observe_verified_read(balances["meta"]["net_equity"],
                                           balances.get("equity_read_receipt"))
 
-    def require_approved(self, equity, *, at=None):
-        report = self.observe(equity, at=at)
-        if not report["approved"]:
-            raise EquityRiskError(report["reason"])
-        return report
+    def require_approved(self, equity, *, receipt=None, now=None, at=None):
+        """Legacy name cannot approve a bare, caller-asserted equity amount."""
+        if at is not None or receipt is None:
+            raise EquityRiskError("verified_equity_receipt_required")
+        return self.require_verified_read(equity, receipt, now=now)
 
 
 class RuntimeEquityGuard:
