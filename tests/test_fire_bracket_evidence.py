@@ -346,6 +346,15 @@ class BracketEvidenceTests(unittest.TestCase):
     def test_product_identity_conflict_is_review_required(self):
         self.exchange.product["id"] = 82
         result = self.run_check()
+        self.assertIn("local_entry_broker_product_identity_conflict",
+                      result["blockers"])
+        self.assertEqual(result["authenticated_order_gets"], 0)
+        self.assertFalse(result["trade_authorized"])
+
+    def test_missing_legacy_entry_cannot_hide_parent_product_mismatch(self):
+        self.write_saved(entry_id=None)
+        self.exchange.product["id"] = 82
+        result = self.run_check()
         self.assertIn("broker_parent_fill_identity_or_state_unverified",
                       result["blockers"])
         self.assertFalse(result["trade_authorized"])
