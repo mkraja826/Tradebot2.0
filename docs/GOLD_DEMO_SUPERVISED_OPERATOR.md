@@ -52,10 +52,19 @@ lock or authorizes a new attempt. An accepted planning review still requires a
 separately approved recovery procedure and explicit execution authorization.
 
 During the supervised trial, the operator must independently confirm
-the exact broker entry fill ID, two active protective child orders, selected
-leverage, isolated account margin mode and real liquidation price at least
-1% of entry beyond SL. Missing/unsafe evidence invokes fail-closed
-emergency closeout, and ambiguous closeout requires human attention.
+the exact broker entry fill ID, **exactly one matching active stop-loss
+and one matching take-profit child order**, each with the correct broker
+product, opposite side, expected trigger and **full filled contract size**,
+selected leverage, isolated account margin mode and real liquidation price
+at least 1% of entry beyond SL. Missing or malformed child `size`, a
+short/oversized protective child, duplicate matching child, or missing child
+identity cannot establish a protected trade; the existing bounded check
+takes the emergency closeout path. Delta bracket sizes may automatically
+adjust with the net position; verify the actual DEMO API response semantics
+with the operator before any execution. This check is intentionally
+fail-closed and could exit a legitimate position if broker metadata is
+absent. Missing/unsafe evidence invokes fail-closed emergency closeout,
+and ambiguous closeout requires human attention.
 Do not assume a terminal local FIRE receipt proves a broker fill cause.
 
 Live trading and autonomous FIRE remain prohibited at this stage.
