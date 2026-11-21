@@ -118,6 +118,36 @@ class CommissioningEquityTests(unittest.TestCase):
         self.exchange.wallet_balances.assert_called_once_with()
         self.assertEqual(self.snapshot(), before)
 
+    def test_equity_ledger_replacement_after_health_is_rejected_before_wallet(self):
+        self.seed()
+        original_health = risk_health
+        preserved = self.root / "preserved-original.sqlite"
+        def replaced_health(path, *, at=None):
+            result = original_health(path, at=at)
+            self.path.rename(preserved)
+            self.path.write_bytes(b"untrusted replacement")
+            return result
+        with patch("tradebot.commissioning_equity.risk_health",
+                   side_effect=replaced_health):
+            with self.assertRaisesRegex(EquityRiskError, "equity_ledger_replaced"):
+                self.check()
+        self.exchange.wallet_balances.assert_not_called()
+        self.assertEqual(self.path.read_bytes(), b"untrusted replacement")
+
+    def test_equity_ledger_replacement_during_wallet_read_is_rejected(self):
+        self.seed()
+        preserved = self.root / "preserved-original.sqlite"
+        wallet = self.exchange.wallet_balances.return_value
+        def replaced_wallet():
+            self.path.rename(preserved)
+            self.path.write_bytes(b"untrusted replacement")
+            return wallet
+        self.exchange.wallet_balances.side_effect = replaced_wallet
+        with self.assertRaisesRegex(EquityRiskError, "equity_ledger_replaced"):
+            self.check()
+        self.exchange.wallet_balances.assert_called_once_with()
+        self.assertEqual(self.path.read_bytes(), b"untrusted replacement")
+
     def test_missing_openings_never_use_the_later_wallet(self):
         self.guard.observe("1000", at=self.now)
         before = self.snapshot()
