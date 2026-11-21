@@ -5,6 +5,7 @@ This is NOT proof that the brackets were simultaneously active, that the
 trade exited safely, that the account is flat, or authority to place orders.
 """
 import argparse
+import hashlib
 from decimal import Decimal, InvalidOperation
 import json
 import os
@@ -55,18 +56,33 @@ def _price(raw):
     return value
 
 
-def _saved(data_dir, symbol, fire_id):
-    if symbol not in MARKET_DATABASES or not isinstance(fire_id, str) or \
-            VALID_FIRE_ID.fullmatch(fire_id) is None:
-        raise BracketEvidenceError("invalid_fire_identity")
+def _source_snapshot(data_dir, symbol):
+    """Fingerprint the *entire* bounded local FIRE ledger and file identity.
+
+    The two read-only transactions cannot prevent concurrent writes, but a
+    changed source must never produce a clean historical broker comparison.
+    This ordinary SHA-256 is a local change detector, not a broker signature.
+    """
     root = Path(data_dir)
     if not root.is_dir() or root.is_symlink():
         raise BracketEvidenceError("untrusted_local_data_directory")
     name = MARKET_DATABASES[symbol]
     try:
-        _, (requests, _, entries) = _read_local_snapshot(root / name, name)
-    except (BrokerInventoryError, OSError, ValueError):
+        identity, sections = _read_local_snapshot(root / name, name)
+        encoded = json.dumps([identity, sections], sort_keys=True,
+                             separators=(",", ":"), allow_nan=False)
+        fingerprint = hashlib.sha256(encoded.encode("utf-8")).digest()
+    except (BrokerInventoryError, OSError, ValueError, TypeError):
         raise BracketEvidenceError("local_fire_ledger_unverified") from None
+    requests, _, entries = sections
+    return requests, entries, fingerprint
+
+
+def _saved(data_dir, symbol, fire_id):
+    if symbol not in MARKET_DATABASES or not isinstance(fire_id, str) or \
+            VALID_FIRE_ID.fullmatch(fire_id) is None:
+        raise BracketEvidenceError("invalid_fire_identity")
+    requests, entries, fingerprint = _source_snapshot(data_dir, symbol)
     found = [row for row in requests if row[0] == fire_id]
     if len(found) != 1:
         raise BracketEvidenceError("fire_receipt_not_found")
@@ -99,12 +115,12 @@ def _saved(data_dir, symbol, fire_id):
             raise BracketEvidenceError("invalid_local_entry_receipt") from None
         if entry_parent != parent:
             raise BracketEvidenceError("local_parent_order_identity_conflict")
-    return {
+    return ({
         "direction": data["direction"], "contracts": size,
         "stop_loss": _price(data.get("stop_loss")),
         "take_profit": _price(data.get("take_profit")),
         "parent": parent, "stop_loss_order": stop, "take_profit_order": target,
-    }
+    }, fingerprint)
 
 
 def _fetch_order(exchange, order_id):
@@ -132,6 +148,7 @@ def audit_bracket_fields(exchange, data_dir, *, symbol, fire_id):
         "is_current_account_flatness_proven": False,
         "order_mutations": False, "ai_calls": 0,
         "authenticated_order_gets": 0,
+        "local_evidence_stable_across_order_reads": False,
         "observation_status": "review_required", "blockers": [],
     }
     problems = result["blockers"]
@@ -140,7 +157,7 @@ def audit_bracket_fields(exchange, data_dir, *, symbol, fire_id):
         problems.append("read_only_delta_demo_client_required")
         return result
     try:
-        saved = _saved(data_dir, symbol, fire_id)
+        saved, source_fingerprint = _saved(data_dir, symbol, fire_id)
     except BracketEvidenceError as exc:
         problems.append(str(exc))
         return result
@@ -165,6 +182,19 @@ def audit_bracket_fields(exchange, data_dir, *, symbol, fire_id):
         # Never surface request errors (possibly containing API credentials).
         problems.append("authenticated_broker_order_read_unavailable")
         return result
+
+    # Re-read the same original ledger after all four broker GETs. Without
+    # this check, a changed FIRE receipt (or a replaced SQLite database)
+    # could be compared against obsolete values yet reported as matching.
+    try:
+        _, _, after_fingerprint = _source_snapshot(data_dir, symbol)
+    except BracketEvidenceError:
+        problems.append("local_fire_evidence_changed_or_unavailable")
+    else:
+        if source_fingerprint != after_fingerprint:
+            problems.append("local_fire_evidence_changed_during_broker_reads")
+        else:
+            result["local_evidence_stable_across_order_reads"] = True
 
     entry_side = "buy" if saved["direction"] == "LONG" else "sell"
     exit_side = "sell" if entry_side == "buy" else "buy"
