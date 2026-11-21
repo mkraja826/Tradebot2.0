@@ -96,10 +96,17 @@ def verify_liquidation_clearance(exchange, product_id, plan, position):
     expected = plan["contracts"] if plan["direction"] == "LONG" else -plan["contracts"]
     if _positive_or_zero(position.get("size")) != expected:
         raise LeverageRejected("Position size changed before liquidation check")
-    rows = exchange._request(
+    reply = exchange._request(
         "GET", "/v2/positions/margined",
         params={"product_ids": str(product_id)}, auth=True
-    )["result"]
+    )
+    if not isinstance(reply, dict):
+        raise LeverageRejected("Invalid margin-aware position response")
+    meta = reply.get("meta")
+    if meta is not None and (
+            not isinstance(meta, dict) or meta.get("after") not in (None, "")):
+        raise LeverageRejected("Incomplete margin-aware liquidation evidence")
+    rows = reply.get("result")
     if not isinstance(rows, list):
         raise LeverageRejected("Invalid margin-aware position list")
     matches = [row for row in rows if isinstance(row, dict) and
