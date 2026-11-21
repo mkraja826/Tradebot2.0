@@ -9,6 +9,7 @@ import argparse
 from collections import Counter, defaultdict
 from contextlib import closing
 from datetime import datetime
+import hashlib
 import json
 from pathlib import Path
 import re
@@ -120,11 +121,19 @@ def _financial_reviews(rows):
     reconciliation snapshots, never a current authenticated broker state.
     """
     grouped = defaultdict(list)
-    for key, body in rows:
+    for digest, key, body in rows:
         if (not isinstance(key, str) or key.count(":") != 1
                 or key.split(":")[0] not in MARKET_DATABASES
                 or not re.fullmatch("[a-f0-9]{32}", key.split(":")[1])):
             raise InventoryEvidenceError("invalid_reconciliation_ownership")
+        # The append-only writer hashes the exact serialized body with its
+        # ownership key. This detects corrupted/replaced local report rows,
+        # but is not a broker signature or protection from a malicious writer
+        # who can replace both a body and its ordinary SHA-256 digest.
+        if (not isinstance(body, str) or not isinstance(digest, str)
+                or not re.fullmatch(r"[0-9a-f]{64}", digest)
+                or hashlib.sha256((key + "\n" + body).encode("utf-8")).hexdigest() != digest):
+            raise InventoryEvidenceError("reconciliation_report_digest_mismatch")
         try:
             record = json.loads(body)
         except (TypeError, ValueError):
@@ -200,7 +209,7 @@ def read_inventory(data_dir, *, limit=100):
         }
 
     report_rows = _read_rows(root / RECONCILIATION_DATABASE,
-                             "SELECT trade_key,body FROM reports")
+                             "SELECT digest,trade_key,body FROM reports")
     known_keys = {r["symbol"] + ":" + r["fire_id"] for r in receipts}
     if report_rows is None:
         missing.append(RECONCILIATION_DATABASE)
