@@ -21,7 +21,8 @@ def _services_active():
         subprocess.run(
             ["systemctl", "is-active", "--quiet", name], check=False, timeout=3
         ).returncode == 0
-        for name in ("tradebot2-dashboard", "tradebot2-fire-watchdog")
+        for name in ("tradebot2-dashboard", "tradebot2-fire-watchdog",
+                     "tradebot2-equity-monitor")
     )
 
 
