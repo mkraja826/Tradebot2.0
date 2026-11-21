@@ -19,6 +19,14 @@ New diagnostic `checkpoint_health` reads the existing SQLite evidence in
 - `evidence_stale`: no recent observation, even if opening anchors are valid
 - `evidence_unavailable`: risk ledger absent, corrupt or unreadable
 
+A legacy opening observation without its original authenticated-wallet
+transport receipt is **not** considered verified. The daily/weekly field
+reports `unverified_receipt`; a recent latest observation without that
+receipt also uses `observation_status=unverified_receipt`. Both block
+`checkpoint_prerequisites_met` and publish the sanitized
+`equity_read_receipt_invalid` alert. This is distinct from a missing
+opening window and does not cause data repair, backfill or trade execution.
+
 The read-only dashboard `GET /api/risk/checkpoints` exposes the status,
 UTC opening-window boundaries, freshness, `blocking_conditions` and
 `alert_codes`, but no API credentials or wallet balances.
