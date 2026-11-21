@@ -7,6 +7,7 @@ The Delta margined endpoint can lag; filtered real-time BTC/Gold positions
 are inspected independently. A zero snapshot does not prove ongoing flatness.
 """
 import argparse
+import hashlib
 from collections import Counter
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
@@ -14,10 +15,15 @@ import json
 import math
 import os
 from pathlib import Path
+import sqlite3
 import time
 
 from tradebot.delta import DeltaDemo, DEMO_API
-from tradebot.fire_inventory import read_inventory, InventoryEvidenceError
+from tradebot.fire_inventory import (
+    read_inventory, InventoryEvidenceError, MARKET_DATABASES,
+    RECONCILIATION_DATABASE, _identity, _read_rows,
+)
+from tradebot.demo_upgrade_preflight import _receipt_states
 
 SYMBOLS = ("BTCUSD", "XAUTUSD")
 SAMPLE_INTERVAL_SECONDS = 11
@@ -162,6 +168,65 @@ def _sample(exchange):
     }
 
 
+def _local_evidence_state(data_dir):
+    """Fingerprint actual local rows and verify durable entry intent.
+
+    An inventory summary of counts alone cannot detect a changed receipt
+    payload or entry state while signed broker reads are in progress.
+    Fingerprints remain internal: never expose raw DB contents or hashes.
+    """
+    root = Path(data_dir)
+    if not root.is_dir() or root.is_symlink():
+        raise BrokerInventoryError("local_data_directory_untrusted")
+    evidence = hashlib.sha256()
+    unresolved = 0
+    try:
+        names = [*MARKET_DATABASES.values(), RECONCILIATION_DATABASE]
+        for name in names:
+            path = root / name
+            identity = _identity(path)
+            if name == RECONCILIATION_DATABASE:
+                queries = ["SELECT digest,trade_key,body FROM reports ORDER BY digest"]
+            else:
+                queries = [
+                    "SELECT press,created_at,updated_at,status,result "
+                    "FROM fire_requests ORDER BY press",
+                    "SELECT name FROM sqlite_master WHERE type='table' "
+                    "AND name='fire_entries'",
+                ]
+            results = []
+            for query in queries:
+                rows = _read_rows(path, query)
+                if rows is None:
+                    raise BrokerInventoryError("local_ledger_missing")
+                results.append(rows)
+            if name != RECONCILIATION_DATABASE:
+                if results[1]:
+                    entries = _read_rows(
+                        path, "SELECT press,status,receipt FROM fire_entries ORDER BY press")
+                    if entries is None:
+                        raise BrokerInventoryError("local_ledger_missing")
+                    # A request recorded as no-order cannot also have a
+                    # durable broker entry, regardless of the entry status.
+                    statuses = {r[0]: r[3] for r in results[0]}
+                    if any(statuses.get(row[0]) == "rejected_no_order" for row in entries):
+                        raise BrokerInventoryError("no_order_receipt_has_durable_entry")
+                    results.append(entries)
+                symbol = next(symbol for symbol, filename
+                              in MARKET_DATABASES.items() if filename == name)
+                unresolved += _receipt_states(root, symbol)
+            if _identity(path) != identity:
+                raise BrokerInventoryError("local_ledger_changed_during_read")
+            encoded = json.dumps([name, identity, results], sort_keys=True,
+                                 separators=(",", ":"), allow_nan=False)
+            evidence.update(encoded.encode("utf-8"))
+        return evidence.digest(), unresolved
+    except BrokerInventoryError:
+        raise
+    except (InventoryEvidenceError, ValueError, TypeError, sqlite3.Error, OSError, StopIteration):
+        raise BrokerInventoryError("local_evidence_or_entry_states_unverified") from None
+
+
 def observe_broker_inventory(exchange, data_dir, *, pause=time.sleep,
                              monotonic=time.monotonic):
     """Return a bounded diagnostic. Failures are safely attributed and never green."""
@@ -187,12 +252,16 @@ def observe_broker_inventory(exchange, data_dir, *, pause=time.sleep,
         return report
     try:
         original = read_inventory(data_dir, limit=0)
+        original_fingerprint, unresolved_entries = _local_evidence_state(data_dir)
+        report["local_unresolved_entry_intents"] = unresolved_entries
+        if unresolved_entries:
+            blockers.append("unresolved_local_fire_entries")
         report["local_evidence_status"] = original["evidence_status"]
         report["local_receipts_total"] = original["total_local_receipts"]
         report["local_requires_broker_review_count"] = original["requires_broker_review_count"]
         if original["evidence_status"] != "inventory_complete_for_local_coverage_only":
             blockers.append("local_history_incomplete_or_ambiguous")
-    except (InventoryEvidenceError, OSError, ValueError):
+    except (InventoryEvidenceError, BrokerInventoryError, OSError, ValueError):
         blockers.append("local_history_unavailable")
         return report
 
@@ -251,9 +320,11 @@ def observe_broker_inventory(exchange, data_dir, *, pause=time.sleep,
 
     try:
         final = read_inventory(data_dir, limit=0)
-        if final != original:
+        final_fingerprint, final_unresolved_entries = _local_evidence_state(data_dir)
+        if final != original or final_fingerprint != original_fingerprint or \
+                final_unresolved_entries != unresolved_entries:
             blockers.append("local_evidence_changed_during_broker_observation")
-    except (InventoryEvidenceError, OSError, ValueError):
+    except (InventoryEvidenceError, BrokerInventoryError, OSError, ValueError):
         blockers.append("local_evidence_changed_or_unavailable")
     report["blockers"] = sorted(set(blockers))
     if not report["blockers"]:
