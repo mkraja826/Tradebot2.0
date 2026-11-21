@@ -38,6 +38,14 @@ class FireHttpTests(unittest.TestCase):
             snapshot_loader=snapshot, probe=gpt6,
             spawn=lambda run: run(), pause=lambda _: None,
         )
+        class ValidArchive:
+            def levels(self, symbol, at, price):
+                return {"periods": {
+                    key: {"quality_status": "provisionally_valid"}
+                    for key in ("day", "previous_day", "week", "previous_week",
+                                "month", "previous_month")
+                }}
+        trade.archive = ValidArchive()
         class State:
             fire_trade = trade
             chart_desk = ChartDesk(self.exchange, {"BTCUSD":trade.store})
