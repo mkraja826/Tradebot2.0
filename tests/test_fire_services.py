@@ -44,6 +44,68 @@ class FireServiceTests(unittest.TestCase):
         self.assertNotIn("sudo systemctl start", script)
         self.assertNotIn("sudo systemctl enable", script)
 
+    def test_equity_launcher_discards_inherited_old_python_package(self):
+        # A protected VM keys.env may be carrying a stale PYTHONPATH.
+        # Execute the launcher against a fake Python binary, not the broker.
+        # Both the preflight and final daemon exec must see deployed /src.
+        with tempfile.TemporaryDirectory(prefix="monitor-launch-") as tmp:
+            root = Path(tmp)
+            project = root / "project"
+            (project / "ops").mkdir(parents=True)
+            (project / ".venv/bin").mkdir(parents=True)
+            (project / "src/tradebot").mkdir(parents=True)
+            launcher = project / "ops/run_equity_monitor.sh"
+            launcher.write_text((ROOT / "ops/run_equity_monitor.sh").read_text())
+
+            home = root / "home"
+            keys = home / ".config/tradebot2/keys.env"
+            keys.parent.mkdir(parents=True)
+            keys.write_text(
+                "export PYTHONPATH=/tmp/old-stale-package\n"
+                "export PYTHONHOME=/tmp/old-stale-home\n"
+                "export PYTHONUSERBASE=/tmp/old-stale-userbase\n"
+            )
+            keys.chmod(0o600)
+
+            interpreter = project / ".venv/bin/python"
+            interpreter.write_text(
+                "#!/usr/bin/env bash\n"
+                'printf "%s|%s|%s|%s|%s\n" "$PYTHONPATH" '
+                '"${PYTHONHOME:-unset}" "${PYTHONUSERBASE:-unset}" '
+                '"${PYTHONSAFEPATH:-unset}" "$*" >> "$CAPTURE_FILE"\n'
+            )
+            interpreter.chmod(0o700)
+            log = root / "capture.txt"
+            proc = subprocess.run(
+                ["bash", str(launcher)],
+                env={**os.environ, "HOME": str(home), "CAPTURE_FILE": str(log),
+                     "PYTHONPATH": "/tmp/inherited-untrusted-path"},
+                capture_output=True, text=True, timeout=10,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            rows = [line.split("|", 4) for line in log.read_text().splitlines()]
+            self.assertEqual(len(rows), 2)
+            for path, pyhome, userbase, safepath, _ in rows:
+                self.assertEqual(path, str(project / "src"))
+                self.assertEqual(pyhome, "unset")
+                self.assertEqual(userbase, "unset")
+                self.assertEqual(safepath, "1")
+            self.assertIn("src/tradebot/equity_monitor.py", rows[0][-1])
+            self.assertIn("-m tradebot.equity_monitor", rows[1][-1])
+            self.assertIn("--data-dir", rows[1][-1])
+
+    def test_equity_monitor_guard_pins_source_and_order_safety(self):
+        launcher = (ROOT / "ops/run_equity_monitor.sh").read_text()
+        self.assertIn('export PYTHONPATH="$PROJECT/src"', launcher)
+        self.assertLess(launcher.index('source "$KEY_FILE"'),
+                        launcher.index('export PYTHONPATH="$PROJECT/src"'))
+        self.assertLess(launcher.index('import tradebot.equity_monitor as monitor'),
+                        launcher.index('exec "$PROJECT/.venv/bin/python" -m'))
+        self.assertIn('unset PYTHONHOME PYTHONUSERBASE TB_API_KEY', launcher)
+        self.assertIn('export ENABLE_DEMO_ORDERS=false', launcher)
+        self.assertIn('export TRADEBOT_FIRE_DEMO_EXECUTION=false', launcher)
+        self.assertIn('export TRADEBOT_GOLD_FIRE_DEMO_EXECUTION=false', launcher)
+
     def test_dashboard_launcher_discards_inherited_old_python_package(self):
         # A protected VM keys.env may be carrying a stale PYTHONPATH.
         # Execute the launcher against a fake Python binary, not the broker.
