@@ -13,7 +13,24 @@ set -a
 # shellcheck disable=SC1090
 source "$KEY_FILE"
 set +a
-unset TB_API_KEY
+
+# Reject inherited Python module redirection from VM key/environment files.
+# Use this checked-out collector, not any older installed tradebot package.
+unset PYTHONHOME PYTHONUSERBASE TB_API_KEY
+export PYTHONNOUSERSITE=1
+export PYTHONSAFEPATH=1
+export PYTHONPATH="$PROJECT/src"
+
+# Source identity check only; does not fetch wallet or touch SQLite.
+"$PROJECT/.venv/bin/python" - "$PROJECT/src/tradebot/equity_monitor.py" <<'PY'
+import sys
+from pathlib import Path
+import tradebot.equity_monitor as monitor
+
+if Path(monitor.__file__).resolve() != Path(sys.argv[1]).resolve():
+    raise SystemExit("REFUSED: equity collector source path does not match deployed project")
+PY
+
 export ENABLE_DEMO_ORDERS=false
 export TRADEBOT_FIRE_DEMO_EXECUTION=false
 export TRADEBOT_GOLD_FIRE_DEMO_EXECUTION=false
