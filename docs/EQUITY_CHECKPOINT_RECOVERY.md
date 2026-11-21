@@ -147,6 +147,17 @@ commissioned**. A VM cannot alert about its own complete loss of connectivity.
    unit only; it never starts or restarts services. Inspect the intended
    unit/targets, obtain independent approval, and preserve the original
    persistent database and service protection before staging it.
+   A separate `tradebot.equity_install_preflight` probe runs with the
+   original risk database opened **read-only**. It refuses unit staging
+   until the existing `equity_read_receipts` table and four evidence
+   immutability triggers exist and the original stored watermark matches
+   the preserved history. On the currently verified legacy VM it is
+   expected to exit **2** with `receipt_schema_migration_required`.
+   **Do not** migrate that original ledger merely to force a green result:
+   preserve a copy, rehearse the additive migration on it, obtain independent
+   approval and only then commission the original schema through the reviewed
+   deployment procedure. Neither schema readiness nor an installed collector
+   verifies historical receipts or authorizes a trade.
 6. After the release/protection procedure is approved and flatness verified,
    enable/start `tradebot2-equity-monitor.service` under supervision, then
    upgrade/restart the watchdog and dashboard using that procedure. **Do not
