@@ -344,11 +344,11 @@ class BrokerInventoryTests(unittest.TestCase):
         path = self.root / "fire-reconciliation.sqlite"
         with sqlite3.connect(path) as db:
             db.execute("INSERT INTO evidence VALUES (?,?,?)",
-                       ("fill", "fill-1", '{"size":"1"}'))
+                       ("fill", "fill-1", '{"id":"fill-1","size":"1"}'))
         def mutate():
             with sqlite3.connect(path) as db:
                 db.execute("UPDATE evidence SET body=? WHERE id=?",
-                           ('{"size":"2"}', "fill-1"))
+                           ('{"id":"fill-1","size":"2"}', "fill-1"))
         self.exchange.second_sample_hook = mutate
         report = self.check()
         self.assertEqual(report["samples_checked"], 2)
@@ -358,9 +358,21 @@ class BrokerInventoryTests(unittest.TestCase):
 
     def test_claim_owner_same_count_mutation_is_detected(self):
         path = self.root / "fire-reconciliation.sqlite"
+        trade_key = "BTCUSD:" + "a" * 32
+        body = json.dumps({"is_net_realized_pnl": True,
+                           "matched_fill_ids": ["fill-1"],
+                           "matched_posting_ids": ["posting-1"]})
+        digest = hashlib.sha256((trade_key + chr(10) + body).encode()).hexdigest()
         with sqlite3.connect(path) as db:
+            db.execute("INSERT INTO evidence VALUES (?,?,?)",
+                       ("fill", "fill-1", '{"id":"fill-1","size":"1"}'))
+            db.execute("INSERT INTO evidence VALUES (?,?,?)",
+                       ("posting", "posting-1", '{"id":"posting-1","amount":"1"}'))
             db.execute("INSERT INTO claims VALUES (?,?,?)",
-                       ("fill", "fill-1", "BTCUSD:" + "a"*32))
+                       ("fill", "fill-1", trade_key))
+            db.execute("INSERT INTO claims VALUES (?,?,?)",
+                       ("posting", "posting-1", trade_key))
+            db.execute("INSERT INTO reports VALUES (?,?,?)", (digest, trade_key, body))
         def mutate():
             with sqlite3.connect(path) as db:
                 db.execute("UPDATE claims SET trade_key=? WHERE id=?",
@@ -368,8 +380,7 @@ class BrokerInventoryTests(unittest.TestCase):
         self.exchange.second_sample_hook = mutate
         report = self.check()
         self.assertEqual(report["samples_checked"], 2)
-        self.assertIn("local_evidence_changed_during_broker_observation",
-                      report["blockers"])
+        self.assertIn("local_evidence_changed_or_unavailable", report["blockers"])
         self.assertFalse(report["trade_authorized"])
 
     def test_report_without_evidence_tables_blocks_broker_sweep(self):
@@ -388,6 +399,71 @@ class BrokerInventoryTests(unittest.TestCase):
         self.assertEqual(report["samples_checked"], 0)
         self.assertEqual(self.exchange.calls, [])
         self.assertFalse(report["trade_authorized"])
+
+    def test_dangling_claim_blocks_broker_access(self):
+        with sqlite3.connect(self.root / "fire-reconciliation.sqlite") as db:
+            db.execute("INSERT INTO claims VALUES (?,?,?)",
+                       ("fill", "not-stored", "BTCUSD:" + "a"*32))
+        report = self.check()
+        self.assertEqual(report["samples_checked"], 0)
+        self.assertIn("local_history_unavailable", report["blockers"])
+        self.assertEqual(self.exchange.calls, [])
+
+    def test_source_body_identifier_mismatch_blocks_broker_access(self):
+        with sqlite3.connect(self.root / "fire-reconciliation.sqlite") as db:
+            db.execute("INSERT INTO evidence VALUES (?,?,?)",
+                       ("fill", "fill-1", '{"id":"fill-other","size":"1"}'))
+        report = self.check()
+        self.assertEqual(report["samples_checked"], 0)
+        self.assertIn("local_history_unavailable", report["blockers"])
+        self.assertEqual(self.exchange.calls, [])
+
+    def test_verified_report_without_source_claim_is_not_trusted(self):
+        path = self.root / "fire-reconciliation.sqlite"
+        key = "BTCUSD:" + "a"*32
+        payload = json.dumps({"is_net_realized_pnl": True,
+                              "matched_fill_ids": ["fill-1"],
+                              "matched_posting_ids": ["posting-1"]})
+        digest = hashlib.sha256((key + chr(10) + payload).encode()).hexdigest()
+        with sqlite3.connect(path) as db:
+            db.execute("INSERT INTO reports VALUES (?,?,?)", (digest, key, payload))
+            db.execute("INSERT INTO evidence VALUES (?,?,?)",
+                       ("fill", "fill-1", '{"id":"fill-1"}'))
+            db.execute("INSERT INTO evidence VALUES (?,?,?)",
+                       ("posting", "posting-1", '{"id":"posting-1"}'))
+            db.execute("INSERT INTO claims VALUES (?,?,?)",
+                       ("fill", "fill-1", key))
+        report = self.check()
+        self.assertIn("local_history_unavailable", report["blockers"])
+        self.assertEqual(report["samples_checked"], 0)
+        self.assertEqual(self.exchange.calls, [])
+
+    def test_claimed_source_and_verified_report_are_structurally_linked(self):
+        path = self.root / "fire-reconciliation.sqlite"
+        key = "BTCUSD:" + "a"*32
+        payload = json.dumps({"is_net_realized_pnl": True,
+                              "matched_fill_ids": ["fill-1"],
+                              "matched_posting_ids": ["posting-1"]})
+        digest = hashlib.sha256((key + chr(10) + payload).encode()).hexdigest()
+        with sqlite3.connect(path) as db:
+            db.execute("INSERT INTO reports VALUES (?,?,?)", (digest, key, payload))
+            for kind, identifier in (("fill", "fill-1"), ("posting", "posting-1")):
+                db.execute("INSERT INTO evidence VALUES (?,?,?)",
+                           (kind, identifier, json.dumps({"id": identifier})))
+                db.execute("INSERT INTO claims VALUES (?,?,?)", (kind, identifier, key))
+        fingerprint, unresolved = _local_evidence_state(self.root)
+        self.assertEqual(unresolved, 0)
+        self.assertEqual(len(fingerprint), 32)
+
+    def test_orphan_claim_with_existing_evidence_is_rejected(self):
+        with sqlite3.connect(self.root / "fire-reconciliation.sqlite") as db:
+            db.execute("INSERT INTO evidence VALUES (?,?,?)",
+                       ("fill", "fill-1", '{"id":"fill-1"}'))
+            db.execute("INSERT INTO claims VALUES (?,?,?)",
+                       ("fill", "fill-1", "BTCUSD:" + "a"*32))
+        report = self.check()
+        self.assertEqual(report["samples_checked"], 0)
+        self.assertIn("local_history_unavailable", report["blockers"])
 
     def test_broker_snapshot_change_is_not_disguised_as_two_flat_checks(self):
         self.exchange.second_sample_hook = lambda: setattr(
