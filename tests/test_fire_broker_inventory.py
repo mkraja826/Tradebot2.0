@@ -29,6 +29,8 @@ class FakeBroker(DeltaDemo):
         self.calls = []
         self.margined = []
         self.live = {27: "0", 82: "0"}
+        self.realtime_meta = None
+        self.realtime_second_meta = None
         self.open_pages = [([], None)]
         self.cross_margin = False
         self.product_second_id = None
@@ -64,7 +66,10 @@ class FakeBroker(DeltaDemo):
                                "contract_type": "perpetual_futures"}}
         if path == "/v2/positions":
             pid = params.get("product_id")
-            return {"result": {"product_id": pid, "size": self.live.get(pid, "0")}}
+            meta = (self.realtime_second_meta if self.profile_reads == 2
+                    and self.realtime_second_meta is not None else self.realtime_meta)
+            return {"result": {"product_id": pid, "size": self.live.get(pid, "0")},
+                    "meta": meta}
         raise AssertionError("Unexpected broker read path: " + path)
 
 
@@ -228,6 +233,50 @@ class BrokerInventoryTests(unittest.TestCase):
         self.assertIn("fire_market_has_exposure", report["blockers"])
         self.assertIn("lagging_or_inconsistent_broker_positions", report["blockers"])
         self.assertFalse(report["trade_authorized"])
+
+    def test_realtime_position_cursor_does_not_hide_other_pages(self):
+        # The first returned product position says zero, but a continuation
+        # cursor means additional positions were never inspected.
+        self.exchange.realtime_meta = {"after": "page-two"}
+        report = self.check()
+        self.assertIn("realtime_positions_pagination_unverified",
+                      report["blockers"])
+        self.assertEqual(report["samples_checked"], 0)
+        self.assertNotEqual(report["observation_status"],
+                            "two_flat_snapshots_observed_not_trade_authority")
+        self.assertFalse(report["trade_authorized"])
+
+    def test_malformed_realtime_position_metadata_cannot_look_flat(self):
+        for malformed in ([], "after=next", {"after": 0}, {"after": False},
+                          {"after": ["next"]}):
+            with self.subTest(meta=malformed):
+                self.exchange.calls.clear()
+                self.exchange.realtime_meta = malformed
+                report = self.check()
+                self.assertIn("realtime_positions_pagination_unverified",
+                              report["blockers"])
+                self.assertFalse(report["safe_to_enable_fire"])
+                self.assertFalse(report["trade_authorized"])
+
+    def test_realtime_cursor_appearing_in_second_sample_blocks_green_result(self):
+        self.exchange.realtime_second_meta = {"after": "later"}
+        report = self.check()
+        self.assertEqual(report["samples_checked"], 1)
+        self.assertIn("realtime_positions_pagination_unverified",
+                      report["blockers"])
+        self.assertIn("two_broker_samples_unavailable", report["blockers"])
+        self.assertFalse(report["trade_authorized"])
+
+    def test_completed_realtime_position_metadata_is_accepted(self):
+        self.exchange.realtime_meta = {"after": None}
+        report = self.check()
+        self.assertEqual(report["observation_status"],
+                         "two_flat_snapshots_observed_not_trade_authority")
+        self.assertFalse(report["safe_to_enable_fire"])
+        self.exchange.realtime_meta = {"after": ""}
+        report = self.check()
+        self.assertEqual(report["observation_status"],
+                         "two_flat_snapshots_observed_not_trade_authority")
 
     def test_non_fire_product_pending_order_is_not_filtered_out(self):
         self.exchange.open_pages = [([{"id": "external", "product_id": 901}], None)]
