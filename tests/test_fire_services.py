@@ -61,18 +61,18 @@ class FireServiceTests(unittest.TestCase):
             keys = home / ".config/tradebot2/keys.env"
             keys.parent.mkdir(parents=True)
             keys.write_text(
-                "export PYTHONPATH=/tmp/old-stale-package\\n"
-                "export PYTHONHOME=/tmp/old-stale-home\\n"
-                "export PYTHONUSERBASE=/tmp/old-stale-userbase\\n"
+                "export PYTHONPATH=/tmp/old-stale-package\n"
+                "export PYTHONHOME=/tmp/old-stale-home\n"
+                "export PYTHONUSERBASE=/tmp/old-stale-userbase\n"
             )
             keys.chmod(0o600)
 
             interpreter = project / ".venv/bin/python"
             interpreter.write_text(
-                "#!/usr/bin/env bash\\n"
-                'printf "%s|%s|%s|%s|%s\\n" "$PYTHONPATH" '
+                "#!/usr/bin/env bash\n"
+                'printf "%s|%s|%s|%s|%s\n" "$PYTHONPATH" '
                 '"${PYTHONHOME:-unset}" "${PYTHONUSERBASE:-unset}" '
-                '"${PYTHONSAFEPATH:-unset}" "$*" >> "$CAPTURE_FILE"\\n'
+                '"${PYTHONSAFEPATH:-unset}" "$*" >> "$CAPTURE_FILE"\n'
             )
             interpreter.chmod(0o700)
             log = root / "capture.txt"
