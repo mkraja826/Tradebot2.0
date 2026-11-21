@@ -188,6 +188,15 @@ class MarketTest(unittest.TestCase):
             desk = FireDemoController(Path(tmp)/"fire-xaut.sqlite",enabled=True,symbol="XAUTUSD",
                                       exchange_factory=lambda:broker,snapshot_loader=snapshot,probe=decide,
                                       spawn=lambda job:job(),pause=lambda _:None)
+            # The mandatory history gate must be configured even in mocks.
+            class ValidArchive:
+                def levels(self, symbol, at, price):
+                    return {"periods": {
+                        key: {"quality_status": "provisionally_valid"}
+                        for key in ("day", "previous_day", "week", "previous_week",
+                                    "month", "previous_month")
+                    }}
+            desk.archive = ValidArchive()
             self.assertTrue(desk.start()[0])
             self.assertEqual(desk.snapshot()["status"],"protected_active")
             self.assertEqual(watchdog_tick(broker,desk.store)["status"], "protected_active")
