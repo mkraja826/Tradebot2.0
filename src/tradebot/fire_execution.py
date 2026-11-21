@@ -92,6 +92,9 @@ def _protective_ids(orders, *, product_id, plan):
     if not isinstance(orders, list):
         raise FireTradeError("Invalid open-order list")
     side = "sell" if plan["direction"] == "LONG" else "buy"
+    expected_size = plan["contracts"]
+    if type(expected_size) is not int or expected_size < 1:
+        raise FireTradeError("Invalid protective contract size")
     found = {}
     for order in orders:
         if not isinstance(order, dict):
@@ -101,25 +104,35 @@ def _protective_ids(orders, *, product_id, plan):
         category = order.get("stop_order_type")
         if category not in ("stop_loss_order", "take_profit_order"):
             continue
+        order_id = order.get("id")
+        id_valid = ((type(order_id) is int and order_id > 0)
+                    or (type(order_id) is str and bool(order_id.strip())))
         if (order.get("bracket_order") is not True or
                 order.get("side") != side or
                 order.get("state") not in ("open", "pending") or
-                not order.get("id")):
+                not id_valid):
             continue
         requested = plan["stop_loss"] if category == "stop_loss_order" else plan["take_profit"]
         try:
-            matched = _dec(order.get("stop_price")) == _dec(requested)
+            size = _dec(order.get("size"))
+            matched = (size == expected_size and
+                       _dec(order.get("stop_price")) == _dec(requested))
         except FireTradeError:
             matched = False
         if matched:
-            found.setdefault(category, set()).add(str(order["id"]))
+            # Two matching child orders are not interchangeable redundancy:
+            # either could close/over-close the same net position. With more
+            # than one matching order, verification is ambiguous and must
+            # trigger the existing emergency-protection path.
+            found.setdefault(category, []).append(str(order_id))
     return found
 
 
 def protective_orders_verified(orders, *, product_id, plan):
     found = _protective_ids(orders, product_id=product_id, plan=plan)
-    return bool(found.get("stop_loss_order") and found.get("take_profit_order")
-                and found["stop_loss_order"].isdisjoint(found["take_profit_order"]))
+    return bool(len(found.get("stop_loss_order", ())) == 1 and
+                len(found.get("take_profit_order", ())) == 1 and
+                found["stop_loss_order"][0] != found["take_profit_order"][0])
 
 
 
@@ -299,7 +312,7 @@ def _protection_check(exchange, receipt, *, pause=sleep, attempts=12):
                 raise FireTradeError("Exchange position does not match entry fill")
             if protective_orders_verified(orders, product_id=product_id, plan=plan):
                 found = _protective_ids(orders, product_id=product_id, plan=plan)
-                receipt["exit_order_ids"] = {kind: next(iter(ids)) for kind, ids in found.items()
+                receipt["exit_order_ids"] = {kind: ids[0] for kind, ids in found.items()
                                              if len(ids) == 1}
                 receipt["protected_at"] = _now().isoformat()
                 try:
