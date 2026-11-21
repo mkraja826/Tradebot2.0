@@ -252,15 +252,19 @@ def observe_broker_inventory(exchange, data_dir, *, pause=time.sleep,
         return report
     try:
         original = read_inventory(data_dir, limit=0)
-        original_fingerprint, unresolved_entries = _local_evidence_state(data_dir)
-        report["local_unresolved_entry_intents"] = unresolved_entries
-        if unresolved_entries:
-            blockers.append("unresolved_local_fire_entries")
         report["local_evidence_status"] = original["evidence_status"]
         report["local_receipts_total"] = original["total_local_receipts"]
         report["local_requires_broker_review_count"] = original["requires_broker_review_count"]
         if original["evidence_status"] != "inventory_complete_for_local_coverage_only":
             blockers.append("local_history_incomplete_or_ambiguous")
+        if original["missing_databases"]:
+            # Keep the precise previous diagnostic and never make broker
+            # requests when an expected local receipt ledger is absent.
+            return report
+        original_fingerprint, unresolved_entries = _local_evidence_state(data_dir)
+        report["local_unresolved_entry_intents"] = unresolved_entries
+        if unresolved_entries:
+            blockers.append("unresolved_local_fire_entries")
     except (InventoryEvidenceError, BrokerInventoryError, OSError, ValueError):
         blockers.append("local_history_unavailable")
         return report
