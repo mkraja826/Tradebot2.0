@@ -204,7 +204,9 @@ class WatchdogTests(unittest.TestCase):
             watchdog_tick(self.broker, self.store)
 
     def test_runtime_attestation_and_boot_heartbeat_before_broker_sweep(self):
-        class StopAfterInspect(Exception):
+        # watchdog.main deliberately catches normal exceptions per symbol.
+        # Use BaseException to stop the mocked loop without being swallowed.
+        class StopAfterInspect(BaseException):
             pass
 
         seen = []
