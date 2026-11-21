@@ -4,6 +4,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
+from equity_fixtures import receipt_for
 from tradebot.equity_checkpoint_health import checkpoint_health
 from tradebot.portfolio_equity_guard import PortfolioEquityGuard
 
@@ -20,6 +21,9 @@ class CheckpointHealthTests(unittest.TestCase):
 
     def check(self, at):
         return checkpoint_health(self.db, at=at)
+
+    def record(self, guard, equity, at):
+        return guard.observe_verified_read(equity, receipt_for(equity, at), now=at)
 
     def test_missing_ledger_does_not_create_db(self):
         result = self.check(utc(20, 12))
@@ -56,9 +60,9 @@ class CheckpointHealthTests(unittest.TestCase):
 
     def test_signed_openings_and_recent_observation_are_healthy(self):
         guard = PortfolioEquityGuard(self.db)
-        guard.observe("1000", at=utc(16, 0, 1))
-        guard.observe("980", at=utc(20, 0, 1))
-        guard.observe("975", at=utc(20, 12, 0))
+        self.record(guard, "1000", utc(16, 0, 1))
+        self.record(guard, "980", utc(20, 0, 1))
+        self.record(guard, "975", utc(20, 12, 0))
         result = self.check(utc(20, 12, 1))
         self.assertEqual(result["daily_checkpoint"], "verified")
         self.assertEqual(result["weekly_checkpoint"], "verified")
@@ -69,7 +73,7 @@ class CheckpointHealthTests(unittest.TestCase):
 
     def test_monday_open_can_be_recorded_during_window(self):
         guard = PortfolioEquityGuard(self.db)
-        guard.observe("995", at=utc(23, 0, 3))
+        self.record(guard, "995", utc(23, 0, 3))
         result = self.check(utc(23, 0, 4))
         self.assertEqual(result["daily_checkpoint"], "verified")
         self.assertEqual(result["weekly_checkpoint"], "verified")
@@ -77,9 +81,9 @@ class CheckpointHealthTests(unittest.TestCase):
 
     def test_missing_today_open_is_not_replaced_by_yesterday(self):
         guard = PortfolioEquityGuard(self.db)
-        guard.observe("1000", at=utc(16, 0, 1))
-        guard.observe("990", at=utc(19, 0, 1))
-        guard.observe("988", at=utc(20, 12, 0))
+        self.record(guard, "1000", utc(16, 0, 1))
+        self.record(guard, "990", utc(19, 0, 1))
+        self.record(guard, "988", utc(20, 12, 0))
         result = self.check(utc(20, 12, 1))
         self.assertEqual(result["daily_checkpoint"], "missed_window")
         self.assertEqual(result["weekly_checkpoint"], "verified")
@@ -87,7 +91,7 @@ class CheckpointHealthTests(unittest.TestCase):
 
     def test_stale_signed_wallet_observation_alert(self):
         guard = PortfolioEquityGuard(self.db)
-        guard.observe("1000", at=utc(23, 0, 1))
+        self.record(guard, "1000", utc(23, 0, 1))
         result = self.check(utc(23, 0, 5))
         self.assertEqual(result["status"], "evidence_stale")
         self.assertIn("signed_equity_observation_stale", result["alert_codes"])
@@ -95,7 +99,7 @@ class CheckpointHealthTests(unittest.TestCase):
 
     def test_ist_clock_resolves_to_correct_utc_period(self):
         guard = PortfolioEquityGuard(self.db)
-        guard.observe("1000", at=utc(23, 0, 1))
+        self.record(guard, "1000", utc(23, 0, 1))
         ist = timezone(timedelta(hours=5, minutes=30))
         result = self.check(utc(23, 0, 2).astimezone(ist))
         self.assertEqual(result["daily_checkpoint"], "verified")

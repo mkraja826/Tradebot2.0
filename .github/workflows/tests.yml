@@ -21,3 +21,5 @@ jobs:
         run: node --check src/tradebot/dashboard_static/app.js
       - name: Validate dashboard service shell syntax
         run: bash -n ops/run_dashboard.sh ops/install_dashboard_service.sh
+      - name: Validate read-only equity monitor service shell syntax
+        run: bash -n ops/run_equity_monitor.sh ops/install_equity_monitor_service.sh

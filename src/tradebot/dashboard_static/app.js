@@ -21,24 +21,31 @@ const ageLabel = seconds => seconds == null ? "Never reported" :
 function renderEquityCheckpointRisk(data) {
   const banner=byId("equity-risk-banner");
   if(!banner)return;
-  const valid=data && typeof data==="object" &&
+  const verified=data && data.daily_checkpoint==="verified" && data.weekly_checkpoint==="verified" &&
+    data.checkpoint_prerequisites_met===true && data.observation_status==="fresh" &&
+    Number.isFinite(data.latest_observation_age_seconds) && data.latest_observation_age_seconds>=0 &&
+    data.latest_observation_age_seconds<=180 && data.monitoring &&
+    data.monitoring.watchdog==="healthy" && data.monitoring.equity_collector==="healthy";
+  const valid=data && typeof data==="object" && (data.status!=="healthy" || verified) &&
     typeof data.status==="string" &&
     ["healthy","checkpoint_pending","checkpoint_missed",
-      "evidence_stale","evidence_unavailable"].includes(data.status);
+      "evidence_stale","evidence_unavailable","monitoring_degraded"].includes(data.status);
   const status=valid?data.status:"evidence_unavailable";
   const titles={
     healthy:"Equity opening checkpoints verified",
     checkpoint_pending:"Equity checkpoint observation pending",
     checkpoint_missed:"Equity opening checkpoint missed — trading risk gate blocked",
     evidence_stale:"Signed equity evidence is stale — risk review required",
-    evidence_unavailable:"Equity risk evidence unavailable — risk review required"
+    evidence_unavailable:"Equity risk evidence unavailable — risk review required",
+    monitoring_degraded:"Safety monitoring needs attention — trading prerequisites incomplete"
   };
   const messages={
     healthy:"Daily and weekly opening checkpoints have been recorded; this does not authorize a trade.",
     checkpoint_pending:"The current UTC opening window is still available. Waiting for a signed equity observation.",
     checkpoint_missed:"A required UTC opening window closed without an authentic equity observation. Historical checkpoints cannot be backfilled.",
     evidence_stale:"Signed equity observations are no longer recent enough for the risk monitor.",
-    evidence_unavailable:"The equity evidence ledger or its health endpoint could not be verified."
+    evidence_unavailable:"The equity evidence ledger or its health endpoint could not be verified.",
+    monitoring_degraded:"A collector, watchdog, clock or broker check needs attention. Checkpoints alone do not authorize a trade."
   };
   const labels={
     verified:"Verified",pending_window:"Pending opening window",
@@ -49,11 +56,16 @@ function renderEquityCheckpointRisk(data) {
   const rawAge=valid?data.latest_observation_age_seconds:null;
   const age=Number.isFinite(rawAge)&&rawAge>=0?
     " · Last signed sample "+ageLabel(rawAge):" · Signed sample age unknown";
+  const monitoring=valid && data.monitoring;
+  const serviceLabel=value=>value==="healthy"?"Reporting":value==="stale"?"Stale":"Needs verification";
+  const services=monitoring && typeof monitoring==="object"?
+    " · Collector: "+serviceLabel(monitoring.equity_collector)+
+    " · Watchdog: "+serviceLabel(monitoring.watchdog):" · Monitoring status unavailable";
   banner.dataset.state=status;
   text("equity-risk-title",titles[status]);
   text("equity-risk-state",status==="healthy"?"READ ONLY · VERIFIED":"RISK EVIDENCE INCOMPLETE");
   text("equity-risk-message",messages[status]);
-  text("equity-risk-detail","Daily: "+daily+" · Weekly: "+weekly+age+
+  text("equity-risk-detail","Daily: "+daily+" · Weekly: "+weekly+age+services+
     " · FIRE requires independent authorization.");
 }
 
@@ -65,8 +77,12 @@ async function refreshEquityCheckpointRisk() {
     if(!res.ok)throw new Error("Risk health endpoint unavailable");
     const data=await res.json();
     if(!data || typeof data!=="object" ||
-       data.mode!=="read_only" || data.trade_authorized!==false)
+       data.mode!=="read_only" || data.trade_authorized!==false ||
+       data.source!=="delta_demo_signed_wallet")
       throw new Error("Risk health response unverified");
+    const reportAge=Date.now()-Date.parse(data.as_of);
+    if(!Number.isFinite(reportAge)||reportAge < -5000||reportAge > 60000)
+      throw new Error("Risk health response stale or clock inconsistent");
     renderEquityCheckpointRisk(data);
   } catch(error) {
     // Fail closed visually on network errors, malformed data and timeouts.

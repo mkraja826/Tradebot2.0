@@ -26,7 +26,7 @@ from tradebot.fire_leverage import synchronize_leverage, verify_liquidation_clea
 from tradebot.fire_account_guard import require_flat_demo_account
 from tradebot.fire_portfolio_reservation import FirePortfolioReservation
 from tradebot.fire_risk import assess_fire_plan
-from tradebot.portfolio_equity_guard import PortfolioEquityGuard
+from tradebot.portfolio_equity_guard import RuntimeEquityGuard
 from tradebot.fire_indicators import decision_context
 from tradebot.fire_entry import FireEntries
 from tradebot.fire_market import FireMarket, positions_for_fire
@@ -92,6 +92,9 @@ def _protective_ids(orders, *, product_id, plan):
     if not isinstance(orders, list):
         raise FireTradeError("Invalid open-order list")
     side = "sell" if plan["direction"] == "LONG" else "buy"
+    expected_size = plan["contracts"]
+    if type(expected_size) is not int or expected_size < 1:
+        raise FireTradeError("Invalid protective contract size")
     found = {}
     for order in orders:
         if not isinstance(order, dict):
@@ -100,26 +103,45 @@ def _protective_ids(orders, *, product_id, plan):
             continue
         category = order.get("stop_order_type")
         if category not in ("stop_loss_order", "take_profit_order"):
-            continue
+            # A third same-product order (including a manual/unknown order)
+            # invalidates exclusive bracket protection. The chosen FIRE
+            # cannot safely attribute that order to its parent fill.
+            return {}
+        order_id = order.get("id")
+        id_valid = ((type(order_id) is int and order_id > 0)
+                    or (type(order_id) is str and bool(order_id.strip())))
         if (order.get("bracket_order") is not True or
                 order.get("side") != side or
                 order.get("state") not in ("open", "pending") or
-                not order.get("id")):
-            continue
+                not id_valid):
+            # An invalid same-product protective child cannot be ignored
+            # simply because one valid SL and TP pair also exists.
+            return {}
         requested = plan["stop_loss"] if category == "stop_loss_order" else plan["take_profit"]
         try:
-            matched = _dec(order.get("stop_price")) == _dec(requested)
+            size = _dec(order.get("size"))
+            matched = (size == expected_size and
+                       _dec(order.get("stop_price")) == _dec(requested))
         except FireTradeError:
             matched = False
-        if matched:
-            found.setdefault(category, set()).add(str(order["id"]))
+        if not matched:
+            # Any other open bracket for this exact product can prematurely
+            # close or over-close the position even if our expected pair is
+            # otherwise present. Fail closed instead of filtering it away.
+            return {}
+        # Two matching child orders are not interchangeable redundancy:
+        # either could close/over-close the same net position. With more
+        # than one matching order, verification is ambiguous and must
+        # trigger the existing emergency-protection path.
+        found.setdefault(category, []).append(str(order_id))
     return found
 
 
 def protective_orders_verified(orders, *, product_id, plan):
     found = _protective_ids(orders, product_id=product_id, plan=plan)
-    return bool(found.get("stop_loss_order") and found.get("take_profit_order")
-                and found["stop_loss_order"].isdisjoint(found["take_profit_order"]))
+    return bool(len(found.get("stop_loss_order", ())) == 1 and
+                len(found.get("take_profit_order", ())) == 1 and
+                found["stop_loss_order"][0] != found["take_profit_order"][0])
 
 
 
@@ -188,9 +210,21 @@ class FireTradeStore:
             db.execute("BEGIN IMMEDIATE")
             if db.execute("SELECT 1 FROM fire_requests WHERE press=?", (press,)).fetchone():
                 return None
+            # The newest receipt being terminal does not prove older FIRE
+            # requests are resolved. Check every durable status under the
+            # same write lock: older protected/unknown/unknown-status rows
+            # must never be hidden by a newer rejected or flat receipt.
+            terminal = tuple(sorted(TERMINAL))
+            placeholders = ",".join("?" for _ in terminal)
+            outstanding = db.execute(
+                "SELECT 1 FROM fire_requests WHERE status NOT IN ("
+                + placeholders + ") LIMIT 1", terminal
+            ).fetchone()
+            if outstanding:
+                raise FireTradeError("Previous FIRE needs broker reconciliation")
             old = db.execute(
                 "SELECT status,created_at FROM fire_requests "
-                "ORDER BY created_at DESC LIMIT 1"
+                "ORDER BY created_at DESC, rowid DESC LIMIT 1"
             ).fetchone()
             if old:
                 if old[0] not in TERMINAL:
@@ -299,7 +333,7 @@ def _protection_check(exchange, receipt, *, pause=sleep, attempts=12):
                 raise FireTradeError("Exchange position does not match entry fill")
             if protective_orders_verified(orders, product_id=product_id, plan=plan):
                 found = _protective_ids(orders, product_id=product_id, plan=plan)
-                receipt["exit_order_ids"] = {kind: next(iter(ids)) for kind, ids in found.items()
+                receipt["exit_order_ids"] = {kind: ids[0] for kind, ids in found.items()
                                              if len(ids) == 1}
                 receipt["protected_at"] = _now().isoformat()
                 try:
@@ -332,7 +366,7 @@ class FireDemoController:
         self.store = FireTradeStore(path)
         self.path = Path(path)
         self.portfolio_reservation = FirePortfolioReservation(self.path.parent)
-        self.equity_guard = PortfolioEquityGuard(self.path.parent / "fire-equity-risk.sqlite")
+        self.equity_guard = RuntimeEquityGuard(self.path.parent / "fire-equity-risk.sqlite")
         self.exchange_factory = exchange_factory or (lambda: FireMarket(self.symbol,
             api_key=os.environ["DELTA_DEMO_API_KEY"],
             api_secret=os.environ["DELTA_DEMO_API_SECRET"],
@@ -402,7 +436,8 @@ class FireDemoController:
             stage = "portfolio_equity_limits"
             if getattr(exchange, "base_url", None) != DEMO_API:
                 raise FireTradeError("Only signed Delta Demo equity accepted")
-            equity_precheck = self.equity_guard.require_approved(budget["equity_usd"])
+            equity_precheck = self.equity_guard.require_verified_read(
+                budget["equity_usd"], budget.get("equity_read_receipt"))
             self.store.update(press, "reasoning", risk_assessment={
                 "equity_monitor": equity_precheck})
             midpoint = (float(snapshot["core"]["best_bid"]) + float(snapshot["core"]["best_ask"])) / 2
@@ -472,7 +507,8 @@ class FireDemoController:
             if plan["contracts"] > current_budget["max_contracts_per_entry"]:
                 raise FireTradeError("Live margin budget changed")
             stage = "portfolio_equity_limits_recheck"
-            equity_recheck = self.equity_guard.require_approved(current_budget["equity_usd"])
+            equity_recheck = self.equity_guard.require_verified_read(
+                current_budget["equity_usd"], current_budget.get("equity_read_receipt"))
             stage = "risk_governor"
             risk_assessment = assess_fire_plan(plan, current_budget, exchange_quote)
             self.store.update(press, "preflight", risk_assessment={
@@ -488,6 +524,9 @@ class FireDemoController:
             final_budget = entry_budget(exchange, self.symbol, product_id, price)
             if final_budget["leverage"] != str(plan["leverage"]) or plan["contracts"] > final_budget["max_contracts_per_entry"]:
                 raise FireTradeError("Verified leverage or margin budget changed")
+            stage = "portfolio_equity_limits_final"
+            equity_recheck = self.equity_guard.require_verified_read(
+                final_budget["equity_usd"], final_budget.get("equity_read_receipt"))
             final_assessment = assess_fire_plan(plan, final_budget, exchange_quote)
             self.store.update(press, "preflight", budget=final_budget, risk_assessment={
                 **final_assessment, "equity_monitor": equity_recheck})
