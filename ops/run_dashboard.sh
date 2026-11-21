@@ -22,17 +22,8 @@ unset PYTHONHOME PYTHONUSERBASE
 export PYTHONNOUSERSITE=1
 export PYTHONSAFEPATH=1
 export PYTHONPATH="$PROJECT/src"
-
-# Import-only, no service startup, no broker requests and no ledger writes.
-"$PROJECT/.venv/bin/python" - "$PROJECT/src/tradebot/dashboard.py" <<'PY'
-import sys
-from pathlib import Path
-import tradebot.dashboard as dashboard
-
-if Path(dashboard.__file__).resolve() != Path(sys.argv[1]).resolve():
-    raise SystemExit("REFUSED: dashboard source path does not match deployed project")
-PY
-
+# No module, including the import-only preflight, can receive a stale
+# credentials-file FIRE toggle before this fail-closed guard takes effect.
 export ENABLE_DEMO_ORDERS=false
 # keys.env is sourced INSIDE this launcher, after systemd UnsetEnvironment.
 # It could accidentally reintroduce TRADEBOT_FIRE_DEMO_EXECUTION=true.
@@ -47,6 +38,18 @@ if [[ -e "$FIRE_DISABLED" || ! -f "$FIRE_OPT_IN" || -L "$FIRE_OPT_IN" ]] ||
 fi
 # Never accept contract-count overrides inherited from keys.env.
 export TRADEBOT_FIRE_MAX_CONTRACTS=1
+
+# Import-only, no service startup, no broker requests and no ledger writes.
+"$PROJECT/.venv/bin/python" - "$PROJECT/src/tradebot/dashboard.py" <<'PY'
+import sys
+from pathlib import Path
+import tradebot.dashboard as dashboard
+
+if Path(dashboard.__file__).resolve() != Path(sys.argv[1]).resolve():
+    raise SystemExit("REFUSED: dashboard source path does not match deployed project")
+PY
+
+export ENABLE_DEMO_ORDERS=false
 export TRADEBOT_DASHBOARD_DATA="$PROJECT/data"
 export PYTHONUNBUFFERED=1
 
