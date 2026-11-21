@@ -26,7 +26,7 @@ from tradebot.fire_leverage import synchronize_leverage, verify_liquidation_clea
 from tradebot.fire_account_guard import require_flat_demo_account
 from tradebot.fire_portfolio_reservation import FirePortfolioReservation
 from tradebot.fire_risk import assess_fire_plan
-from tradebot.portfolio_equity_guard import PortfolioEquityGuard
+from tradebot.portfolio_equity_guard import RuntimeEquityGuard
 from tradebot.fire_indicators import decision_context
 from tradebot.fire_entry import FireEntries
 from tradebot.fire_market import FireMarket, positions_for_fire
@@ -332,7 +332,7 @@ class FireDemoController:
         self.store = FireTradeStore(path)
         self.path = Path(path)
         self.portfolio_reservation = FirePortfolioReservation(self.path.parent)
-        self.equity_guard = PortfolioEquityGuard(self.path.parent / "fire-equity-risk.sqlite")
+        self.equity_guard = RuntimeEquityGuard(self.path.parent / "fire-equity-risk.sqlite")
         self.exchange_factory = exchange_factory or (lambda: FireMarket(self.symbol,
             api_key=os.environ["DELTA_DEMO_API_KEY"],
             api_secret=os.environ["DELTA_DEMO_API_SECRET"],

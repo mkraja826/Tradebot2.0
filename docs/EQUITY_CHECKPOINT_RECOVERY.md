@@ -25,6 +25,12 @@ commissioning lock must remain intact. No historical checkpoints are created.
   after its decision, and again against the final pre-entry wallet read.
 - The existing 2% daily / 5% weekly / 8% observed-peak limits are unchanged.
   A missing watermark is an integrity error, never a reason to reset the peak.
+- Runtime collection and FIRE open only an existing, nonempty risk ledger with
+  its original watermark. A missing file, empty replacement or missing schema
+  blocks risk approval; it is never recreated from the current wallet. Runtime
+  connections use SQLite `mode=rw`, bind the file identity and reject deletion
+  or replacement. Dashboard initialization defers risk-ledger access so its
+  diagnostic endpoint remains available when that ledger is broken.
 - `equity_read_receipts` is an **additive** immutable table. Existing evidence
   and opening checkpoints are preserved, without inventing transport receipts
   for legacy rows. Duplicate identical readings do not duplicate evidence;
@@ -53,6 +59,10 @@ limitation when reviewing commissioning evidence.
 Actual DEMO response headers, clock synchronization, restart behavior and
 real UTC openings must be verified on the VM. Unsupported or missing Date
 headers fail closed; do not weaken the policy to obtain a passing result.
+This is an upgrade of an existing account: missing original history requires
+an approved restore/reconciliation procedure, not initial provisioning. There
+is no runtime bootstrap command. Do not copy test fixtures, create an empty
+ledger, or treat a current wallet read as a new historical peak.
 Notifications currently persist in SQLite and the system journal. Off-machine
 pager delivery, acknowledgement and an external VM-loss alarm are **not
 commissioned**. A VM cannot alert about its own complete loss of connectivity.
@@ -112,7 +122,11 @@ old watchdog's equity sampling before stopping the new collector, avoiding a
 gap in observation coverage. Then verify fresh authenticated observations,
 preserved opening values and SL/TP supervision. Keep the newer ledger intact
 for investigation. This rollback restores the old timing-validation behavior
-and is not approval for trading.
+and automatic ledger-creation behavior; it is not approval for trading. If the
+ledger is missing or its provenance is uncertain, stop equity ingestion and
+keep FIRE disabled during rollback. Restore original evidence only under the
+approved recovery procedure; never start the older collector against an absent
+ledger. No rollback test or source merge authorizes a service restart.
 
 ## Offline validation
 
@@ -130,3 +144,6 @@ legacy schema migration, independent loss limits, reboot/reconnect recovery,
 durable alert throttling and failed telemetry during watchdog protection.
 Browser checks cover 375/768/1440 px, stale successes, contradictions and
 connection failures. Tests use no exchange orders and no paid AI calls.
+
+The [release review](RELEASE_REVIEW_PR3.md) records the reproduced ledger-reset
+defect and the existing-only runtime correction, including recovery/race tests.

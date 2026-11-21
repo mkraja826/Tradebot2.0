@@ -11,6 +11,7 @@ from pathlib import Path
 import os
 import sqlite3
 import json
+import stat
 
 from tradebot.equity_receipt import validate_receipt
 
@@ -43,19 +44,47 @@ class PortfolioEquityGuard:
     """One persistent loss budget shared by BTC and gold FIRE controllers."""
 
     def __init__(self, path, *, max_daily=Decimal("0.02"),
-                 max_weekly=Decimal("0.05"), max_drawdown=Decimal("0.08")):
+                 max_weekly=Decimal("0.05"), max_drawdown=Decimal("0.08"),
+                 require_existing=False):
         self.path = Path(path)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.require_existing = require_existing
+        self._identity = None
+        if not require_existing:
+            # Initialization is for isolated fixtures / separately approved
+            # first-time provisioning, never automatic runtime recovery.
+            self.path.parent.mkdir(parents=True, exist_ok=True)
         if self.path.is_symlink():
             raise EquityRiskError("Refusing symlinked risk ledger")
-        fd = os.open(self.path, os.O_RDWR | os.O_CREAT |
-                     getattr(os, "O_NOFOLLOW", 0), 0o600)
-        os.close(fd)
+        try:
+            fd = os.open(self.path, os.O_RDWR | (0 if require_existing else os.O_CREAT) |
+                         getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0), 0o600)
+        except FileNotFoundError:
+            raise EquityRiskError("equity_ledger_unavailable") from None
+        try:
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode):
+                raise EquityRiskError("equity_ledger_unavailable")
+            if require_existing:
+                self._identity = (info.st_dev, info.st_ino)
+        finally:
+            os.close(fd)
         os.chmod(self.path, 0o600)
         self.limits = tuple(amount(x) for x in (max_daily, max_weekly, max_drawdown))
         if any(x >= 1 for x in self.limits):
             raise EquityRiskError("Invalid loss-limit fractions")
-        with closing(sqlite3.connect(self.path, timeout=20)) as db:
+        with closing(self._connect()) as db:
+            if require_existing:
+                # Do this before migrations or WAL changes. An empty file or
+                # missing schema is missing history, not a fresh risk baseline.
+                if db.execute("PRAGMA quick_check(1)").fetchone() != ("ok",):
+                    raise EquityRiskError("equity_database_integrity_failed")
+                latest = db.execute("SELECT equity_usd,origin FROM equity_evidence "
+                                    "ORDER BY observed_us DESC LIMIT 1").fetchone()
+                peak = db.execute("SELECT high_usd FROM equity_watermark WHERE singleton=1").fetchone()
+                if latest is None or peak is None:
+                    raise EquityRiskError("equity_history_or_watermark_missing")
+                if latest[1] != "delta_demo_signed_wallet" or amount(peak[0]) < amount(latest[0]):
+                    raise EquityRiskError("equity_watermark_inconsistent")
             db.execute("PRAGMA journal_mode=WAL")
             db.executescript("""
                 CREATE TABLE IF NOT EXISTS equity_evidence(
@@ -93,9 +122,34 @@ class PortfolioEquityGuard:
                     SELECT RAISE(ABORT, 'Immutable equity observation');
                 END;
             """)
+        self._check_identity()
+
+    def _check_identity(self):
+        if not self.require_existing:
+            return
+        try:
+            info = self.path.lstat()
+        except FileNotFoundError:
+            raise EquityRiskError("equity_ledger_unavailable") from None
+        if not stat.S_ISREG(info.st_mode) or (info.st_dev, info.st_ino) != self._identity:
+            raise EquityRiskError("equity_ledger_replaced")
+
+    def _connect(self):
+        self._check_identity()
+        if not self.require_existing:
+            return sqlite3.connect(self.path, timeout=20)
+        # mode=rw, unlike the SQLite default, cannot recreate a missing ledger
+        # if it vanishes between checks or later in this process's lifetime.
+        db = sqlite3.connect(self.path.absolute().as_uri() + "?mode=rw", uri=True, timeout=20)
+        try:
+            self._check_identity()
+        except Exception:
+            db.close()
+            raise
+        return db
 
     def latest_observed_us(self):
-        with closing(sqlite3.connect(self.path, timeout=20)) as db:
+        with closing(self._connect()) as db:
             record = db.execute("SELECT max(observed_us) FROM equity_evidence").fetchone()
         return record[0]
 
@@ -123,11 +177,13 @@ class PortfolioEquityGuard:
         day_start = instant.astimezone(timezone.utc).replace(
             hour=0, minute=0, second=0, microsecond=0)
         week_start = day_start - timedelta(days=day_start.weekday())
-        with closing(sqlite3.connect(self.path, timeout=20)) as db:
+        with closing(self._connect()) as db:
             db.execute("BEGIN IMMEDIATE")
             if db.execute("PRAGMA quick_check(1)").fetchone() != ("ok",):
                 raise EquityRiskError("equity_database_integrity_failed")
             latest = db.execute("SELECT max(observed_us) FROM equity_evidence").fetchone()[0]
+            if self.require_existing and latest is None:
+                raise EquityRiskError("equity_history_or_watermark_missing")
             if latest is not None and current_us < latest:
                 raise EquityRiskError("equity_observation_out_of_order_or_clock_reversed")
             peak_row = db.execute(
@@ -165,6 +221,7 @@ class PortfolioEquityGuard:
             daily = self._opening(db, stamp(day_start), current_us)
             weekly = self._opening(db, stamp(week_start), current_us)
             db.commit()
+        self._check_identity()
 
         status = {
             "policy": "delta-demo-equity-loss-v1",
@@ -229,3 +286,26 @@ class PortfolioEquityGuard:
         if not report["approved"]:
             raise EquityRiskError(report["reason"])
         return report
+
+
+class RuntimeEquityGuard:
+    """Lazy existing-only access: diagnostic startup must survive risk DB faults.
+
+    There is no initializer, repair, reset or backfill path in this facade.
+    Opening or replacing evidence is an explicit operator recovery concern.
+    """
+
+    def __init__(self, path):
+        self.path = Path(path)
+        self._guard = None
+
+    def _existing(self):
+        if self._guard is None:
+            self._guard = PortfolioEquityGuard(self.path, require_existing=True)
+        return self._guard
+
+    def require_verified_read(self, equity, receipt, *, now=None):
+        return self._existing().require_verified_read(equity, receipt, now=now)
+
+    def observe_signed_demo(self, exchange):
+        return self._existing().observe_signed_demo(exchange)

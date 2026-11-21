@@ -374,6 +374,32 @@ class FireExecutionTests(unittest.TestCase):
         self.assertEqual(self.calls, [])
         self.assertEqual(self.exchange.requests, [])
 
+    def test_missing_equity_ledger_does_not_reset_peak_on_controller_restart(self):
+        risk = self.path.parent / "fire-equity-risk.sqlite"
+        preserved = risk.with_name("preserved-risk.sqlite")
+        original = risk.read_bytes()
+        risk.rename(preserved)
+        fire = self.make()
+        self.assertFalse(risk.exists())
+        self.assertTrue(fire.start()[0])
+        self.assertEqual(fire.snapshot()["status"], "rejected_no_order")
+        self.assertEqual(fire.snapshot()["reason_code"], "portfolio_equity_limits_failed")
+        self.assertFalse(risk.exists())
+        self.assertEqual(preserved.read_bytes(), original)
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.exchange.requests, [])
+
+    def test_corrupt_equity_ledger_does_not_prevent_diagnostic_startup(self):
+        risk = self.path.parent / "fire-equity-risk.sqlite"
+        risk.write_bytes(b"original corrupt risk evidence")
+        fire = self.make()
+        self.assertEqual(fire.snapshot()["status"], "idle")
+        self.assertTrue(fire.start()[0])
+        self.assertEqual(fire.snapshot()["reason_code"], "portfolio_equity_limits_failed")
+        self.assertEqual(risk.read_bytes(), b"original corrupt risk evidence")
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.exchange.requests, [])
+
     def test_missing_receipt_blocks_before_paid_model_or_broker_post(self):
         wallet = self.exchange.wallet_balances()
         wallet.pop("equity_read_receipt")
