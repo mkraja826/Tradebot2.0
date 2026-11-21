@@ -5,9 +5,13 @@ from pathlib import Path
 import sqlite3
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 from tradebot.delta import DeltaDemo, DEMO_API
-from tradebot.fire_broker_inventory import observe_broker_inventory
+from tradebot.fire_broker_inventory import (
+    observe_broker_inventory, _local_evidence_state, _read_local_snapshot,
+    BrokerInventoryError,
+)
 
 
 class FakeClock:
@@ -91,6 +95,47 @@ class BrokerInventoryTests(unittest.TestCase):
             pause=self.clock.pause if pause is None else pause,
             monotonic=self.clock.monotonic,
         )
+
+    def test_each_local_source_is_read_in_one_sqlite_transaction(self):
+        # The old implementation opened each table through a separate
+        # connection. A single read transaction per DB avoids hybrid rows.
+        real_connect = sqlite3.connect
+        calls = []
+        def tracked_connect(*args, **kwargs):
+            calls.append(args[0])
+            return real_connect(*args, **kwargs)
+        with patch("tradebot.fire_broker_inventory.sqlite3.connect",
+                   side_effect=tracked_connect):
+            fingerprint, unresolved = _local_evidence_state(self.root)
+        self.assertIsInstance(fingerprint, bytes)
+        self.assertEqual(unresolved, 0)
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(len(set(calls)), 3)
+
+    def test_missing_source_table_fails_without_creating_it(self):
+        path = self.root / "fire-reconciliation.sqlite"
+        with sqlite3.connect(path) as db:
+            db.execute("DROP TABLE evidence")
+            db.execute("INSERT INTO reports VALUES (?,?,?)",
+                       ("d" * 64, "BTCUSD:" + "a"*32, "{}"))
+        with self.assertRaisesRegex(
+                BrokerInventoryError, "reconciliation_source_tables_missing"):
+            _read_local_snapshot(path, "fire-reconciliation.sqlite")
+        with sqlite3.connect(path) as db:
+            self.assertIsNone(db.execute(
+                "SELECT name FROM sqlite_master WHERE name='evidence'").fetchone())
+
+    def test_bounded_snapshot_denies_oversized_rows(self):
+        path = self.root / "fire-ops.sqlite"
+        with sqlite3.connect(path) as db:
+            db.execute("INSERT INTO fire_requests VALUES (?,?,?,?,?)",
+                       ("a"*32, "2026-11-20T10:00:00+00:00",
+                        "2026-11-20T10:00:00+00:00", "rejected_no_order",
+                        '{"orders_submitted":false}'))
+        # Force a tiny bound to exercise fail-closed behavior with a fixture.
+        with patch("tradebot.fire_broker_inventory.MAX_ROWS", 0):
+            with self.assertRaisesRegex(BrokerInventoryError, "local_ledger_too_large"):
+                _read_local_snapshot(path, "fire-ops.sqlite")
 
     def test_two_flat_snapshots_are_only_diagnostic_not_trade_permission(self):
         report = self.check()
