@@ -197,6 +197,44 @@ class DemoEvidenceTests(unittest.TestCase):
                       report["blockers"])
         self.assertNotIn("SECRET", json.dumps(report))
 
+    def test_late_clock_service_or_fire_change_blocks_even_after_clean_broker_reads(self):
+        for check_name in ("clock_check", "service_check", "fire_disabled_check"):
+            with self.subTest(check=check_name):
+                observations = iter((True, False))
+                report = self.observe(**{check_name: lambda: next(observations)})
+                self.assertIn("host_or_equity_changed_during_broker_observation",
+                              report["blockers"])
+                self.assertEqual(report["status"], "review_required")
+                self.assertFalse(report["checks"]["final_host_and_equity_still_healthy"])
+                self.assertTrue(report["checks"]["two_flat_broker_samples_observed"])
+                self.assertTrue(report["checks"]["historical_order_fields_match"])
+                self.assertFalse(report["trade_authorized"])
+
+    def test_late_equity_checkpoint_staleness_blocks_limited_consistency(self):
+        reads = iter((healthy(None),
+                      {"status": "evidence_stale",
+                       "checkpoint_prerequisites_met": False,
+                       "trade_authorized": False,
+                       "blocking_conditions": ["signed_equity_observation_stale"]}))
+        report = self.observe(health_check=lambda _p: next(reads))
+        self.assertTrue(report["checks"]["equity_checkpoint_prerequisites_met"])
+        self.assertIn("host_or_equity_changed_during_broker_observation",
+                      report["blockers"])
+        self.assertFalse(report["checks"]["final_host_and_equity_still_healthy"])
+        self.assertEqual(report["status"], "review_required")
+
+    def test_final_host_recheck_exception_is_sanitized(self):
+        observations = iter((True, RuntimeError("PRIVATE_HOST_SECRET")))
+        def service():
+            val = next(observations)
+            if isinstance(val, Exception):
+                raise val
+            return val
+        report = self.observe(service_check=service)
+        self.assertIn("host_or_equity_changed_during_broker_observation",
+                      report["blockers"])
+        self.assertNotIn("PRIVATE_HOST_SECRET", json.dumps(report))
+
     def test_clock_sync_requires_explicit_yes(self):
         def completed(out, ret=0):
             return type("Completed", (), {"returncode": ret, "stdout": out})()
