@@ -99,8 +99,16 @@ existing per-market SQLite store with a bounded read-only transaction and
 device/inode checks; it never creates or edits a ledger. The stored receipt
 must contain a submitted broker parent ID and two distinct saved child IDs,
 a valid contract size, trade direction, and planned stop/take-profit triggers.
-Any durable entry-order identity, if present, must agree before contacting
-the broker.
+If a separate durable `fire_entries` record exists, the auditor now verifies
+its **filled state, press ID, market symbol, parent order ID, original trade
+direction, exact contract size and stop-loss/take-profit prices** against
+the later parent FIRE receipt *before* fetching any broker orders. The
+original entry product ID must also match the authenticated broker product
+lookup before fetching the three historical orders. Missing or contradictory
+entry-plan fields fail closed; local receipts are not exchange signatures.
+Some older receipts may predate `fire_entries` and can still be inspected
+against authenticated historical order fields, but this does **not** supply
+the missing independent entry-intent evidence or prove continuous protection.
 
 Only with a **DEMO read-only** client (`allow_orders=False`) does the diagnostic
 make one authenticated `GET /v2/products/{symbol}` and **three**
