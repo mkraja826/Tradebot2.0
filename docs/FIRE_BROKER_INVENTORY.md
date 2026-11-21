@@ -116,7 +116,14 @@ type, and **matching contract size**. Child states are summarized (open,
 pending, closed, cancelled, unknown), without exposing broker account or order
 identifiers. Malformed, missing, changed or conflicting fields produce
 sanitized blockers. Missing credentials or network access also block; errors
-are not treated as negative broker responses.
+are not treated as negative broker responses. The diagnostic fingerprints
+**all saved parent/entry rows and the source database's device/inode**, then
+rechecks that read-only SQLite snapshot after the broker GETs. Changes,
+replacement or loss of the local ledger during observation block a clean
+field match, including changes to an unrelated historical receipt. This
+ordinary SHA-256 comparison is a local consistency check, **not** a broker
+signature or an atomic transaction with the exchange. Changes occurring
+between the final local read and operator interpretation cannot be excluded.
 
 Even a result of `historical_order_fields_match_not_protection_proof` is
 **not** proof that both children were simultaneously active, that they
