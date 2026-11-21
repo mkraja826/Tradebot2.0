@@ -38,8 +38,9 @@ class RecoveryTests(unittest.TestCase):
         monday = datetime(2026, 11, 23, tzinfo=UTC)
         health = checkpoint_health(self.path, at=monday + timedelta(minutes=5))
         self.assertEqual(health["daily_checkpoint"], "pending_window")
-        self.guard.observe("1000", at=monday + timedelta(minutes=5))
-        self.assertEqual(checkpoint_health(self.path, at=monday + timedelta(minutes=5))[
+        edge = monday + timedelta(minutes=5)
+        self.guard.observe_verified_read("1000", receipt_for(at=edge), now=edge)
+        self.assertEqual(checkpoint_health(self.path, at=edge)[
             "weekly_checkpoint"], "verified")
         # A new process after next week's missed window cannot turn a later
         # current wallet balance into the opening it did not observe.
@@ -73,7 +74,7 @@ class RecoveryTests(unittest.TestCase):
 
     def test_staleness_uses_exact_boundary_without_rounding_down(self):
         at = datetime(2026, 11, 23, 0, 1, tzinfo=UTC)
-        self.guard.observe("1000", at=at)
+        self.guard.observe_verified_read("1000", receipt_for(at=at), now=at)
         self.assertEqual(checkpoint_health(self.path, at=at + timedelta(seconds=180))[
             "observation_status"], "fresh")
         self.assertEqual(checkpoint_health(self.path, at=at + timedelta(seconds=180, microseconds=1))[
@@ -97,7 +98,63 @@ class RecoveryTests(unittest.TestCase):
             self.assertEqual(db.execute("SELECT * FROM equity_evidence").fetchall(),
                              [(observed_us,"1000","delta_demo_signed_wallet")])
             self.assertEqual(db.execute("SELECT * FROM equity_read_receipts").fetchall(), [])
-        self.assertTrue(checkpoint_health(path, at=at)["checkpoint_prerequisites_met"])
+        legacy_health = checkpoint_health(path, at=at)
+        self.assertFalse(legacy_health["checkpoint_prerequisites_met"])
+        self.assertEqual(legacy_health["daily_checkpoint"], "unverified_receipt")
+        self.assertEqual(legacy_health["weekly_checkpoint"], "unverified_receipt")
+        self.assertEqual(legacy_health["latest_receipt_status"], "missing")
+        self.assertIn("equity_read_receipt_invalid", legacy_health["alert_codes"])
+
+    def test_historical_opening_without_transport_receipt_is_not_verified(self):
+        at = datetime(2026, 11, 23, 0, 1, tzinfo=UTC)
+        latest = at + timedelta(minutes=2)
+        self.guard.observe("1000", at=at)
+        self.guard.observe_verified_read("1000", receipt_for(at=latest), now=latest)
+        report = checkpoint_health(self.path, at=latest)
+        self.assertEqual(report["daily_checkpoint"], "unverified_receipt")
+        self.assertEqual(report["weekly_checkpoint"], "unverified_receipt")
+        self.assertEqual(report["latest_receipt_status"], "verified")
+        self.assertFalse(report["checkpoint_prerequisites_met"])
+        self.assertIn("equity_read_receipt_invalid", report["alert_codes"])
+        with sqlite3.connect(self.path) as db:
+            self.assertEqual(db.execute("SELECT count(*) FROM equity_read_receipts").fetchone()[0], 1)
+
+    def test_recent_unsigned_latest_observation_is_not_fresh_verified(self):
+        at = datetime(2026, 11, 23, 0, 1, tzinfo=UTC)
+        self.guard.observe_verified_read("1000", receipt_for(at=at), now=at)
+        self.guard.observe("1000", at=at + timedelta(seconds=1))
+        report = checkpoint_health(self.path, at=at + timedelta(seconds=1))
+        self.assertEqual(report["daily_checkpoint"], "verified")
+        self.assertEqual(report["weekly_checkpoint"], "verified")
+        self.assertEqual(report["latest_receipt_status"], "missing")
+        self.assertEqual(report["observation_status"], "unverified_receipt")
+        self.assertIn("latest_equity_read_receipt_unverified", report["blocking_conditions"])
+        self.assertFalse(report["checkpoint_prerequisites_met"])
+
+    def test_mismatched_historical_equity_receipt_fails_closed(self):
+        at = datetime(2026, 11, 23, 0, 1, tzinfo=UTC)
+        self.guard.observe("1000", at=at)
+        with sqlite3.connect(self.path) as db:
+            db.execute("INSERT INTO equity_read_receipts VALUES (?,?)",
+                       (int(at.timestamp()*1_000_000), json.dumps(receipt_for("5000", at))))
+            db.commit()
+        report = checkpoint_health(self.path, at=at)
+        self.assertEqual(report["daily_checkpoint"], "unverified_receipt")
+        self.assertEqual(report["latest_receipt_status"], "invalid")
+        self.assertFalse(report["checkpoint_prerequisites_met"])
+
+    def test_untrusted_receipt_timestamp_does_not_establish_opening(self):
+        at = datetime(2026, 11, 23, 0, 1, tzinfo=UTC)
+        self.guard.observe("1000", at=at)
+        forged = receipt_for("1000", at)
+        forged["received_us"] += 1_000_000
+        with sqlite3.connect(self.path) as db:
+            db.execute("INSERT INTO equity_read_receipts VALUES (?,?)",
+                       (int(at.timestamp()*1_000_000), json.dumps(forged)))
+            db.commit()
+        result = checkpoint_health(self.path, at=at)
+        self.assertEqual(result["weekly_checkpoint"], "unverified_receipt")
+        self.assertFalse(result["checkpoint_prerequisites_met"])
 
     def test_concurrent_duplicate_read_commits_only_one_immutable_observation(self):
         at = datetime(2026, 11, 23, 0, 1, tzinfo=UTC)
@@ -121,7 +178,10 @@ class RecoveryTests(unittest.TestCase):
         end = at + timedelta(days=30, hours=23, minutes=59)
         started = time.monotonic()
         for _ in range(10):
-            self.assertTrue(checkpoint_health(self.path, at=end)["checkpoint_prerequisites_met"])
+            health = checkpoint_health(self.path, at=end)
+            self.assertFalse(health["checkpoint_prerequisites_met"])
+            self.assertEqual(health["daily_checkpoint"], "unverified_receipt")
+            self.assertEqual(health["latest_receipt_status"], "missing")
         self.assertLess(time.monotonic() - started, 3)
 
     def test_loss_limits_still_reject_exact_boundaries_after_receipt_validation(self):
