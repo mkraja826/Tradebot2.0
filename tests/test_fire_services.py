@@ -167,6 +167,69 @@ class FireServiceTests(unittest.TestCase):
         self.assertIn('export TRADEBOT_DASHBOARD_DATA="$PROJECT/data"', launcher)
         self.assertIn('--host 127.0.0.1 --port 8765', launcher)
 
+    def test_dashboard_cannot_reenable_fire_from_keys_without_root_opt_in(self):
+        # Real launcher, fake interpreter: no broker, server or database writes.
+        # The protected key file is deliberately "hostile" and exports true;
+        # a normal dashboard restart must still be fail-closed by default.
+        with tempfile.TemporaryDirectory(prefix="dashboard-fire-off-") as tmp:
+            root = Path(tmp)
+            project = root / "project"
+            (project / "ops").mkdir(parents=True)
+            (project / ".venv/bin").mkdir(parents=True)
+            (project / "src/tradebot").mkdir(parents=True)
+            launcher = project / "ops/run_dashboard.sh"
+            launcher.write_text((ROOT / "ops/run_dashboard.sh").read_text())
+
+            home = root / "home"
+            keys = home / ".config/tradebot2/keys.env"
+            keys.parent.mkdir(parents=True)
+            keys.write_text(
+                "export TRADEBOT_FIRE_DEMO_EXECUTION=true\n"
+                "export TRADEBOT_FIRE_MAX_CONTRACTS=999\n"
+            )
+            keys.chmod(0o600)
+
+            interpreter = project / ".venv/bin/python"
+            interpreter.write_text(
+                "#!/usr/bin/env bash\n"
+                'printf "%s|%s|%s\\n" '
+                '"$TRADEBOT_FIRE_DEMO_EXECUTION" '
+                '"$TRADEBOT_FIRE_MAX_CONTRACTS" "$*" >> "$CAPTURE_FILE"\n'
+            )
+            interpreter.chmod(0o700)
+
+            log = root / "capture.txt"
+            proc = subprocess.run(
+                ["bash", str(launcher)],
+                env={**os.environ, "HOME": str(home), "CAPTURE_FILE": str(log),
+                     "TRADEBOT_FIRE_DEMO_EXECUTION": "true"},
+                capture_output=True, text=True, timeout=10,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            entries = [line.split("|", 2)
+                       for line in log.read_text().splitlines()]
+            self.assertEqual(len(entries), 2)
+            for fire_flag, contract_cap, _ in entries:
+                # Import preflight runs before FIRE environment normalization;
+                # only the actual daemon invocation must be fail closed.
+                if "-m tradebot.dashboard" in _:
+                    self.assertEqual(fire_flag, "false")
+                    self.assertEqual(contract_cap, "1")
+            self.assertIn("-m tradebot.dashboard", entries[-1][-1])
+
+    def test_dashboard_launcher_requires_explicit_root_demo_opt_in(self):
+        script = (ROOT / "ops/run_dashboard.sh").read_text()
+        self.assertIn('FIRE_OPT_IN="$FIRE_UNIT_DIR/fire-demo.conf"', script)
+        self.assertIn('FIRE_DISABLED="$FIRE_UNIT_DIR/99-fire-disabled.conf"', script)
+        self.assertIn(
+            "Environment=TRADEBOT_FIRE_DEMO_EXECUTION=true", script)
+        self.assertIn('export TRADEBOT_FIRE_DEMO_EXECUTION=false', script)
+        self.assertIn('export TRADEBOT_FIRE_MAX_CONTRACTS=1', script)
+        self.assertLess(script.index('source "$KEY_FILE"'),
+                        script.index('export TRADEBOT_FIRE_DEMO_EXECUTION=false'))
+        self.assertLess(script.index('export TRADEBOT_FIRE_DEMO_EXECUTION=false'),
+                        script.index('exec "$PROJECT/.venv/bin/python" -m'))
+
     def test_watchdog_launcher_discards_inherited_old_python_package(self):
         # A protected VM keys.env may be carrying a stale PYTHONPATH.
         # Execute the launcher against a fake Python binary, not the broker.
