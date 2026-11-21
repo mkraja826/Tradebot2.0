@@ -1,4 +1,5 @@
 """No-network tests of the two-sample, read-only DEMO broker exposure inventory."""
+import hashlib
 import json
 from pathlib import Path
 import sqlite3
@@ -77,6 +78,10 @@ class BrokerInventoryTests(unittest.TestCase):
         with sqlite3.connect(self.root / "fire-reconciliation.sqlite") as db:
             db.execute("CREATE TABLE reports("
                        "digest TEXT PRIMARY KEY, trade_key TEXT NOT NULL, body TEXT NOT NULL)")
+            db.execute("CREATE TABLE evidence(kind TEXT, id TEXT, body TEXT NOT NULL,"
+                       "PRIMARY KEY(kind,id))")
+            db.execute("CREATE TABLE claims(kind TEXT, id TEXT, trade_key TEXT NOT NULL,"
+                       "PRIMARY KEY(kind,id))")
         self.exchange = FakeBroker()
         self.clock = FakeClock()
 
@@ -288,6 +293,55 @@ class BrokerInventoryTests(unittest.TestCase):
         report = self.check()
         self.assertIn("local_evidence_changed_during_broker_observation",
                       report["blockers"])
+        self.assertFalse(report["trade_authorized"])
+
+    def test_fill_evidence_same_count_mutation_is_detected(self):
+        path = self.root / "fire-reconciliation.sqlite"
+        with sqlite3.connect(path) as db:
+            db.execute("INSERT INTO evidence VALUES (?,?,?)",
+                       ("fill", "fill-1", '{"size":"1"}'))
+        def mutate():
+            with sqlite3.connect(path) as db:
+                db.execute("UPDATE evidence SET body=? WHERE id=?",
+                           ('{"size":"2"}', "fill-1"))
+        self.exchange.second_sample_hook = mutate
+        report = self.check()
+        self.assertEqual(report["samples_checked"], 2)
+        self.assertIn("local_evidence_changed_during_broker_observation",
+                      report["blockers"])
+        self.assertFalse(report["trade_authorized"])
+
+    def test_claim_owner_same_count_mutation_is_detected(self):
+        path = self.root / "fire-reconciliation.sqlite"
+        with sqlite3.connect(path) as db:
+            db.execute("INSERT INTO claims VALUES (?,?,?)",
+                       ("fill", "fill-1", "BTCUSD:" + "a"*32))
+        def mutate():
+            with sqlite3.connect(path) as db:
+                db.execute("UPDATE claims SET trade_key=? WHERE id=?",
+                           ("XAUTUSD:" + "b"*32, "fill-1"))
+        self.exchange.second_sample_hook = mutate
+        report = self.check()
+        self.assertEqual(report["samples_checked"], 2)
+        self.assertIn("local_evidence_changed_during_broker_observation",
+                      report["blockers"])
+        self.assertFalse(report["trade_authorized"])
+
+    def test_report_without_evidence_tables_blocks_broker_sweep(self):
+        path = self.root / "fire-reconciliation.sqlite"
+        key, body = "BTCUSD:" + "a"*32, json.dumps({
+            "is_net_realized_pnl": False,
+            "reconciliation_as_of_us": 1795000000000000,
+        })
+        digest = hashlib.sha256((key + "\\n" + body).encode()).hexdigest()
+        with sqlite3.connect(path) as db:
+            db.execute("DROP TABLE evidence")
+            db.execute("DROP TABLE claims")
+            db.execute("INSERT INTO reports VALUES (?,?,?)", (digest, key, body))
+        report = self.check()
+        self.assertIn("local_history_unavailable", report["blockers"])
+        self.assertEqual(report["samples_checked"], 0)
+        self.assertEqual(self.exchange.calls, [])
         self.assertFalse(report["trade_authorized"])
 
     def test_broker_snapshot_change_is_not_disguised_as_two_flat_checks(self):
