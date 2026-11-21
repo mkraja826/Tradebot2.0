@@ -2,6 +2,7 @@
 from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
+from types import SimpleNamespace
 import sqlite3
 import tempfile
 import unittest
@@ -201,6 +202,63 @@ class WatchdogTests(unittest.TestCase):
         self.broker.base_url = "https://api.india.delta.exchange"
         with self.assertRaises(ValueError):
             watchdog_tick(self.broker, self.store)
+
+    def test_runtime_attestation_and_boot_heartbeat_before_broker_sweep(self):
+        # watchdog.main deliberately catches normal exceptions per symbol.
+        # Use BaseException to stop the mocked loop without being swallowed.
+        class StopAfterInspect(BaseException):
+            pass
+
+        seen = []
+        monitor_path = self.root / "fire-monitoring.sqlite"
+
+        def fake_tick(exchange, store):
+            # The broker has NOT yet been touched. Startup telemetry must
+            # exist with an explicitly UNVERIFIED protection status.
+            with sqlite3.connect(monitor_path) as db:
+                row = db.execute(
+                    "SELECT status FROM monitor_heartbeat WHERE service='watchdog'"
+                ).fetchone()
+                starts = db.execute(
+                    "SELECT COUNT(*) FROM monitor_starts WHERE service='watchdog'"
+                ).fetchone()[0]
+            seen.append((row, starts))
+            raise StopAfterInspect()
+
+        with (patch("tradebot.fire_watchdog.FireMarket",
+                    side_effect=lambda symbol, **kwargs: SimpleNamespace(symbol=symbol)),
+              patch("tradebot.fire_watchdog.watchdog_tick", side_effect=fake_tick),
+              patch("builtins.print") as output):
+            with self.assertRaises(StopAfterInspect):
+                main(["--database", str(self.store.path)])
+
+        self.assertEqual(seen, [(("watchdog_protection_unverified",), 1)])
+        self.assertIn("watchdog_runtime_initialized", str(output.call_args_list))
+        self.assertIn("watchdog-telemetry-v2-20261122", str(output.call_args_list))
+
+    def test_boot_heartbeat_becomes_healthy_after_both_market_ticks(self):
+        class StopAfterCycle(Exception):
+            pass
+
+        with (patch("tradebot.fire_watchdog.FireMarket",
+                    side_effect=lambda symbol, **kwargs: SimpleNamespace(symbol=symbol)),
+              patch("tradebot.fire_watchdog.watchdog_tick",
+                    return_value={"status": "idle_or_terminal"}) as tick,
+              patch("tradebot.fire_watchdog.time.sleep", side_effect=StopAfterCycle),
+              patch("builtins.print")):
+            with self.assertRaises(StopAfterCycle):
+                main(["--database", str(self.store.path)])
+
+        self.assertEqual(tick.call_count, 2)
+        with sqlite3.connect(self.root / "fire-monitoring.sqlite") as db:
+            row = db.execute(
+                "SELECT status FROM monitor_heartbeat WHERE service='watchdog'"
+            ).fetchone()
+            starts = db.execute(
+                "SELECT COUNT(*) FROM monitor_starts WHERE service='watchdog'"
+            ).fetchone()[0]
+        self.assertEqual(row, ("healthy",))
+        self.assertEqual(starts, 1)
 
     def test_corrupt_equity_and_failed_telemetry_do_not_interrupt_protection_loop(self):
         (self.root / "fire-equity-risk.sqlite").write_bytes(b"broken equity db")

@@ -20,6 +20,10 @@ from tradebot.fire_execution import (
     EXPOSED, FireTradeStore, active_position, protective_orders_verified
 )
 
+# Static, non-sensitive runtime identity. Check the current *process* journal
+# after an upgrade: a source checkout alone does not prove the daemon reloaded.
+WATCHDOG_RUNTIME_VERSION = "watchdog-telemetry-v2-20261122"
+
 
 def watchdog_tick(exchange, store, *, pause=None):
     if getattr(exchange, "base_url", None) != DEMO_API or not exchange.allow_orders:
@@ -146,6 +150,26 @@ def main(argv=None):
     monitoring_path = Path(args.database).parent / "fire-monitoring.sqlite"
     monitoring_started = False
     last_monitor_error = None
+    # Emit an unmistakable, non-secret startup marker from THIS Python process.
+    # If this event does not appear under its own systemd MainPID, the daemon
+    # isn't running this source, irrespective of the git checkout on disk.
+    print(json.dumps({"event": "watchdog_runtime_initialized",
+                      "runtime_version": WATCHDOG_RUNTIME_VERSION,
+                      "new_entry_orders_enabled": False}), flush=True)
+
+    # Register a startup state before the first broker sweep. It is explicitly
+    # *unverified* until both markets have completed one protective check.
+    # A slow/blocked first exchange GET must not masquerade as healthy.
+    try:
+        initial_monitor = MonitorStore(monitoring_path)
+        initial_monitor.start("watchdog")
+        initial_monitor.heartbeat("watchdog", "watchdog_protection_unverified")
+        monitoring_started = True
+    except Exception:
+        print(json.dumps({"event": "watchdog_telemetry_unavailable",
+                          "action": "protection_loop_continues"}), flush=True)
+        last_monitor_error = time.monotonic()
+
     while True:
         # Protection always runs before optional telemetry. Equity reads run in
         # their own read-only service; a broken equity DB cannot stop this loop.
