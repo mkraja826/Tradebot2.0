@@ -68,6 +68,21 @@ def checkpoint_health(path, *, at=None, stale_after_seconds=180):
             db.execute("BEGIN")  # one consistent view despite concurrent collectors
             if db.execute("PRAGMA quick_check(1)").fetchone() != ("ok",):
                 raise ValueError("Database integrity failure")
+            # An uncommissioned legacy ledger may legitimately predate the
+            # immutable transport receipt table. Its rows are NOT corrupt,
+            # and neither a read-only health probe nor the diagnostics CLI
+            # may silently migrate it. Report an explicit fail-closed schema
+            # prerequisite rather than a misleading SQLite integrity fault.
+            has_receipts = db.execute(
+                "SELECT 1 FROM sqlite_master "
+                "WHERE type='table' AND name='equity_read_receipts'"
+            ).fetchone() is not None
+            if not has_receipts:
+                report["database_integrity"] = "verified"
+                report["status"] = "legacy_receipt_schema_uncommissioned"
+                report["blocking_conditions"].append("equity_receipt_schema_missing")
+                report["alert_codes"].append("equity_read_receipt_invalid")
+                return report
             latest = db.execute(
                 "SELECT observed_us,equity_usd,origin FROM equity_evidence "
                 "ORDER BY observed_us DESC LIMIT 1"
