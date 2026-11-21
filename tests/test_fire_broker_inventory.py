@@ -333,7 +333,7 @@ class BrokerInventoryTests(unittest.TestCase):
             "is_net_realized_pnl": False,
             "reconciliation_as_of_us": 1795000000000000,
         })
-        digest = hashlib.sha256((key + "\\n" + body).encode()).hexdigest()
+        digest = hashlib.sha256((key + chr(10) + body).encode()).hexdigest()
         with sqlite3.connect(path) as db:
             db.execute("DROP TABLE evidence")
             db.execute("DROP TABLE claims")
