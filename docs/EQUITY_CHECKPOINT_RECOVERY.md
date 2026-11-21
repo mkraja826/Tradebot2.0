@@ -25,6 +25,10 @@ commissioning lock must remain intact. No historical checkpoints are created.
   after its decision, and again against the final pre-entry wallet read.
 - The existing 2% daily / 5% weekly / 8% observed-peak limits are unchanged.
   A missing watermark is an integrity error, never a reason to reset the peak.
+  Every risk write and read-only health check compares that watermark with all
+  immutable equity history using exact decimal values. A lowered historical
+  peak fails closed without repair, including after a new UTC opening or a
+  process restart. A higher stored peak is never reduced by this validation.
 - Runtime collection and FIRE open only an existing, nonempty risk ledger with
   its original watermark. A missing file, empty replacement or missing schema
   blocks risk approval; it is never recreated from the current wallet. Runtime

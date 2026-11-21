@@ -9,6 +9,7 @@ from tradebot.equity_monitor import risk_health
 from tradebot.equity_receipt import validate_receipt
 from tradebot.portfolio_equity_guard import (
     DEFAULT_LIMITS, PortfolioEquityGuard, EquityRiskError, amount, assess_equity, stamp,
+    validated_watermark,
 )
 
 
@@ -45,12 +46,8 @@ def signed_equity_readiness(exchange, data_dir, *, now=None):
             raise EquityRiskError("equity_observation_out_of_order_or_clock_reversed")
         daily = PortfolioEquityGuard._opening(db, stamp(day), stamp(instant))
         weekly = PortfolioEquityGuard._opening(db, stamp(week), stamp(instant))
-        peak = db.execute("SELECT high_usd FROM equity_watermark WHERE singleton=1").fetchone()
-        if peak is None:
-            raise EquityRiskError("equity_watermark_missing")
-        if amount(peak[0]) < amount(latest[1]):
-            raise EquityRiskError("equity_watermark_inconsistent")
-        assessment = assess_equity(current, daily, weekly, max(current, amount(peak[0])), instant, DEFAULT_LIMITS)
+        peak = validated_watermark(db)
+        assessment = assess_equity(current, daily, weekly, max(current, peak), instant, DEFAULT_LIMITS)
     # This assessment is not committed and cannot create a missing opening.
     return {**assessment, "health": health, "read_receipt": receipt,
             "mode": "read_only", "trade_authorized": False, "evidence_persisted": False}

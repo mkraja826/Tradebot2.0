@@ -83,6 +83,27 @@ def assess_equity(current, daily, weekly, peak, instant, limits):
     return status
 
 
+def validated_watermark(db):
+    """Check the stored peak against all immutable history in this transaction.
+
+    Equity is decimal text: SQL text ordering and binary floats can both hide
+    a lowered peak. An inconsistency is evidence failure, never permission to
+    repair the watermark or derive a replacement from the current wallet.
+    """
+    row = db.execute("SELECT high_usd FROM equity_watermark WHERE singleton=1").fetchone()
+    if row is None:
+        raise EquityRiskError("equity_watermark_missing")
+    peak = amount(row[0])
+    seen = False
+    for equity, origin in db.execute("SELECT equity_usd,origin FROM equity_evidence"):
+        seen = True
+        if origin != "delta_demo_signed_wallet" or amount(equity) > peak:
+            raise EquityRiskError("equity_watermark_inconsistent")
+    if not seen:
+        raise EquityRiskError("equity_history_or_watermark_missing")
+    return peak
+
+
 class PortfolioEquityGuard:
     """One persistent loss budget shared by BTC and gold FIRE controllers."""
 
@@ -119,6 +140,7 @@ class PortfolioEquityGuard:
             if require_existing:
                 # Do this before migrations or WAL changes. An empty file or
                 # missing schema is missing history, not a fresh risk baseline.
+                db.execute("BEGIN")
                 if db.execute("PRAGMA quick_check(1)").fetchone() != ("ok",):
                     raise EquityRiskError("equity_database_integrity_failed")
                 latest = db.execute("SELECT equity_usd,origin FROM equity_evidence "
@@ -126,8 +148,8 @@ class PortfolioEquityGuard:
                 peak = db.execute("SELECT high_usd FROM equity_watermark WHERE singleton=1").fetchone()
                 if latest is None or peak is None:
                     raise EquityRiskError("equity_history_or_watermark_missing")
-                if latest[1] != "delta_demo_signed_wallet" or amount(peak[0]) < amount(latest[0]):
-                    raise EquityRiskError("equity_watermark_inconsistent")
+                validated_watermark(db)
+                db.commit()
             db.execute("PRAGMA journal_mode=WAL")
             db.executescript("""
                 CREATE TABLE IF NOT EXISTS equity_evidence(
@@ -234,10 +256,7 @@ class PortfolioEquityGuard:
             if latest is not None and peak_row is None:
                 raise EquityRiskError("equity_watermark_missing")
             if latest is not None:
-                previous_equity = db.execute("SELECT equity_usd FROM equity_evidence WHERE observed_us=?",
-                                             (latest,)).fetchone()[0]
-                if amount(peak_row[0]) < amount(previous_equity):
-                    raise EquityRiskError("equity_watermark_inconsistent")
+                validated_watermark(db)
             old = db.execute("SELECT equity_usd FROM equity_evidence WHERE observed_us=?",
                              (current_us,)).fetchone()
             if old is not None:

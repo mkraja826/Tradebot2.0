@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import sqlite3
 
-from tradebot.portfolio_equity_guard import ANCHOR_WINDOW, amount, stamp
+from tradebot.portfolio_equity_guard import ANCHOR_WINDOW, amount, stamp, validated_watermark
 
 
 def checkpoint_health(path, *, at=None, stale_after_seconds=180):
@@ -96,9 +96,7 @@ def checkpoint_health(path, *, at=None, stale_after_seconds=180):
                 if observed_us > now_us:
                     report["alert_codes"].append("equity_clock_inconsistent")
                     raise ValueError("Future observation; clock or evidence invalid")
-                peak = db.execute("SELECT high_usd FROM equity_watermark WHERE singleton=1").fetchone()
-                if peak is None or amount(peak[0]) < amount(observed_equity):
-                    raise ValueError("Invalid equity watermark")
+                validated_watermark(db)
                 report["latest_observation_age_seconds"] = (now_us - observed_us) / 1_000_000
                 report["latest_observation_utc"] = datetime.fromtimestamp(
                     observed_us / 1_000_000, timezone.utc).isoformat()

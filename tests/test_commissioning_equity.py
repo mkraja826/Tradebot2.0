@@ -90,6 +90,34 @@ class CommissioningEquityTests(unittest.TestCase):
         self.assertFalse(result["approved"])
         self.assertEqual(result["reason"], "loss_limit_weekly")
 
+    def test_lowered_historical_peak_blocks_before_wallet_without_repair(self):
+        self.guard.observe("1100", at=self.now - timedelta(days=1))
+        self.seed()
+        with closing(sqlite3.connect(self.path)) as db, db:
+            db.execute("UPDATE equity_watermark SET high_usd='1000' WHERE singleton=1")
+        before = self.snapshot()
+        result = self.check()
+        self.assertFalse(result["approved"])
+        self.assertEqual(result["health"]["database_integrity"], "failed")
+        self.exchange.wallet_balances.assert_not_called()
+        self.assertEqual(self.snapshot(), before)
+
+    def test_final_readonly_snapshot_rejects_peak_lowered_after_health_checks(self):
+        self.guard.observe("1100", at=self.now - timedelta(days=1))
+        self.seed()
+        health = risk_health(self.path, at=self.now)
+        self.assertTrue(health["checkpoint_prerequisites_met"])
+        with closing(sqlite3.connect(self.path)) as db, db:
+            db.execute("UPDATE equity_watermark SET high_usd='1000' WHERE singleton=1")
+        before = self.snapshot()
+        # Simulate previously healthy snapshots; the final DB transaction must
+        # independently validate history even when those snapshots were sound.
+        with patch("tradebot.commissioning_equity.risk_health", return_value=health):
+            with self.assertRaisesRegex(EquityRiskError, "watermark_inconsistent"):
+                self.check()
+        self.exchange.wallet_balances.assert_called_once_with()
+        self.assertEqual(self.snapshot(), before)
+
     def test_missing_openings_never_use_the_later_wallet(self):
         self.guard.observe("1000", at=self.now)
         before = self.snapshot()
