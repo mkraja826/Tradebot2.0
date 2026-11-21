@@ -21,15 +21,20 @@ class FakeBroker(DeltaDemo):
                         "contract_type": "perpetual_futures"}
         self.orders = {
             "101": {"id": 101, "product_id": 27, "client_order_id": FIRE,
-                    "side": "buy", "size": 2, "state": "closed", "unfilled_size": 0},
+                    "side": "buy", "size": 2, "state": "closed", "unfilled_size": 0,
+                    "order_type": "market_order", "reduce_only": False,
+                    "bracket_stop_loss_price": "95",
+                    "bracket_take_profit_price": "110"},
             "102": {"id": "102", "product_id": 27, "side": "sell",
                     "size": "2", "state": "cancelled",
                     "stop_order_type": "stop_loss_order", "stop_price": "95",
-                    "bracket_order": True},
+                    "bracket_order": True, "stop_trigger_method": "mark_price",
+                    "reduce_only": True},
             "103": {"id": 103, "product_id": 27, "side": "sell",
                     "size": "2", "state": "closed",
                     "stop_order_type": "take_profit_order", "stop_price": "110",
-                    "bracket_order": True},
+                    "bracket_order": True, "stop_trigger_method": "mark_price",
+                    "reduce_only": True},
         }
 
     def _request(self, method, path, *, auth=False, params=None, payload=None):
@@ -203,6 +208,72 @@ class BracketEvidenceTests(unittest.TestCase):
                 self.exchange.orders[order_id][field] = value
                 self.assertIn(expected, self.run_check()["blockers"])
                 self.exchange.orders[order_id][field] = saved
+
+    def test_parent_entry_instruction_and_attached_brackets_fail_closed(self):
+        checks = (
+            ("order_type", "limit_order",
+             "broker_parent_entry_instruction_unverified"),
+            ("order_type", None, "broker_parent_entry_instruction_unverified"),
+            ("reduce_only", True, "broker_parent_entry_instruction_unverified"),
+            ("reduce_only", None, "broker_parent_entry_instruction_unverified"),
+            ("bracket_stop_loss_price", "94", "broker_parent_bracket_echo_mismatch"),
+            ("bracket_take_profit_price", "111", "broker_parent_bracket_echo_mismatch"),
+            ("bracket_stop_loss_price", None, "broker_parent_bracket_echo_unverified"),
+            ("bracket_take_profit_price", "NaN", "broker_parent_bracket_echo_unverified"),
+        )
+        for field, value, expected in checks:
+            with self.subTest(field=field, value=value):
+                self.exchange.orders["101"][field] = value
+                report = self.run_check()
+                self.assertIn(expected, report["blockers"])
+                self.assertEqual(report["observation_status"], "review_required")
+                self.assertFalse(report["trade_authorized"])
+                self.assertFalse(report["is_historical_protection_proven"])
+                self.assertTrue(all(call[0] == "GET" for call in self.exchange.calls))
+                self.exchange.orders["101"][field] = {
+                    "order_type": "market_order",
+                    "reduce_only": False,
+                    "bracket_stop_loss_price": "95",
+                    "bracket_take_profit_price": "110",
+                }[field]
+                self.exchange.calls.clear()
+
+    def test_child_trigger_method_and_reduce_only_are_not_ignored(self):
+        for child_id, prefix in (("102", "stop_loss_order"),
+                                 ("103", "take_profit_order")):
+            for field, value, expected in (
+                ("stop_trigger_method", "last_traded_price",
+                 prefix + "_broker_trigger_method_unverified"),
+                ("stop_trigger_method", None,
+                 prefix + "_broker_trigger_method_unverified"),
+                ("reduce_only", False, prefix + "_broker_reduce_only_unverified"),
+                ("reduce_only", None, prefix + "_broker_reduce_only_unverified"),
+            ):
+                with self.subTest(child=child_id, field=field, value=value):
+                    good = self.exchange.orders[child_id][field]
+                    self.exchange.orders[child_id][field] = value
+                    report = self.run_check()
+                    self.assertIn(expected, report["blockers"])
+                    self.assertEqual(report["observation_status"], "review_required")
+                    self.assertFalse(report["trade_authorized"])
+                    self.assertFalse(report["safe_to_enable_fire"])
+                    self.exchange.orders[child_id][field] = good
+                    self.exchange.calls.clear()
+
+    def test_parent_unfilled_quantity_accepts_numeric_zero_but_rejects_unsafe_values(self):
+        for zero in (0, "0", "0.000", "0E-7"):
+            with self.subTest(zero=zero):
+                self.exchange.orders["101"]["unfilled_size"] = zero
+                self.assertEqual(self.run_check()["observation_status"],
+                                 "historical_order_fields_match_not_protection_proof")
+        for bad in (1, "0.5", -1, "-0.5", "NaN", "Infinity", True, None):
+            with self.subTest(bad=bad):
+                self.exchange.orders["101"]["unfilled_size"] = bad
+                report = self.run_check()
+                self.assertTrue(any("broker_parent_unfilled_quantity_" in x
+                                    for x in report["blockers"]))
+                self.assertEqual(report["observation_status"], "review_required")
+                self.assertFalse(report["trade_authorized"])
 
     def test_unknown_broker_child_state_fails_closed(self):
         self.exchange.orders["103"]["state"] = "unknown_provider_state"
