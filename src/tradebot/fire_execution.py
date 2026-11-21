@@ -103,7 +103,10 @@ def _protective_ids(orders, *, product_id, plan):
             continue
         category = order.get("stop_order_type")
         if category not in ("stop_loss_order", "take_profit_order"):
-            continue
+            # A third same-product order (including a manual/unknown order)
+            # invalidates exclusive bracket protection. The chosen FIRE
+            # cannot safely attribute that order to its parent fill.
+            return {}
         order_id = order.get("id")
         id_valid = ((type(order_id) is int and order_id > 0)
                     or (type(order_id) is str and bool(order_id.strip())))
@@ -111,7 +114,9 @@ def _protective_ids(orders, *, product_id, plan):
                 order.get("side") != side or
                 order.get("state") not in ("open", "pending") or
                 not id_valid):
-            continue
+            # An invalid same-product protective child cannot be ignored
+            # simply because one valid SL and TP pair also exists.
+            return {}
         requested = plan["stop_loss"] if category == "stop_loss_order" else plan["take_profit"]
         try:
             size = _dec(order.get("size"))
@@ -119,12 +124,16 @@ def _protective_ids(orders, *, product_id, plan):
                        _dec(order.get("stop_price")) == _dec(requested))
         except FireTradeError:
             matched = False
-        if matched:
-            # Two matching child orders are not interchangeable redundancy:
-            # either could close/over-close the same net position. With more
-            # than one matching order, verification is ambiguous and must
-            # trigger the existing emergency-protection path.
-            found.setdefault(category, []).append(str(order_id))
+        if not matched:
+            # Any other open bracket for this exact product can prematurely
+            # close or over-close the position even if our expected pair is
+            # otherwise present. Fail closed instead of filtering it away.
+            return {}
+        # Two matching child orders are not interchangeable redundancy:
+        # either could close/over-close the same net position. With more
+        # than one matching order, verification is ambiguous and must
+        # trigger the existing emergency-protection path.
+        found.setdefault(category, []).append(str(order_id))
     return found
 
 
