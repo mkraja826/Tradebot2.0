@@ -90,11 +90,19 @@ def _receipt(symbol, row):
     if not isinstance(evidence, dict):
         raise InventoryEvidenceError("invalid_receipt_payload")
     submitted = evidence.get("orders_submitted")
-    if status == "rejected_no_order" and submitted is False:
+    broker_refs = any(evidence.get(key) for key in (
+        "broker_order_id", "entry", "exit_order_ids", "order_state", "protected_at"))
+    protection_claimed = (evidence.get("protection_verified") is True
+                          or evidence.get("liquidation_verified") is True)
+    if (status == "rejected_no_order" and submitted is False
+            and not broker_refs and not protection_claimed):
         category = "locally_reported_no_order"
-    elif status in CLOSED_RECEIPT_STATUSES and submitted is True:
+    elif (status in CLOSED_RECEIPT_STATUSES and submitted is True
+          and evidence.get("broker_order_id")):
         category = "locally_reported_flat"
     else:
+        # Contradictory no-order claims or closed receipts without a linked
+        # broker entry ID require review; never turn them into safe outcomes.
         category = "requires_broker_review"
     return {"symbol": symbol, "fire_id": press, "created_at": created,
             "updated_at": updated, "status": status, "category": category,
