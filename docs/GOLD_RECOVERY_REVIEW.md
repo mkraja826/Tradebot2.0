@@ -28,7 +28,9 @@ The capture command uses the existing mutation-disabled Delta India DEMO client:
 4. Require fresh collector/watchdog evidence and genuine UTC daily/weekly
    checkpoints. Evaluate a fresh authenticated wallet response against existing
    daily, weekly and peak limits, using the same deterministic calculation as
-   FIRE. This read-only check never creates an observation, changes the peak or
+   FIRE. Pin the original risk ledger's file identity across the health checks,
+   network wallet read and final read-only calculation; replacement fails closed.
+   This read-only check never creates an observation, changes the peak or
    recovers a missed checkpoint. FIRE independently rechecks before submission.
 5. Wait at least five minutes after the recorded prior attempt's update time
    before querying its complete paginated Gold fill window (one second before
