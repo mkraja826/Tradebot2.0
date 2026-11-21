@@ -442,22 +442,26 @@ class FireDemoController:
                 "equity_monitor": equity_precheck})
             midpoint = (float(snapshot["core"]["best_bid"]) + float(snapshot["core"]["best_ask"])) / 2
             context = decision_context(exchange, self.store, self.symbol, collected.timestamp(), midpoint)
-            if self.archive is not None:
-                stage = "historical_data_integrity"
-                try:
-                    levels = self.archive.levels(self.symbol, collected.timestamp(), midpoint)
-                except (sqlite3.Error, ValueError, TypeError):
-                    raise FireTradeError("Historical levels unavailable") from None
-                periods = levels.get("periods") if isinstance(levels, dict) else None
-                required = ("day", "previous_day", "week", "previous_week",
-                            "month", "previous_month")
-                if not isinstance(periods, dict) or any(
-                    not isinstance(periods.get(key), dict)
-                    or periods[key].get("quality_status") != "provisionally_valid"
-                    for key in required
-                ):
-                    raise FireTradeError("Unverified historical levels; no FIRE order")
-                context["historical_levels"] = levels
+            # Historical data integrity is mandatory, not an optional plugin.
+            # A direct FireDemoController or missed dashboard wiring must
+            # never enter the GPT-6 decision path without an archive.
+            stage = "historical_data_integrity"
+            if self.archive is None:
+                raise FireTradeError("Historical candle archive not configured")
+            try:
+                levels = self.archive.levels(self.symbol, collected.timestamp(), midpoint)
+            except (sqlite3.Error, ValueError, TypeError):
+                raise FireTradeError("Historical levels unavailable") from None
+            periods = levels.get("periods") if isinstance(levels, dict) else None
+            required = ("day", "previous_day", "week", "previous_week",
+                        "month", "previous_month")
+            if not isinstance(periods, dict) or any(
+                not isinstance(periods.get(key), dict)
+                or periods[key].get("quality_status") != "provisionally_valid"
+                for key in required
+            ):
+                raise FireTradeError("Unverified historical levels; no FIRE order")
+            context["historical_levels"] = levels
             self.store.update(press, "reasoning", indicators=context)
             model_snapshot = {**snapshot, "indicators": context, "fire_execution_scope": {
                 "environment": "delta-india-demo",

@@ -173,13 +173,24 @@ class FireExecutionTests(unittest.TestCase):
             self.calls.append(routes)
             loader()
             return {"results": {"fire": {"decision": p}}}
-        return FireDemoController(
+        desk = FireDemoController(
             self.path, enabled=enabled,
             exchange_factory=lambda: self.exchange,
             snapshot_loader=snapshot,
             probe=model, spawn=lambda callback: callback(),
             pause=lambda seconds: None,
         )
+        class ValidArchive:
+            def levels(self, symbol, at, price):
+                return {"periods": {
+                    key: {"quality_status": "provisionally_valid"}
+                    for key in ("day", "previous_day", "week", "previous_week",
+                                "month", "previous_month")
+                }}
+        # Test fixtures deliberately make the mandatory historical gate pass.
+        # Production must use an actual checked candle archive.
+        desk.archive = ValidArchive()
+        return desk
 
     def test_one_click_posts_one_order_and_verifies_both_protective_stops(self):
         fire = self.make()
@@ -281,6 +292,48 @@ class FireExecutionTests(unittest.TestCase):
         fire = self.make()
         fire.start()
         self.assertEqual(fire.snapshot()["reason_code"], "account_exposure_preflight_failed")
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.exchange.requests, [])
+
+    def test_missing_order_pagination_metadata_never_proves_flat(self):
+        original = self.exchange._request
+        def missing_meta(method, path, **kwargs):
+            if method == "GET" and path == "/v2/orders":
+                return {"result": []}
+            return original(method, path, **kwargs)
+        self.exchange._request = missing_meta
+        fire = self.make()
+        fire.start()
+        self.assertEqual(fire.snapshot()["reason_code"],
+                         "account_exposure_preflight_failed")
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.exchange.requests, [])
+
+    def test_global_position_continuation_never_proves_flat(self):
+        original = self.exchange._request
+        def partial(method, path, **kwargs):
+            if method == "GET" and path == "/v2/positions/margined":
+                return {"result": [], "meta": {"after": "next-page"}}
+            return original(method, path, **kwargs)
+        self.exchange._request = partial
+        fire = self.make()
+        fire.start()
+        self.assertEqual(fire.snapshot()["reason_code"],
+                         "account_exposure_preflight_failed")
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.exchange.requests, [])
+
+    def test_realtime_position_continuation_never_proves_flat(self):
+        original = self.exchange._request
+        def partial(method, path, **kwargs):
+            if method == "GET" and path == "/v2/positions":
+                return {"result": [], "meta": {"after": "next-page"}}
+            return original(method, path, **kwargs)
+        self.exchange._request = partial
+        fire = self.make()
+        fire.start()
+        self.assertEqual(fire.snapshot()["reason_code"],
+                         "account_exposure_preflight_failed")
         self.assertEqual(self.calls, [])
         self.assertEqual(self.exchange.requests, [])
 
@@ -434,6 +487,16 @@ class FireExecutionTests(unittest.TestCase):
             self.assertEqual(fire.snapshot()["reason_code"], "portfolio_equity_limits_failed")
             self.assertEqual(self.calls, [])
             self.assertEqual(self.exchange.requests, [])
+
+    def test_missing_archive_rejects_before_paid_ai_and_broker_order(self):
+        fire = self.make()
+        fire.archive = None
+        self.assertTrue(fire.start()[0])
+        self.assertEqual(fire.snapshot()["reason_code"],
+                         "historical_data_integrity_failed")
+        self.assertFalse(self.calls)
+        self.assertFalse(self.exchange.requests)
+        self.assertFalse(fire.snapshot()["orders_submitted"])
 
     def test_quarantined_historical_levels_block_paid_ai_and_execution(self):
         class UnverifiedArchive:

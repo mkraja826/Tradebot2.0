@@ -21,6 +21,27 @@ class FireServiceTests(unittest.TestCase):
                 )
                 self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_equity_installer_refuses_staging_or_missing_original_ledger(self):
+        path = ROOT / "ops/install_equity_monitor_service.sh"
+        script = path.read_text()
+        self.assertEqual(subprocess.run(
+            ["bash", "-n", str(path)], capture_output=True
+        ).returncode, 0)
+        # Both currently deployed services must point to this *exact* source
+        # directory before the installer writes a systemd unit. No implicit
+        # switch to the isolated -review worktree is permitted.
+        self.assertIn("tradebot2-dashboard.service", script)
+        self.assertIn("tradebot2-fire-watchdog.service", script)
+        self.assertIn('deployed_dir" != "$PROJECT"', script)
+        self.assertIn('! -f "$PROJECT/data/fire-equity-risk.sqlite"', script)
+        self.assertIn('tradebot.equity_install_preflight', script)
+        self.assertLess(script.index('systemctl show "$service"'),
+                        script.index('tradebot.equity_install_preflight'))
+        self.assertLess(script.index('tradebot.equity_install_preflight'),
+                        script.index('sudo install -m 0644'))
+        self.assertNotIn("sudo systemctl start", script)
+        self.assertNotIn("sudo systemctl enable", script)
+
     def test_fire_demo_cannot_be_enabled_without_active_watchdog(self):
         active = (ROOT / "ops/enable_fire_demo.sh").read_text()
         self.assertIn("YES-DELTA-DEMO", active)

@@ -43,9 +43,20 @@ def require_flat_demo_account(exchange, *, selected_symbol=None, selected_produc
     if not isinstance(profile, dict) or profile.get("margin_mode") != "isolated":
         raise AccountExposureRejected("Broker isolated-margin mode not verified")
 
-    global_positions = exchange._request(
+    wide_reply = exchange._request(
         "GET", "/v2/positions/margined", auth=True
-    )["result"]
+    )
+    if not isinstance(wide_reply, dict):
+        raise AccountExposureRejected("Account-wide positions unverified")
+    # Delta can omit metadata for this positions endpoint. If it supplies
+    # a continuation cursor, failing to inspect it could falsely approve
+    # a flat first page while later pages contain exposure.
+    wide_meta = wide_reply.get("meta")
+    if wide_meta is not None and (
+            not isinstance(wide_meta, dict)
+            or wide_meta.get("after") not in (None, "")):
+        raise AccountExposureRejected("Account-wide position pagination unverified")
+    global_positions = wide_reply.get("result")
     if not isinstance(global_positions, list):
         raise AccountExposureRejected("Account-wide positions unverified")
     for row in global_positions:
@@ -75,10 +86,17 @@ def require_flat_demo_account(exchange, *, selected_symbol=None, selected_produc
                 or type(product.get("id")) is not int or product["id"] <= 0):
             raise AccountExposureRejected("FIRE product not verified")
         ids[symbol] = product["id"]
-        live = exchange._request(
+        live_reply = exchange._request(
             "GET", "/v2/positions",
             params={"product_id": product["id"]}, auth=True
-        )["result"]
+        )
+        if not isinstance(live_reply, dict):
+            raise AccountExposureRejected("Real-time market positions unverified")
+        meta = live_reply.get("meta")
+        if meta is not None and (
+                not isinstance(meta, dict) or meta.get("after") not in (None, "")):
+            raise AccountExposureRejected("Real-time market pagination unverified")
+        live = live_reply.get("result")
         if isinstance(live, dict):
             live = [live]
         if not isinstance(live, list):

@@ -54,7 +54,7 @@ class DemoAccount(FireMarket):
                 return {"result": {"product_id": 27, "entry_price":"0","size":0}}
             return {"result":{"entry_price":"3800","size": self.gold_size}}
         if method == "GET" and path == "/v2/orders":
-            return {"result":self.orders[:]}
+            return {"result": self.orders[:], "meta": {"after": None}}
         if method == "GET" and path == "/v2/profile":
             return {"result": {"margin_mode": "isolated"}}
         if method == "GET" and path == "/v2/positions/margined":
@@ -188,6 +188,15 @@ class MarketTest(unittest.TestCase):
             desk = FireDemoController(Path(tmp)/"fire-xaut.sqlite",enabled=True,symbol="XAUTUSD",
                                       exchange_factory=lambda:broker,snapshot_loader=snapshot,probe=decide,
                                       spawn=lambda job:job(),pause=lambda _:None)
+            # The mandatory history gate must be configured even in mocks.
+            class ValidArchive:
+                def levels(self, symbol, at, price):
+                    return {"periods": {
+                        key: {"quality_status": "provisionally_valid"}
+                        for key in ("day", "previous_day", "week", "previous_week",
+                                    "month", "previous_month")
+                    }}
+            desk.archive = ValidArchive()
             self.assertTrue(desk.start()[0])
             self.assertEqual(desk.snapshot()["status"],"protected_active")
             self.assertEqual(watchdog_tick(broker,desk.store)["status"], "protected_active")

@@ -63,6 +63,18 @@ class DynamicLeverageTests(unittest.TestCase):
         with self.assertRaises(LeverageRejected):
             verify_liquidation_clearance(self.broker, 27, self.plan, self.position)
 
+    def test_liquidation_cannot_trust_only_first_position_page(self):
+        self.broker.position = 1
+        original = self.broker._request
+        def cursor(method, path, **kwargs):
+            response = original(method, path, **kwargs)
+            if path == "/v2/positions/margined":
+                return {**response, "meta": {"after": "another-page"}}
+            return response
+        self.broker._request = cursor
+        with self.assertRaisesRegex(LeverageRejected, "Incomplete margin-aware"):
+            verify_liquidation_clearance(self.broker, 27, self.plan, self.position)
+
     def test_short_liquidation_buffer_enforced_in_both_directions(self):
         self.broker.position = -1
         plan = {"direction": "SHORT", "contracts": 1, "leverage": 20,
