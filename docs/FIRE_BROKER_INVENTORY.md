@@ -42,7 +42,11 @@ For both sweeps the tool uses authenticated GETs to inspect:
   distinguish. Nonempty reconciliation reports require both the `evidence`
   and `claims` source tables; otherwise observation fails closed. A fingerprint
   is not a broker signature and does not guarantee atomicity across databases
-  or capture every intermediate state between the two reads.
+  or capture every intermediate state between the two reads. Each individual
+  SQLite file is read using a single bounded, read-only transaction covering
+  its receipt/report, entry, and evidence/ownership tables; source device/inode
+  is checked before and after. This avoids combining separate table reads
+  from different moments within the same SQLite file.
 
 Both observations must be flat, isolated, consistent and stable. A changed
 product ID, mismatch between margined and filtered positions, open unrelated
