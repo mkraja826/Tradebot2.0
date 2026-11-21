@@ -6,7 +6,10 @@ BTC and Gold dashboard FIRE endpoints are disabled and both services healthy.
 It additionally requires the equity collector service to be active, and
 current collector/watchdog telemetry, authentic daily/weekly
 equity checkpoints and a fresh signed-wallet loss assessment before consuming
-the one-shot marker. A missing opening cannot be reconstructed by this command.
+the one-shot marker. Dashboard/watchdog/collector activity and both disabled
+FIRE endpoints are rechecked after the broker and equity reads, so changes
+during preflight fail closed. A missing opening cannot be reconstructed by
+this command.
 
 ```bash
 # Read-only readiness; never submits an order.
