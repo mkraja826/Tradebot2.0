@@ -29,7 +29,12 @@ For both sweeps the tool uses authenticated GETs to inspect:
 - Independently identified BTCUSD and XAUTUSD perpetual products and their
   real-time product-filtered positions. For each FIRE product, compare the
   **exact signed contract quantity** from the account-wide margined response
-  against the real-time filtered response. A same-direction quantity
+  against the real-time filtered response. Both broker position endpoints
+  are checked for **present pagination metadata**: malformed metadata or
+  a nonempty `after` cursor on the product-filtered real-time endpoint
+  blocks the diagnostic instead of treating a partial zero page as complete.
+  The real-time endpoint may omit metadata; its absence does not establish
+  completeness independently of the provider's API contract. A same-direction quantity
   difference (e.g. +5 vs +3), opposite signs, or a nonzero/zero mismatch is
   inconsistent and blocks a clean result. Even quantities that agree but
   are nonzero remain blocked as active account exposure. Delta documents
