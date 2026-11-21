@@ -384,6 +384,72 @@ class BracketEvidenceTests(unittest.TestCase):
         self.assertFalse(report["is_historical_protection_proven"])
         self.assertFalse(report["trade_authorized"])
 
+    def test_unresolved_or_contradictory_fire_status_never_looks_like_historical_match(self):
+        # The parent/children are deliberately otherwise a perfect match.
+        # An unresolved local FIRE must not receive a clean historic label.
+        for status in ("protected_active", "exposure_unknown", "submitting",
+                       "verifying_protection", "unknown_legacy", "rejected_no_order"):
+            with self.subTest(status=status):
+                self.write_saved()
+                with sqlite3.connect(self.dbpath) as db:
+                    db.execute("UPDATE fire_requests SET status=? WHERE press=?",
+                               (status, FIRE))
+                self.exchange.calls.clear()
+                result = self.run_check()
+                self.assertIn("historical_fire_receipt_not_locally_flat",
+                              result["blockers"])
+                self.assertEqual(result["authenticated_order_gets"], 0)
+                self.assertEqual(result["observation_status"], "review_required")
+                self.assertFalse(result["trade_authorized"])
+                self.assertFalse(result["is_historical_protection_proven"])
+                self.assertEqual(self.exchange.calls, [])
+
+    def test_invalid_local_fire_chronology_fails_before_broker_get(self):
+        cases = (
+            ("created_at", "not-a-date"),
+            ("updated_at", "2026-11-20T06:00:00"),  # no timezone
+            ("created_at", "2026-11-21T05:00:00+00:00"),  # after updated
+        )
+        for field, value in cases:
+            with self.subTest(field=field, value=value):
+                self.write_saved()
+                with sqlite3.connect(self.dbpath) as db:
+                    db.execute("UPDATE fire_requests SET " + field +
+                               "=? WHERE press=?", (value, FIRE))
+                self.exchange.calls.clear()
+                report = self.run_check()
+                self.assertIn("invalid_local_fire_receipt_chronology_or_identity",
+                              report["blockers"])
+                self.assertEqual(report["authenticated_order_gets"], 0)
+                self.assertFalse(report["trade_authorized"])
+                self.assertEqual(self.exchange.calls, [])
+
+    def test_terminal_flat_receipt_can_be_diagnosed_without_trade_permission(self):
+        for status in ("flat_verified", "aborted_flat", "cancelled_flat_verified"):
+            with self.subTest(status=status):
+                self.write_saved()
+                with sqlite3.connect(self.dbpath) as db:
+                    db.execute("UPDATE fire_requests SET status=? WHERE press=?",
+                               (status, FIRE))
+                self.exchange.calls.clear()
+                report = self.run_check()
+                self.assertEqual(report["observation_status"],
+                                 "historical_order_fields_match_not_protection_proof")
+                self.assertEqual(report["authenticated_order_gets"], 3)
+                self.assertFalse(report["trade_authorized"])
+                self.assertFalse(report["is_historical_protection_proven"])
+
+    def test_malformed_public_arguments_return_sanitized_blocker(self):
+        for symbol, fire_id in (([], FIRE), ({}, FIRE),
+                                (None, FIRE), ("BTCUSD", []),
+                                ("BTCUSD", 123), ("WRONG", FIRE)):
+            with self.subTest(symbol=symbol, fire_id=fire_id):
+                report = self.run_check(symbol=symbol, fire_id=fire_id)
+                self.assertIn("invalid_fire_identity", report["blockers"])
+                self.assertEqual(report["observation_status"], "review_required")
+                self.assertFalse(report["trade_authorized"])
+                self.assertEqual(self.exchange.calls, [])
+
     def test_no_order_or_unknown_fire_receipt_never_contacts_broker(self):
         self.saved["orders_submitted"] = False
         self.write_saved()
