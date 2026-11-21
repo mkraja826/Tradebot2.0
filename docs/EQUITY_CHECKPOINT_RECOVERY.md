@@ -134,6 +134,21 @@ commissioned**. A VM cannot alert about its own complete loss of connectivity.
 4. Stage the tested branch in an isolated worktree/venv and run the offline
    tests. Use copied evidence for migration/rollback checks; never seed the
    live data directory with test fixtures or use a later balance as an opening.
+   **Offline additive migration rehearsal only:** after reviewing the source,
+   use an existing private `~/tradebot-backups/full-<UTC stamp>/` directory
+   containing a verified SQLite online backup and execute
+   `python -m tradebot.equity_migration_rehearsal --snapshot-dir <full-backup-directory>`.
+   The tool verifies the input SQLite snapshot, creates a new private
+   `~/tradebot-backups/migration-drill-*` directory and uses the actual
+   `PortfolioEquityGuard(..., require_existing=True)` migration **only on
+   that disposable copy**. It compares all original equity evidence rows,
+   the historical peak watermark and all real prior receipt rows byte/value
+   for preservation, requires all six immutable triggers, and forbids
+   synthesizing historical receipts. It checks the input backup hash again
+   and never opens the live `~/Tradebot2.0/data/` path. Exit 0 means the
+   **copy-only** migration passed, never that the existing VM is migrated,
+   that a weekly opening exists, that independent approval is waived or that
+   live trading can begin. Exit 2 means the rehearsal is blocked or unverified.
 5. Check `timedatectl show --property=NTPSynchronized --value`. Review
    the new collector installer `ops/install_equity_monitor_service.sh`
    **without executing it in the staging worktree**. When independently
@@ -149,7 +164,7 @@ commissioned**. A VM cannot alert about its own complete loss of connectivity.
    persistent database and service protection before staging it.
    A separate `tradebot.equity_install_preflight` probe runs with the
    original risk database opened **read-only**. It refuses unit staging
-   until the existing `equity_read_receipts` table and four evidence
+   until the existing `equity_read_receipts` table and six evidence
    immutability triggers exist and the original stored watermark matches
    the preserved history. On the currently verified legacy VM it is
    expected to exit **2** with `receipt_schema_migration_required`.
