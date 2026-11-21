@@ -18,7 +18,7 @@ from uuid import uuid4
 
 from tradebot.delta import DeltaDemo, DeltaReadError
 from tradebot.equity_receipt import EquityReadError
-from tradebot.portfolio_equity_guard import PortfolioEquityGuard, EquityRiskError, stamp
+from tradebot.portfolio_equity_guard import RuntimeEquityGuard, EquityRiskError, stamp
 
 SERVICES = {"watchdog", "equity_collector"}
 READ_FAILURES = {
@@ -190,7 +190,7 @@ def collect_once(exchange, data_dir, *, clock_check=clock_synchronized):
     try:
         if not clock_check():
             raise EquityReadError("system_clock_unverified")
-        result = PortfolioEquityGuard(path).observe_signed_demo(exchange)
+        result = RuntimeEquityGuard(path).observe_signed_demo(exchange)
         if result["reason"].startswith("loss_limit_"):
             status = "equity_loss_limit_breached"
     except (EquityReadError, DeltaReadError) as exc:

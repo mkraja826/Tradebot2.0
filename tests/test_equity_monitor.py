@@ -23,6 +23,13 @@ class MonitorTests(unittest.TestCase):
         self.store = MonitorStore(self.path)
         self.now = datetime(2026, 11, 23, 0, 1, tzinfo=timezone.utc)
 
+    def seed_ledger(self):
+        path = self.root / "fire-equity-risk.sqlite"
+        guard = PortfolioEquityGuard(path)
+        # Synthetic pre-existing history, older than the current live clock.
+        guard.observe("1000", at=datetime.now(timezone.utc) - timedelta(days=8))
+        return guard
+
     def test_events_are_deduplicated_and_recover_across_restarts(self):
         code = "broker_authentication_failed"
         self.assertEqual(self.store.publish([code], at=self.now)[0]["transition"], "opened")
@@ -59,6 +66,7 @@ class MonitorTests(unittest.TestCase):
         self.assertTrue(report["alert_codes"])
 
     def test_collector_is_read_only_and_ignores_missing_openings_for_monitoring(self):
+        self.seed_ledger()
         now = datetime.now(timezone.utc)
         broker = Mock(base_url=DEMO_API)
         broker.wallet_balances.return_value = {"meta":{"net_equity":"1000"},
@@ -72,12 +80,13 @@ class MonitorTests(unittest.TestCase):
         self.assertNotIn("1000", json.dumps(events))
 
     def test_authentication_failure_reports_code_without_upstream_secrets(self):
+        old = self.seed_ledger().latest_observed_us()
         broker = Mock(base_url=DEMO_API)
         broker.wallet_balances.side_effect = DeltaReadError("broker_authentication_failed")
         report, _ = collect_once(broker, self.root, clock_check=lambda:True)
         self.assertIn("broker_authentication_failed", report["alert_codes"])
         self.assertEqual(broker.wallet_balances.call_count, 1)
-        self.assertIsNone(PortfolioEquityGuard(self.root / "fire-equity-risk.sqlite").latest_observed_us())
+        self.assertEqual(PortfolioEquityGuard(self.root / "fire-equity-risk.sqlite").latest_observed_us(), old)
 
     def test_clock_failure_blocks_sampling_not_protection(self):
         broker = Mock(base_url=DEMO_API)
@@ -103,6 +112,7 @@ class MonitorTests(unittest.TestCase):
         self.assertEqual(broker.mock_calls, [])
 
     def test_reconnect_resolves_auth_failure_without_backfilling_history(self):
+        self.seed_ledger()
         broker = Mock(base_url=DEMO_API)
         broker.wallet_balances.side_effect = DeltaReadError("broker_authentication_failed")
         collect_once(broker, self.root, clock_check=lambda:True)
@@ -114,7 +124,21 @@ class MonitorTests(unittest.TestCase):
         self.assertIn({"code":"broker_authentication_failed","transition":"resolved"},
                       [{k:e[k] for k in ("code","transition")} for e in events])
         with sqlite3.connect(self.root / "fire-equity-risk.sqlite") as db:
-            self.assertEqual(db.execute("SELECT count(*) FROM equity_evidence").fetchone()[0], 1)
+            self.assertEqual(db.execute("SELECT count(*) FROM equity_evidence").fetchone()[0], 2)
+
+    def test_missing_historical_ledger_is_not_recreated_from_a_current_wallet(self):
+        path = self.root / "fire-equity-risk.sqlite"
+        self.seed_ledger()
+        original = path.read_bytes()
+        backup = path.with_name("preserved-risk.sqlite")
+        path.rename(backup)
+        broker = Mock(base_url=DEMO_API)
+        report, _ = collect_once(broker, self.root, clock_check=lambda:True)
+        self.assertFalse(report["checkpoint_prerequisites_met"])
+        self.assertIn("equity_ledger_unavailable", report["alert_codes"])
+        self.assertFalse(path.exists())
+        self.assertEqual(backup.read_bytes(), original)
+        self.assertEqual(broker.mock_calls, [])
 
     def test_read_only_check_does_not_create_or_repair_files(self):
         missing = self.root / "missing"
