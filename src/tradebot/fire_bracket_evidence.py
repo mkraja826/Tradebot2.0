@@ -102,24 +102,52 @@ def _saved(data_dir, symbol, fire_id):
     stop, target = _id(ids["stop_loss_order"]), _id(ids["take_profit_order"])
     if len({parent, stop, target}) != 3:
         raise BracketEvidenceError("duplicate_saved_order_identity")
-    # If durable entry receipt exists, it must agree on the selected parent
-    # identity. No local record (or digest) can certify broker chronology.
+    # The entry-writer saves a separate immutable-intent candidate before
+    # order submission. An entry present for this FIRE must agree with the
+    # parent receipt on ALL known original plan fields, not just order ID.
+    # Otherwise a later rewritten parent plan could appear to match a
+    # broker order despite contradicting its own durable entry intent.
     matching_entries = [row for row in entries if row[0] == fire_id]
     if len(matching_entries) > 1:
         raise BracketEvidenceError("conflicting_local_entry_receipts")
+    entry_product_id = None
     if matching_entries:
+        entry_row = matching_entries[0]
         try:
-            entry = json.loads(matching_entries[0][2])
-            entry_parent = _id(entry.get("order_id"))
-        except (TypeError, ValueError, AttributeError):
+            entry = json.loads(entry_row[2])
+        except (TypeError, ValueError):
             raise BracketEvidenceError("invalid_local_entry_receipt") from None
-        if entry_parent != parent:
+        if not isinstance(entry, dict):
+            raise BracketEvidenceError("invalid_local_entry_receipt")
+        if _id(entry.get("order_id")) != parent:
             raise BracketEvidenceError("local_parent_order_identity_conflict")
+        if (entry.get("press") != fire_id or entry.get("symbol") != symbol
+                or type(entry.get("product_id")) is not int
+                or entry["product_id"] <= 0):
+            raise BracketEvidenceError("local_entry_market_identity_conflict")
+        entry_product_id = entry["product_id"]
+        if (entry_row[1] != "filled" or entry.get("status") != entry_row[1]):
+            raise BracketEvidenceError("local_entry_filled_state_unverified")
+        plan = entry.get("plan")
+        if not isinstance(plan, dict):
+            raise BracketEvidenceError("local_entry_trade_plan_unverified")
+        try:
+            consistent_plan = (
+                plan.get("direction") == data["direction"]
+                and _size(plan.get("contracts")) == size
+                and _price(plan.get("stop_loss")) == _price(data.get("stop_loss"))
+                and _price(plan.get("take_profit")) == _price(data.get("take_profit"))
+            )
+        except BracketEvidenceError:
+            raise BracketEvidenceError("local_entry_trade_plan_unverified") from None
+        if not consistent_plan:
+            raise BracketEvidenceError("local_entry_trade_plan_conflict")
     return ({
         "direction": data["direction"], "contracts": size,
         "stop_loss": _price(data.get("stop_loss")),
         "take_profit": _price(data.get("take_profit")),
         "parent": parent, "stop_loss_order": stop, "take_profit_order": target,
+        "entry_product_id": entry_product_id,
     }, fingerprint)
 
 
@@ -169,6 +197,9 @@ def audit_bracket_fields(exchange, data_dir, *, symbol, fire_id):
                 or product.get("contract_type") != "perpetual_futures"
                 or type(pid) is not int or pid <= 0):
             raise BracketEvidenceError("broker_product_unverified")
+        if (saved["entry_product_id"] is not None
+                and saved["entry_product_id"] != pid):
+            raise BracketEvidenceError("local_entry_broker_product_identity_conflict")
         parent = _fetch_order(exchange, saved["parent"])
         result["authenticated_order_gets"] += 1
         stop = _fetch_order(exchange, saved["stop_loss_order"])
