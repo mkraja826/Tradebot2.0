@@ -14,7 +14,7 @@ import re
 
 from tradebot.delta import DeltaDemo, DEMO_API
 from tradebot.fire_broker_inventory import _read_local_snapshot, BrokerInventoryError
-from tradebot.fire_inventory import MARKET_DATABASES
+from tradebot.fire_inventory import MARKET_DATABASES, _receipt, InventoryEvidenceError
 
 VALID_FIRE_ID = re.compile(r"[0-9a-f]{32}\Z")
 
@@ -93,8 +93,9 @@ def _source_snapshot(data_dir, symbol):
 
 
 def _saved(data_dir, symbol, fire_id):
-    if symbol not in MARKET_DATABASES or not isinstance(fire_id, str) or \
-            VALID_FIRE_ID.fullmatch(fire_id) is None:
+    if (type(symbol) is not str or symbol not in MARKET_DATABASES
+            or type(fire_id) is not str
+            or VALID_FIRE_ID.fullmatch(fire_id) is None):
         raise BracketEvidenceError("invalid_fire_identity")
     requests, entries, fingerprint = _source_snapshot(data_dir, symbol)
     found = [row for row in requests if row[0] == fire_id]
@@ -106,6 +107,16 @@ def _saved(data_dir, symbol, fire_id):
         raise BracketEvidenceError("invalid_fire_receipt") from None
     if not isinstance(data, dict) or data.get("orders_submitted") is not True:
         raise BracketEvidenceError("no_submitted_order_receipt")
+    # A diagnostic scoped to historic completed orders must not present an
+    # unresolved FIRE (or a forged terminal status) as a clean retrospective
+    # match. Reuse the local inventory's strict receipt chronology and status
+    # classification rather than accepting order identifiers alone.
+    try:
+        local = _receipt(symbol, found[0])
+    except InventoryEvidenceError:
+        raise BracketEvidenceError("invalid_local_fire_receipt_chronology_or_identity") from None
+    if local["category"] != "locally_reported_flat":
+        raise BracketEvidenceError("historical_fire_receipt_not_locally_flat")
     if data.get("direction") not in ("LONG", "SHORT"):
         raise BracketEvidenceError("invalid_saved_direction")
     size = _size(data.get("contracts"))
@@ -184,7 +195,7 @@ def audit_bracket_fields(exchange, data_dir, *, symbol, fire_id):
     """Never trades; a matching historical response is not a protection proof."""
     result = {
         "environment": "delta-india-demo", "mode": "read_only",
-        "symbol": symbol if symbol in MARKET_DATABASES else None,
+        "symbol": symbol if type(symbol) is str and symbol in MARKET_DATABASES else None,
         "trade_authorized": False, "safe_to_enable_fire": False,
         "is_historical_protection_proven": False,
         "is_current_account_flatness_proven": False,
