@@ -210,9 +210,21 @@ class FireTradeStore:
             db.execute("BEGIN IMMEDIATE")
             if db.execute("SELECT 1 FROM fire_requests WHERE press=?", (press,)).fetchone():
                 return None
+            # The newest receipt being terminal does not prove older FIRE
+            # requests are resolved. Check every durable status under the
+            # same write lock: older protected/unknown/unknown-status rows
+            # must never be hidden by a newer rejected or flat receipt.
+            terminal = tuple(sorted(TERMINAL))
+            placeholders = ",".join("?" for _ in terminal)
+            outstanding = db.execute(
+                "SELECT 1 FROM fire_requests WHERE status NOT IN ("
+                + placeholders + ") LIMIT 1", terminal
+            ).fetchone()
+            if outstanding:
+                raise FireTradeError("Previous FIRE needs broker reconciliation")
             old = db.execute(
                 "SELECT status,created_at FROM fire_requests "
-                "ORDER BY created_at DESC LIMIT 1"
+                "ORDER BY created_at DESC, rowid DESC LIMIT 1"
             ).fetchone()
             if old:
                 if old[0] not in TERMINAL:
