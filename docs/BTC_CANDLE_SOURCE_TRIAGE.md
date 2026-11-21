@@ -43,6 +43,18 @@ credentials, change leverage, or place/cancel orders.
 - Exit **2**: incomplete, malformed, inconsistent, or failed market reads.
   Don't relax the time-alignment, missing-minute, or schema gates.
 
+**Per-feed failure codes (new):** Each result includes `source_checks` with
+`trade_5m`, `trade_1m`, and `mark_5m` fields. Each reports `complete`
+or a bounded fixed diagnostic such as `candle_window_incomplete`,
+`candle_ohlcv_invalid`, `candle_response_unavailable`,
+`candle_numeric_field_unverified`, or `candle_source_unavailable`.
+This permits the operator to identify an unavailable mark series, incomplete
+minute history, or malformed 5-minute data separately. The tool attempts
+all three public GETs even if the first fails, but it never treats a partial
+comparison as success and never prints provider exception bodies. A failure
+remains blocked; never synthesize missing minute candles or replace the mark
+series with traded prices.
+
 **Recovery requires separate review:** preserve original rows including
 quarantine, capture immutable hashed source request/response evidence off
 the service, compare truly independent trade/price sources and actual
