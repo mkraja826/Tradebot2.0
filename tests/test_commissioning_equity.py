@@ -148,6 +148,22 @@ class CommissioningEquityTests(unittest.TestCase):
         self.exchange.wallet_balances.assert_called_once_with()
         self.assertEqual(self.path.read_bytes(), b"untrusted replacement")
 
+    def test_equity_ledger_replacement_during_final_calculation_is_rejected(self):
+        self.seed()
+        preserved = self.root / "preserved-original.sqlite"
+        from tradebot.portfolio_equity_guard import assess_equity as original_assess
+        def replaced_assessment(*args, **kwargs):
+            report = original_assess(*args, **kwargs)
+            self.path.rename(preserved)
+            self.path.write_bytes(b"untrusted replacement")
+            return report
+        with patch("tradebot.commissioning_equity.assess_equity",
+                   side_effect=replaced_assessment):
+            with self.assertRaisesRegex(EquityRiskError, "equity_ledger_replaced"):
+                self.check()
+        self.exchange.wallet_balances.assert_called_once_with()
+        self.assertEqual(self.path.read_bytes(), b"untrusted replacement")
+
     def test_missing_openings_never_use_the_later_wallet(self):
         self.guard.observe("1000", at=self.now)
         before = self.snapshot()
