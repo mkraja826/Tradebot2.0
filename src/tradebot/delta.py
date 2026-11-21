@@ -175,17 +175,21 @@ class DeltaDemo:
                 params["after"] = after
             reply = self._request("GET", "/v2/orders", params=params, auth=True)
             result = reply.get("result")
-            if not isinstance(result, list) or any(not isinstance(v, dict) for v in result):
+            if (not isinstance(result, list) or len(result) > 50
+                    or any(not isinstance(v, dict) for v in result)):
                 raise DeltaError("Unexpected open orders response")
-            orders.extend(result)
-            meta = reply.get("meta") or {}
-            if not isinstance(meta, dict):
-                raise DeltaError("Malformed open-order pagination metadata")
-            nxt = meta.get("after")
-            if not nxt:
+            # No pagination metadata is NOT proof that there is no next page.
+            # Match the strict broker inventory: absence of 'after' fails shut.
+            meta = reply.get("meta")
+            if not isinstance(meta, dict) or "after" not in meta:
+                raise DeltaError("Open-order pagination metadata unavailable")
+            nxt = meta["after"]
+            if nxt in (None, ""):
+                orders.extend(result)
                 return orders
-            if nxt in seen:
+            if not isinstance(nxt, str) or nxt in seen or nxt == after:
                 raise DeltaError("Open-order pagination loop")
+            orders.extend(result)
             seen.add(nxt)
             after = nxt
         raise DeltaError("Open-order pagination incomplete: refuse closeout")
