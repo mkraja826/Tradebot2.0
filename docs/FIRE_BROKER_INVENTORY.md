@@ -99,6 +99,14 @@ existing per-market SQLite store with a bounded read-only transaction and
 device/inode checks; it never creates or edits a ledger. The stored receipt
 must contain a submitted broker parent ID and two distinct saved child IDs,
 a valid contract size, trade direction, and planned stop/take-profit triggers.
+The selected FIRE request must also have a **valid, timezone-aware and
+chronologically ordered local receipt**, with a terminal
+`flat_verified`, `aborted_flat` or `cancelled_flat_verified` state
+classified as `locally_reported_flat` by the separate local inventory.
+Unresolved, unknown, contradictory or malformed FIRE states block the
+historical comparison **before any broker GET**; a local terminal label is
+only a prerequisite for the retrospective diagnostic, **not a verified
+broker exit, genuine account-flatness claim, or release permission**.
 If a separate durable `fire_entries` record exists, the auditor now verifies
 its **filled state, press ID, market symbol, parent order ID, original trade
 direction, exact contract size and stop-loss/take-profit prices** against
