@@ -34,6 +34,19 @@ if Path(dashboard.__file__).resolve() != Path(sys.argv[1]).resolve():
 PY
 
 export ENABLE_DEMO_ORDERS=false
+# keys.env is sourced INSIDE this launcher, after systemd UnsetEnvironment.
+# It could accidentally reintroduce TRADEBOT_FIRE_DEMO_EXECUTION=true.
+# Allow DEMO entry mode only with the reviewed root-owned explicit opt-in
+# drop-in, and never while the fail-closed disable marker is present.
+FIRE_UNIT_DIR=/etc/systemd/system/tradebot2-dashboard.service.d
+FIRE_OPT_IN="$FIRE_UNIT_DIR/fire-demo.conf"
+FIRE_DISABLED="$FIRE_UNIT_DIR/99-fire-disabled.conf"
+if [[ -e "$FIRE_DISABLED" || ! -f "$FIRE_OPT_IN" || -L "$FIRE_OPT_IN" ]] ||
+   ! grep -Fxq 'Environment=TRADEBOT_FIRE_DEMO_EXECUTION=true' "$FIRE_OPT_IN"; then
+  export TRADEBOT_FIRE_DEMO_EXECUTION=false
+fi
+# Never accept contract-count overrides inherited from keys.env.
+export TRADEBOT_FIRE_MAX_CONTRACTS=1
 export TRADEBOT_DASHBOARD_DATA="$PROJECT/data"
 export PYTHONUNBUFFERED=1
 
