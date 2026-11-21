@@ -118,11 +118,17 @@ the child order `size`, `stop_price`, `stop_order_type`, `bracket_order`,
 https://docs.delta.exchange/
 
 The command compares historical parent product/client ID, buy/sell direction,
-full filled quantity and closed state, and checks that both child orders
-reference the same product, opposite side, saved trigger, correct bracket
-type, and **matching contract size**. Child states are summarized (open,
-pending, closed, cancelled, unknown), without exposing broker account or order
-identifiers. Malformed, missing, changed or conflicting fields produce
+full filled quantity and closed state. It additionally requires the parent
+broker response to match FIRE's original **market-order, non-reduce-only entry**
+with the saved attached bracket SL/TP prices, and requires a numerically
+verified zero unfilled contract count. Both child orders must reference the
+same product, opposite side, saved trigger, correct bracket type, **matching
+contract size**, `mark_price` trigger method and explicit **reduce_only=true**.
+Unknown or differently encoded broker fields fail closed for human schema
+review; the operator must confirm Delta DEMO's actual bracket-child
+`reduce_only` semantics before treating a clean result as comparable
+historical evidence. Child states are summarized (open, pending, closed,
+cancelled, unknown), without exposing broker account or order identifiers. Malformed, missing, changed or conflicting fields produce
 sanitized blockers. Missing credentials or network access also block; errors
 are not treated as negative broker responses. The diagnostic fingerprints
 **all saved parent/entry rows and the source database's device/inode**, then
