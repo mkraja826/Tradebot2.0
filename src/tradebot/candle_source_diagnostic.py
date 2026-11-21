@@ -97,12 +97,47 @@ def compare_sources(exchange, times):
         report["blockers"] = ["invalid_candle_window"]
         return report
     for t in times:
-        result = {"utc": datetime.fromtimestamp(t, timezone.utc).isoformat(),
-                  "comparison": "unverified"}
-        try:
-            five = _read(exchange, "BTCUSD", "5m", t, BAR, 1)[0]
-            minutes = _read(exchange, "BTCUSD", "1m", t, MINUTE, 5)
-            mark = _read(exchange, "MARK:BTCUSD", "5m", t, BAR, 1)[0]
+        result = {
+            "utc": datetime.fromtimestamp(t, timezone.utc).isoformat(),
+            "comparison": "unverified",
+            "source_checks": {},
+        }
+        # Each source is independently checked. A partial failure must never
+        # be disguised as a successful cross-resolution comparison, but the
+        # operator can now tell which public GET response is missing/malformed.
+        # Fixed error codes only: do not leak provider response or URL details.
+        sources = (
+            ("trade_5m", "BTCUSD", "5m", BAR, 1),
+            ("trade_1m", "BTCUSD", "1m", MINUTE, 5),
+            ("mark_5m", "MARK:BTCUSD", "5m", BAR, 1),
+        )
+        readings = {}
+        for name, symbol, resolution, step, count in sources:
+            try:
+                readings[name] = _read(exchange, symbol, resolution, t, step, count)
+                result["source_checks"][name] = "complete"
+            except CandleReadError as exc:
+                code = str(exc)
+                if code not in {
+                    "candle_numeric_field_unverified",
+                    "candle_response_unavailable",
+                    "candle_response_malformed",
+                    "candle_timestamp_unverified",
+                    "candle_duplicate_or_alignment_error",
+                    "candle_ohlcv_invalid",
+                    "candle_window_incomplete",
+                }:
+                    code = "candle_source_unverified"
+                result["source_checks"][name] = code
+            except Exception:
+                result["source_checks"][name] = "candle_source_unavailable"
+
+        if len(readings) != len(sources):
+            report["blockers"].append("candle_source_comparison_unverified")
+        else:
+            five = readings["trade_5m"][0]
+            minutes = readings["trade_1m"]
+            mark = readings["mark_5m"][0]
             aggregate = _aggregate(minutes)
             result.update({
                 "comparison": "source_crosscheck_complete_not_independent_proof",
@@ -116,15 +151,10 @@ def compare_sources(exchange, times):
                 "five_minute_volume_matches_one_minute": five[4] == aggregate[4],
                 "mark_reference_is_independent": False,
             })
-            # A mismatch is evidence for review, never a reason to relax an
-            # existing suspicious_extreme or quarantine admission blocker.
+            # A mismatch remains evidence for review, never a reason to relax
+            # an existing suspicious_extreme or quarantine admission blocker.
             if five[:4] != aggregate[:4]:
                 report["blockers"].append("cross_resolution_ohlc_mismatch")
-        except (ValueError, TypeError, OverflowError, KeyError, OSError):
-            report["blockers"].append("candle_source_comparison_unverified")
-        except Exception:
-            # Never expose untrusted provider response bodies or network data.
-            report["blockers"].append("candle_source_comparison_unverified")
         report["results"].append(result)
     report["blockers"] = sorted(set(report["blockers"]))
     if not report["blockers"]:
