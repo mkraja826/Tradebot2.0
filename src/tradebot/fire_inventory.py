@@ -6,7 +6,7 @@ repairs the source databases. An exchange order can exist despite a local
 no-order receipt; signed broker reconciliation is still required.
 """
 import argparse
-from collections import Counter
+from collections import Counter, defaultdict
 from contextlib import closing
 from datetime import datetime
 import json
@@ -14,6 +14,8 @@ from pathlib import Path
 import re
 import sqlite3
 import stat
+
+from tradebot.fire_performance import _validated
 
 MARKET_DATABASES = {"BTCUSD": "fire-ops.sqlite", "XAUTUSD": "fire-xaut.sqlite"}
 RECONCILIATION_DATABASE = "fire-reconciliation.sqlite"
@@ -110,6 +112,62 @@ def _receipt(symbol, row):
             "_created_sort": start}
 
 
+def _financial_reviews(rows):
+    """Classify latest local financial reports without exposing amounts.
+
+    Shares the same per-snapshot financial consistency predicate as the
+    performance summary. This proves at most the integrity of stored local
+    reconciliation snapshots, never a current authenticated broker state.
+    """
+    grouped = defaultdict(list)
+    for key, body in rows:
+        if (not isinstance(key, str) or key.count(":") != 1
+                or key.split(":")[0] not in MARKET_DATABASES
+                or not re.fullmatch("[a-f0-9]{32}", key.split(":")[1])):
+            raise InventoryEvidenceError("invalid_reconciliation_ownership")
+        try:
+            record = json.loads(body)
+        except (TypeError, ValueError):
+            raise InventoryEvidenceError("invalid_reconciliation_report") from None
+        if not isinstance(record, dict):
+            raise InventoryEvidenceError("invalid_reconciliation_report")
+        grouped[key].append(record)
+
+    statuses, verified = {}, {}
+    for key, reports in grouped.items():
+        cutoffs = [r.get("reconciliation_as_of_us") for r in reports]
+        if any(type(v) is not int or v <= 0 for v in cutoffs):
+            statuses[key] = "unsequenced_report"
+            continue
+        latest = max(cutoffs)
+        newest = [r for r in reports if r["reconciliation_as_of_us"] == latest]
+        canonical = {json.dumps(r, sort_keys=True, separators=(",", ":"),
+                                allow_nan=False) for r in newest}
+        if len(canonical) != 1:
+            statuses[key] = "conflicting_latest_reports"
+            continue
+        check = _validated(newest[0], key, latest)
+        if check is None:
+            statuses[key] = "latest_unverified_report"
+            continue
+        verified[key] = check
+        statuses[key] = "latest_locally_verified_snapshot"
+
+    # A duplicated broker fill or wallet posting cannot confirm two different
+    # trades. Flag *all* conflicting owners rather than choosing a winner.
+    owners = defaultdict(set)
+    for key, entry in verified.items():
+        for kind, values in (("fill", entry["fill_ids"]),
+                             ("posting", entry["posting_ids"])):
+            for identifier in values:
+                owners[(kind, identifier)].add(key)
+    for keys in owners.values():
+        if len(keys) > 1:
+            for key in keys:
+                statuses[key] = "shared_broker_evidence_conflict"
+    return statuses
+
+
 def read_inventory(data_dir, *, limit=100):
     """Count every local FIRE receipt and reconcile *presence*, not economics.
 
@@ -144,34 +202,33 @@ def read_inventory(data_dir, *, limit=100):
     report_rows = _read_rows(root / RECONCILIATION_DATABASE,
                              "SELECT trade_key,body FROM reports")
     known_keys = {r["symbol"] + ":" + r["fire_id"] for r in receipts}
-    review_keys = set()
     if report_rows is None:
         missing.append(RECONCILIATION_DATABASE)
+        reviews = {}
     else:
-        for key, body in report_rows:
-            if (not isinstance(key, str) or key.count(":") != 1
-                    or key.split(":")[0] not in MARKET_DATABASES
-                    or not re.fullmatch("[a-f0-9]{32}", key.split(":")[1])):
-                raise InventoryEvidenceError("invalid_reconciliation_ownership")
-            try:
-                record = json.loads(body)
-            except (TypeError, ValueError):
-                raise InventoryEvidenceError("invalid_reconciliation_report") from None
-            if not isinstance(record, dict):
-                raise InventoryEvidenceError("invalid_reconciliation_report")
-            review_keys.add(key)
-
+        reviews = _financial_reviews(report_rows)
+    review_keys = set(reviews)
     for item in receipts:
-        item["local_financial_report_present"] = (
-            (item["symbol"] + ":" + item["fire_id"]) in review_keys)
+        key = item["symbol"] + ":" + item["fire_id"]
+        item["local_financial_report_present"] = key in reviews
+        item["local_financial_review_status"] = reviews.get(key, "no_report")
+        if item["category"] == "locally_reported_no_order" and key in reviews:
+            # A no-submission claim with a financial report is contradictory,
+            # even when the report's own financial evidence is inconclusive.
+            item["category"] = "requires_broker_review"
+
     flat = [r for r in receipts if r["category"] == "locally_reported_flat"]
     missing_reviews = [r for r in flat if not r["local_financial_report_present"]]
+    unverified_reviews = [r for r in flat
+                          if r["local_financial_report_present"] and
+                          r["local_financial_review_status"] != "latest_locally_verified_snapshot"]
     unresolved = [r for r in receipts if r["category"] == "requires_broker_review"]
     orphans = sorted(review_keys - known_keys)
     receipts.sort(key=lambda r: (r.pop("_created_sort"), r["symbol"], r["fire_id"]),
                   reverse=True)
     total = sum(x["total_receipts"] or 0 for x in by_market.values())
-    evidence_complete = not missing and not orphans and not unresolved and not missing_reviews
+    evidence_complete = (not missing and not orphans and not unresolved
+                         and not missing_reviews and not unverified_reviews)
     return {
         "mode": "read_only", "source": "local_fire_receipts_and_reconciliation_report_presence",
         "scope": "non_atomic_local_snapshots_not_current_broker_state",
@@ -187,11 +244,13 @@ def read_inventory(data_dir, *, limit=100):
             r["category"] == "locally_reported_no_order" for r in receipts),
         "requires_broker_review_count": len(unresolved),
         "flat_receipts_missing_financial_review_count": len(missing_reviews),
+        "flat_receipts_unverified_financial_review_count": len(unverified_reviews),
+        "financial_review_status_counts": dict(sorted(Counter(reviews.values()).items())),
         "unmatched_financial_report_keys_count": len(orphans),
         "unmatched_financial_report_key_examples": orphans[:limit],
         "entries": receipts[:limit],
         "entries_truncated": len(receipts) > limit,
-        "caveat": "Local states and report presence are not broker-confirmed or a claim of profitability",
+        "caveat": "Historical local verification is not fresh broker proof, current flatness or profitability",
     }
 
 
