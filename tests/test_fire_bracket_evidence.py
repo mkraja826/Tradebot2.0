@@ -91,6 +91,7 @@ class BracketEvidenceTests(unittest.TestCase):
         self.assertEqual(result["observation_status"],
                          "historical_order_fields_match_not_protection_proof")
         self.assertEqual(result["authenticated_order_gets"], 3)
+        self.assertTrue(result["local_evidence_stable_across_order_reads"])
         self.assertEqual(result["historical_child_states"],
                          {"stop_loss_order": "cancelled",
                           "take_profit_order": "closed"})
@@ -107,6 +108,65 @@ class BracketEvidenceTests(unittest.TestCase):
                             for method, _, auth, params, payload
                             in self.exchange.calls))
         self.assertNotIn("101", json.dumps(result))
+
+    def test_receipt_changed_during_last_broker_get_is_blocked(self):
+        original_request = self.exchange._request
+        def mutate_after_read(method, path, **kwargs):
+            response = original_request(method, path, **kwargs)
+            if path == "/v2/orders/103":
+                changed = dict(self.saved, take_profit="111")
+                with sqlite3.connect(self.dbpath) as db:
+                    db.execute("UPDATE fire_requests SET result=? WHERE press=?",
+                               (json.dumps(changed), FIRE))
+                    db.commit()
+            return response
+        self.exchange._request = mutate_after_read
+        result = self.run_check()
+        self.assertEqual(result["authenticated_order_gets"], 3)
+        self.assertIn("local_fire_evidence_changed_during_broker_reads",
+                      result["blockers"])
+        self.assertEqual(result["observation_status"], "review_required")
+        self.assertFalse(result["local_evidence_stable_across_order_reads"])
+        self.assertFalse(result["trade_authorized"])
+        self.assertFalse(result["safe_to_enable_fire"])
+
+    def test_unrelated_local_receipt_changes_also_block_historical_audit(self):
+        another = "d" * 32
+        with sqlite3.connect(self.dbpath) as db:
+            db.execute("INSERT INTO fire_requests VALUES (?,?,?,?,?)",
+                       (another, "2026-11-19T05:00:00+00:00",
+                        "2026-11-19T06:00:00+00:00", "flat_verified",
+                        '{"orders_submitted":true}'))
+        original_request = self.exchange._request
+        def mutate_unrelated_receipt(method, path, **kwargs):
+            response = original_request(method, path, **kwargs)
+            if path == "/v2/orders/102":
+                with sqlite3.connect(self.dbpath) as db:
+                    db.execute("UPDATE fire_requests SET result=? WHERE press=?",
+                               ('{"orders_submitted":false}', another))
+            return response
+        self.exchange._request = mutate_unrelated_receipt
+        result = self.run_check()
+        self.assertIn("local_fire_evidence_changed_during_broker_reads",
+                      result["blockers"])
+        self.assertFalse(result["local_evidence_stable_across_order_reads"])
+        self.assertEqual(result["authenticated_order_gets"], 3)
+
+    def test_source_deleted_during_broker_reads_fails_without_recreating_db(self):
+        original_request = self.exchange._request
+        def unlink_after_read(method, path, **kwargs):
+            response = original_request(method, path, **kwargs)
+            if path == "/v2/orders/103":
+                self.dbpath.unlink()
+            return response
+        self.exchange._request = unlink_after_read
+        result = self.run_check()
+        self.assertIn("local_fire_evidence_changed_or_unavailable",
+                      result["blockers"])
+        self.assertFalse(self.dbpath.exists())
+        self.assertFalse(result["local_evidence_stable_across_order_reads"])
+        self.assertFalse(result["is_historical_protection_proven"])
+        self.assertFalse(result["trade_authorized"])
 
     def test_child_order_size_missing_or_wrong_is_not_accepted(self):
         for wrong in ("1", "3", None, False, "NaN"):
