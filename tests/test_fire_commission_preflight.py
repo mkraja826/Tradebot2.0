@@ -100,6 +100,35 @@ class CommissioningPreflightTests(unittest.TestCase):
                    return_value=type("Completed", (), {"returncode": 0})()):
             self.assertTrue(_services_active())
 
+    def test_collector_stops_during_equity_readiness_blocks_approval(self):
+        states = iter((True, False))
+        result = self.run_gate(services=lambda: next(states))
+        self.assertFalse(result["ready_for_supervised_operator_review"])
+        self.assertFalse(result["watchdog_and_dashboard_active"])
+        self.assertIn("service_health_changed_during_preflight", result["blockers"])
+        self.assertFalse(result["trade_authorized"])
+
+    def test_fire_endpoint_enabled_during_equity_readiness_blocks_approval(self):
+        states = iter((True, False))
+        result = self.run_gate(fire=lambda: next(states))
+        self.assertFalse(result["ready_for_supervised_operator_review"])
+        self.assertFalse(result["both_fire_endpoints_disabled"])
+        self.assertIn("fire_execution_state_changed_during_preflight", result["blockers"])
+        self.assertFalse(result["trade_authorized"])
+
+    def test_service_recheck_error_fails_closed_without_leaking_details(self):
+        calls = [0]
+        def health():
+            calls[0] += 1
+            if calls[0] == 2:
+                raise OSError("private service information")
+            return True
+        result = self.run_gate(services=health)
+        self.assertFalse(result["ready_for_supervised_operator_review"])
+        self.assertFalse(result["watchdog_and_dashboard_active"])
+        self.assertIn("service_health_recheck_unavailable", result["blockers"])
+        self.assertNotIn("private service information", str(result))
+
     def test_missing_watchdog_blocks_commission_readiness(self):
         result = self.run_gate(services=lambda: False)
         self.assertIn("dashboard_or_watchdog_not_active", result["blockers"])
