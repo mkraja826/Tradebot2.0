@@ -45,6 +45,11 @@ raw request headers or complete broker replies into a public GitHub issue.
    parent and SL/TP child order fields by exact broker ID via
    `fire_bracket_evidence`. An invalid, missing or ambiguous child
    triggers `historical_btc_bracket_fields_unverified`.
+6. Repeat NTP, all three monitor-service checks, both disabled FIRE
+   endpoints and read-only signed-equity checkpoint health after the broker
+   sweeps and archived-order reads. Any late status/freshness change blocks
+   even the limited read-only consistency result; this is not a guarantee
+   that those states remain unchanged after the report.
 
 Cheap host/ledger failures skip expensive broker calls. Any incomplete
 broker inventory skips the historical order GETs. Exceptions are reduced
