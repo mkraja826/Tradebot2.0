@@ -36,10 +36,13 @@ For both sweeps the tool uses authenticated GETs to inspect:
   An unconfirmed, accepted or submitting entry prevents a clean observation;
   a no-order request with **any** linked durable entry is contradictory.
 - An internal SHA-256 fingerprint of all local receipt rows, entry-intent rows,
-  reconciliation report rows and source file identities before and after both
-  broker reads. This catches equal-count, equal-status changes that the
-  summary view cannot distinguish, but does not provide broker authenticity
-  or guarantee atomicity across databases or intermediate states.
+  reconciliation reports, available source fill/posting evidence, ownership
+  claims and file identities before and after the broker observations. This
+  catches equal-count, equal-status changes that the summary view cannot
+  distinguish. Nonempty reconciliation reports require both the `evidence`
+  and `claims` source tables; otherwise observation fails closed. A fingerprint
+  is not a broker signature and does not guarantee atomicity across databases
+  or capture every intermediate state between the two reads.
 
 Both observations must be flat, isolated, consistent and stable. A changed
 product ID, mismatch between margined and filtered positions, open unrelated
