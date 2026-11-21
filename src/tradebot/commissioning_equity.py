@@ -33,7 +33,14 @@ def signed_equity_readiness(exchange, data_dir, *, now=None):
     # Keep the original risk evidence pinned through both health checks,
     # the wallet network read, and the final read-only SQLite transaction.
     # The runtime collector has a similar existing-file identity guard.
-    original_identity = _ledger_identity(path)
+    try:
+        original_identity = _ledger_identity(path)
+    except EquityRiskError:
+        # Preserve the read-only diagnostic API's denial response for an
+        # absent/invalid ledger, without creating or repairing evidence.
+        health = risk_health(path, at=at)
+        return {"approved": False, "reason": "equity_or_monitoring_prerequisites_missing",
+                "health": health, "trade_authorized": False}
 
     def require_same_ledger():
         if _ledger_identity(path) != original_identity:
