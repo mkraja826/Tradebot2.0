@@ -10,6 +10,22 @@ The existing `CandleArchive.levels` marks affected months
 requires `provisionally_valid` for *all* six periods and rejects an entry
 before AI/model request if any period fails. **Do not bypass that gate**.
 
+### Mark-price volume is not traded volume
+
+The operator's exact 2026-11-04 13:15 cross-check showed
+`trade_5m=complete` and `trade_1m=complete`, but
+`mark_5m=candle_numeric_field_unverified`. Delta's public documentation
+states that mark-price candlesticks do not carry trading volume. The
+diagnostic therefore accepts an **absent/null volume field in mark OHLC
+only**, marking it as `mark_5m_volume=not_provided`; it still requires
+finite, positive, ordered mark OHLC. Trade `BTCUSD` 5m and all five 1m
+bars **still require valid numeric volumes**. A malformed mark numeric
+price or missing traded volume remains a hard diagnostic failure.
+This change is a reference-data parsing correction only; **not** an
+archive repair, an independent price validation, or a FIRE admission
+change. The actual DEMO response must be retested; no source-level
+change is proof of successful broker reads.
+
 ## Read-only supplementary diagnostic
 
 Delta's documented historical candle endpoint supports `1m`, `5m`,
