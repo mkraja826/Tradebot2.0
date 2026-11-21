@@ -7,10 +7,12 @@ balances. This is a diagnostic, not an authorization to trade.
 """
 from contextlib import closing
 from datetime import datetime, timedelta, timezone
+import json
 from pathlib import Path
 import sqlite3
 
 from tradebot.portfolio_equity_guard import ANCHOR_WINDOW, amount, stamp, validated_watermark
+from tradebot.equity_receipt import EquityReadError, validate_receipt
 
 
 def checkpoint_health(path, *, at=None, stale_after_seconds=180):
@@ -42,6 +44,7 @@ def checkpoint_health(path, *, at=None, stale_after_seconds=180):
         "latest_observation_age_seconds": None,
         "latest_observation_utc": None,
         "observation_status": "unavailable",
+        "latest_receipt_status": "unavailable",
         "database_integrity": "unavailable",
         "daily_next_window_start_utc": (today + timedelta(days=1)).isoformat(),
         "weekly_next_window_start_utc": (week + timedelta(days=7)).isoformat(),
@@ -70,20 +73,48 @@ def checkpoint_health(path, *, at=None, stale_after_seconds=180):
                 "ORDER BY observed_us DESC LIMIT 1"
             ).fetchone()
 
+            def receipt_status(observed_us, observed_equity):
+                """Inspect saved historical transport evidence at its own clock time.
+
+                Never refresh/backdate stored provenance with the current clock.
+                Legacy rows lacking a receipt remain unverified, even when the
+                signed-wallet origin label is present. No database writes.
+                """
+                if type(observed_us) is not int or observed_us <= 0:
+                    return "invalid"
+                raw = db.execute(
+                    "SELECT receipt FROM equity_read_receipts WHERE observed_us=?",
+                    (observed_us,),
+                ).fetchone()
+                if raw is None:
+                    return "missing"
+                try:
+                    saved = json.loads(raw[0])
+                    if (not isinstance(saved, dict) or
+                            type(saved.get("received_us")) is not int or
+                            saved["received_us"] != observed_us):
+                        return "invalid"
+                    at = datetime.fromtimestamp(observed_us / 1_000_000, timezone.utc)
+                    verified_at = validate_receipt(observed_equity, saved, now=at)
+                    return "verified" if stamp(verified_at) == observed_us else "invalid"
+                except (EquityReadError, ValueError, TypeError, OverflowError):
+                    return "invalid"
+
             def state(period_start):
                 start = stamp(period_start)
                 end = start + ANCHOR_WINDOW*1_000_000
                 observation = db.execute(
-                    "SELECT equity_usd,origin FROM equity_evidence "
+                    "SELECT observed_us,equity_usd,origin FROM equity_evidence "
                     "WHERE observed_us>=? AND observed_us<=? AND observed_us<=? "
                     "ORDER BY observed_us LIMIT 1",
                     (start, end, now_us),
                 ).fetchone()
                 if observation:
-                    amount(observation[0])
-                    if observation[1] != "delta_demo_signed_wallet":
+                    amount(observation[1])
+                    if observation[2] != "delta_demo_signed_wallet":
                         raise ValueError("Unverified observation origin")
-                    return "verified"
+                    return ("verified" if receipt_status(observation[0], observation[1]) == "verified"
+                            else "unverified_receipt")
                 return "pending_window" if now_us <= end else "missed_window"
 
             report["daily_checkpoint"] = state(today)
@@ -97,6 +128,7 @@ def checkpoint_health(path, *, at=None, stale_after_seconds=180):
                     report["alert_codes"].append("equity_clock_inconsistent")
                     raise ValueError("Future observation; clock or evidence invalid")
                 validated_watermark(db)
+                report["latest_receipt_status"] = receipt_status(observed_us, observed_equity)
                 report["latest_observation_age_seconds"] = (now_us - observed_us) / 1_000_000
                 report["latest_observation_utc"] = datetime.fromtimestamp(
                     observed_us / 1_000_000, timezone.utc).isoformat()
@@ -106,6 +138,7 @@ def checkpoint_health(path, *, at=None, stale_after_seconds=180):
         report["weekly_checkpoint"] = "unavailable"
         report["latest_observation_age_seconds"] = None
         report["latest_observation_utc"] = None
+        report["latest_receipt_status"] = "unavailable"
         report["database_integrity"] = "failed"
         report["blocking_conditions"].append("equity_ledger_unavailable")
         report["blocking_conditions"].extend(report["alert_codes"])
@@ -118,8 +151,16 @@ def checkpoint_health(path, *, at=None, stale_after_seconds=180):
             report["blocking_conditions"].append(name + "_checkpoint_" + status)
             if status == "missed_window":
                 report["alert_codes"].append("missed_" + name + "_checkpoint")
+            elif status == "unverified_receipt":
+                report["alert_codes"].append("equity_read_receipt_invalid")
     age = report["latest_observation_age_seconds"]
-    report["observation_status"] = "stale" if age is None or age > stale_after_seconds else "fresh"
+    report["observation_status"] = ("unverified_receipt"
+                                    if report["latest_receipt_status"] in ("missing", "invalid")
+                                    else "stale" if age is None or age > stale_after_seconds
+                                    else "fresh")
+    if report["latest_receipt_status"] in ("missing", "invalid"):
+        report["blocking_conditions"].append("latest_equity_read_receipt_unverified")
+        report["alert_codes"].append("equity_read_receipt_invalid")
     if age is None or age > stale_after_seconds:
         report["blocking_conditions"].append("signed_equity_observation_stale")
         report["alert_codes"].append("signed_equity_observation_stale")
