@@ -12,6 +12,22 @@ from tradebot.fire_inventory import InventoryEvidenceError, read_inventory, main
 BTC = "a" * 32
 GOLD = "b" * 32
 UTC = "2026-11-20T10:00:00+00:00"
+BASE = 1795000000000000
+
+
+def verified_report(tag, *, cutoff=BASE + 900_000_000, net="5"):
+    return {
+        "financial_reconciliation_status": "broker_reconciled",
+        "is_net_realized_pnl": True, "funding_reconciled": True,
+        "reconciliation_version": "fire-reconciliation-v1",
+        "reconciliation_reason": "matched_fills_and_wallet",
+        "reconciliation_as_of_us": cutoff, "entry_at_us": BASE + 10_000_000,
+        "exit_at_us": BASE + 100_000_000,
+        "net_realized_pnl_usd": net, "gross_realized_pnl_usd": net,
+        "reconciled_fees_usd": "0", "funding_cashflow_usd": "0",
+        "matched_fill_ids": ["entry-" + tag, "exit-" + tag],
+        "matched_posting_ids": ["cash-" + tag, "fee-" + tag],
+    }
 
 
 class FireInventoryTests(unittest.TestCase):
@@ -100,6 +116,83 @@ class FireInventoryTests(unittest.TestCase):
         self.assertTrue(report["entries"][0]["local_financial_report_present"])
         self.assertNotIn("net_realized_pnl_usd", json.dumps(report))
         self.assertFalse(report["is_account_realized_pnl"])
+
+    def test_latest_consistent_snapshot_is_local_only_not_account_profit(self):
+        self.add_receipt("BTCUSD", BTC, "flat_verified", True)
+        self.add_report("BTCUSD:" + BTC, verified_report("btc"))
+        report = read_inventory(self.root)
+        self.assertEqual(report["entries"][0]["local_financial_review_status"],
+                         "latest_locally_verified_snapshot")
+        self.assertEqual(report["flat_receipts_unverified_financial_review_count"], 0)
+        self.assertEqual(report["financial_review_status_counts"],
+                         {"latest_locally_verified_snapshot": 1})
+        self.assertEqual(report["evidence_status"], "inventory_complete_for_local_coverage_only")
+        self.assertFalse(report["is_account_realized_pnl"])
+        self.assertFalse(report["is_account_flatness_verified"])
+        self.assertNotIn("net_realized_pnl_usd", json.dumps(report))
+
+    def test_later_unverified_snapshot_supersedes_earlier_verified(self):
+        self.add_receipt("BTCUSD", BTC, "flat_verified", True)
+        self.add_report("BTCUSD:" + BTC, verified_report("btc"), marker="old")
+        self.add_report("BTCUSD:" + BTC, {
+            "reconciliation_as_of_us": BASE + 901_000_000,
+            "is_net_realized_pnl": False,
+            "reconciliation_reason": "wallet_postings_incomplete",
+        }, marker="new")
+        report = read_inventory(self.root)
+        self.assertEqual(report["entries"][0]["local_financial_review_status"],
+                         "latest_unverified_report")
+        self.assertEqual(report["flat_receipts_unverified_financial_review_count"], 1)
+        self.assertEqual(report["evidence_status"], "incomplete_or_ambiguous")
+
+    def test_unsequenced_snapshot_never_inherits_older_verification(self):
+        self.add_receipt("BTCUSD", BTC, "flat_verified", True)
+        self.add_report("BTCUSD:" + BTC, verified_report("btc"), marker="old")
+        self.add_report("BTCUSD:" + BTC, {"is_net_realized_pnl": False}, marker="unknown")
+        report = read_inventory(self.root)
+        self.assertEqual(report["entries"][0]["local_financial_review_status"],
+                         "unsequenced_report")
+        self.assertEqual(report["flat_receipts_unverified_financial_review_count"], 1)
+
+    def test_conflicting_latest_reports_do_not_prove_coverage(self):
+        self.add_receipt("BTCUSD", BTC, "flat_verified", True)
+        self.add_report("BTCUSD:" + BTC, verified_report("btc", net="5"), marker="a")
+        self.add_report("BTCUSD:" + BTC, verified_report("btc", net="8"), marker="b")
+        report = read_inventory(self.root)
+        self.assertEqual(report["entries"][0]["local_financial_review_status"],
+                         "conflicting_latest_reports")
+        self.assertEqual(report["evidence_status"], "incomplete_or_ambiguous")
+
+    def test_cross_market_shared_fill_ids_invalidate_both_owners(self):
+        self.add_receipt("BTCUSD", BTC, "flat_verified", True)
+        self.add_receipt("XAUTUSD", GOLD, "flat_verified", True)
+        self.add_report("BTCUSD:" + BTC, verified_report("same"), marker="a")
+        self.add_report("XAUTUSD:" + GOLD, verified_report("same"), marker="b")
+        report = read_inventory(self.root)
+        self.assertEqual(report["financial_review_status_counts"],
+                         {"shared_broker_evidence_conflict": 2})
+        self.assertEqual(report["flat_receipts_unverified_financial_review_count"], 2)
+        self.assertEqual(report["evidence_status"], "incomplete_or_ambiguous")
+
+    def test_no_order_with_financial_report_requires_broker_review(self):
+        self.add_receipt("XAUTUSD", GOLD, "rejected_no_order", False)
+        self.add_report("XAUTUSD:" + GOLD, verified_report("gold"))
+        report = read_inventory(self.root)
+        self.assertEqual(report["locally_reported_no_order_count"], 0)
+        self.assertEqual(report["by_market"]["XAUTUSD"]["locally_reported_no_order"], 0)
+        self.assertEqual(report["by_market"]["XAUTUSD"]["requires_broker_review"], 1)
+        self.assertEqual(report["requires_broker_review_count"], 1)
+        self.assertEqual(report["evidence_status"], "incomplete_or_ambiguous")
+
+    def test_invalid_nonfinite_latest_report_is_not_accepted(self):
+        self.add_receipt("BTCUSD", BTC, "flat_verified", True)
+        bad = verified_report("btc")
+        bad["net_realized_pnl_usd"] = float("nan")
+        self.add_report("BTCUSD:" + BTC, bad)
+        report = read_inventory(self.root)
+        self.assertEqual(report["entries"][0]["local_financial_review_status"],
+                         "invalid_latest_report")
+        self.assertEqual(report["flat_receipts_unverified_financial_review_count"], 1)
 
     def test_reconciliation_without_receipt_is_orphan_not_account_profit(self):
         self.add_report("BTCUSD:" + BTC)
