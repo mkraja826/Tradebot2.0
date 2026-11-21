@@ -19,14 +19,29 @@ The output explicitly distinguishes:
   positions or absence of open orders.
 - `requires_broker_review`: unknown, inconsistent or potentially open state.
 - `local_financial_report_present`: at least one historical report for that
-  FIRE key exists in the reconciliation ledger. **This does not establish a
-  verified net result**; the separate `tradebot.fire_performance` verifier
-  applies economic checks and always excludes uncertain reports.
+  FIRE key exists in the reconciliation ledger; presence is **not verification**.
+- `local_financial_review_status`: classifies the latest local report as
+  `latest_locally_verified_snapshot`, `latest_unverified_report`,
+  `unsequenced_report`, `conflicting_latest_reports`,
+  `invalid_latest_report`, `shared_broker_evidence_conflict` or `no_report`.
+  The validation uses the same per-snapshot financial consistency checks as
+  `tradebot.fire_performance`; later failed evidence supersedes earlier
+  success, and conflicting fill/posting ownership invalidates all owners.
+  This is **historical local evidence**, never a fresh authenticated broker
+  check or account-wide profitability claim.
+- A local `rejected_no_order` receipt with any reconciliation report is
+  treated as `requires_broker_review`, not an accepted no-order conclusion.
 
 The report includes per-market local counts, missing database names, locally
-flat receipts lacking financial review, and reconciliation reports without
-matching local receipts. It limits displayed example entries without changing
-aggregate counts. A nonzero exit code reports unavailable or incomplete data.
+flat receipts lacking financial review, locally flat receipts with failed or
+ambiguous financial review, and reconciliation reports without matching local
+receipts. It limits displayed example entries without changing aggregate
+counts. A nonzero exit code reports unavailable or incomplete data.
+
+Even when `evidence_status=inventory_complete_for_local_coverage_only`, this
+means **only** that the visible local receipts have no identified local
+coverage conflicts. It never establishes complete broker trade inventory,
+current flatness, realized account performance or trading authorization.
 
 ## Integrity and scope
 
