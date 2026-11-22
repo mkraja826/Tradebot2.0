@@ -81,7 +81,7 @@ class StageWatchdogUnitTests(unittest.TestCase):
         candidates = list(stage.iterdir())
         self.assertEqual(len(candidates), 1)
         unit = candidates[0]
-        self.assertRegex(unit.name, r"^tradebot2-fire-watchdog.service\\.[A-Za-z0-9]{8}$")
+        self.assertRegex(unit.name, r"^tradebot2-fire-watchdog.service\.[A-Za-z0-9]{8}$")
         self.assertEqual(unit.stat().st_mode & 0o777, 0o600)
         self.assertEqual(stage.stat().st_mode & 0o777, 0o700)
         candidate = unit.read_text()
