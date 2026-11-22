@@ -6,6 +6,7 @@ user-controlled 20x maximum is a CEILING; a risk gate still sizes every entry.
 from decimal import Decimal, InvalidOperation
 
 from tradebot.fire_market import positions_for_fire
+from tradebot.signed_margin_mode import signed_account_margin_mode
 
 
 class LeverageRejected(ValueError):
@@ -87,11 +88,11 @@ def verify_liquidation_clearance(exchange, product_id, plan, position):
     """
     if not isinstance(position, dict):
         raise LeverageRejected("Missing real-time filled position")
-    # Delta exposes margin_mode on the signed account profile, not on the
-    # documented /positions/margined response. Never assume isolated mode.
-    profile = exchange._request("GET", "/v2/profile", auth=True)["result"]
-    if not isinstance(profile, dict) or profile.get("margin_mode") != "isolated":
-        raise LeverageRejected("Signed isolated-margin account profile required")
+    # GET /v2/profile is no longer permitted for API keys. Use two signed
+    # account-scoped GETs matched by user ID; never infer isolated mode from
+    # a filled position or defaults in the margined endpoint.
+    if signed_account_margin_mode(exchange) != "isolated":
+        raise LeverageRejected("Signed isolated-margin account identity required")
     entry = _positive(position.get("entry_price"))
     expected = plan["contracts"] if plan["direction"] == "LONG" else -plan["contracts"]
     if _positive_or_zero(position.get("size")) != expected:
