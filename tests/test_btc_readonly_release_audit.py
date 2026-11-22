@@ -39,6 +39,7 @@ class BtcReadOnlyAuditTests(unittest.TestCase):
         for module in (
             "tradebot.fire_leverage_probe",
             "tradebot.equity_checkpoint_health",
+            "tradebot.candle_extreme_crosscheck",
             "tradebot.fire_reconciliation_phase_probe",
             "tradebot.demo_release_evidence",
         ):
