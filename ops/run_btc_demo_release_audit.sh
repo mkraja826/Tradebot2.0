@@ -81,6 +81,10 @@ run_check 'Single-trade broker fill/wallet evidence (analysis only)' \
 run_check 'Combined host, equity, account-wide and bracket checks' \
   "$PY" -m tradebot.demo_release_evidence --data-dir "$DATA" --fire-id "$FIRE_ID"
 
+run_check 'BTC historical extreme vs public mark/1m/spot context — manual review only' \
+  "$PY" -m tradebot.candle_extreme_crosscheck --data-dir "$DATA"
+
+
 printf '\n=== FINAL ===\n'
 if [[ "$BLOCKED" -eq 0 ]]; then
   printf 'CHECK_STATUS: DIAGNOSTICS_CONSISTENT\n'
