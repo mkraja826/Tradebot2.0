@@ -37,6 +37,61 @@ INSTRUCTION = (
 )
 
 
+RESTRICTED_BTC_INSTRUCTION = (
+    "This is one supervised BTCUSD Delta India DEMO attempt using exactly "
+    "the last 24 hours of 5-minute local market history, not month or week "
+    "highs/lows. The supplied 24h history is provisionally validated locally "
+    "but not independently trade-price authenticated; when evidence is "
+    "inadequate, choose WAIT. Never invent monthly or weekly statistics. "
+    "Make no trade when spread, entry setup or risk is questionable. "
+    "Return only one JSON object with keys direction, leverage, contracts, "
+    "stop_loss, take_profit, thesis. Direction must be WAIT, LONG or SHORT. "
+    "For WAIT use contracts=0, leverage=null, stop_loss=null, "
+    "take_profit=null and explain why. For a trade choose exactly one "
+    "contract and integer leverage 1..20, tick-aligned stop_loss and "
+    "take_profit; LONG requires stop below best_bid and target above best_ask, "
+    "SHORT the reverse. Evaluate 15-minute/hour EMA20, ATR5m, VWAP and the "
+    "single true last_24h high/low only. Do not infer trade authority from "
+    "model output. Risk checks, broker signed isolated margin, verified "
+    "account-wide flatness and broker-side brackets are independent mandates."
+)
+
+
+def instruction_for_snapshot(snapshot):
+    """Prevent an old six-period prompt from hallucinating withheld months."""
+    if not isinstance(snapshot, dict):
+        raise PlanError("Invalid FIRE snapshot")
+    scope = snapshot.get("fire_execution_scope") or {}
+    if not isinstance(scope, dict):
+        raise PlanError("Invalid FIRE execution scope")
+    version = scope.get("strategy_history_version")
+    if version is None:
+        return INSTRUCTION
+    if version != "btc-demo-recent24h-v1":
+        raise PlanError("Unsupported FIRE history scope")
+    context = snapshot.get("indicators")
+    levels = context.get("historical_levels") if isinstance(context, dict) else None
+    periods = levels.get("periods") if isinstance(levels, dict) else None
+    ticker = (snapshot.get("core") or {}).get("ticker")
+    if (snapshot.get("environment") != "delta-india-demo"
+            or not isinstance(ticker, dict)
+            or ticker.get("symbol") != "BTCUSD"
+            or scope.get("max_contracts_per_entry") != 1
+            or scope.get("attached_stop_loss_and_take_profit_required") is not True
+            or not isinstance(levels, dict)
+            or levels.get("strategy_history_version") != version
+            or levels.get("source") != "original_delta_demo_24h_5m_local_only"
+            or type(periods) is not dict
+            or set(periods) != {"last_24h"}
+            or periods["last_24h"].get("quality_status") != "provisionally_valid"
+            or periods["last_24h"].get("bars") != 288
+            or periods["last_24h"].get("expected") != 288
+            or any(context.get(k) is None
+                   for k in ("ema_15m", "ema_1h", "atr_5m"))):
+        raise PlanError("Unverified restricted BTC FIRE history")
+    return RESTRICTED_BTC_INSTRUCTION
+
+
 def validate(decision, core, *, require_leverage=False):
     if not isinstance(decision, dict):
         raise PlanError("Expected an object")
@@ -121,6 +176,7 @@ def run_probe(routes, snapshot_loader, client_factory=TopBillingClient):
     if missing:
         raise PlanError("Top Billing catalogue missing route(s): " + ", ".join(sorted(missing)))
     snapshot = snapshot_loader()
+    instruction = instruction_for_snapshot(snapshot)
     content = json.dumps(snapshot, sort_keys=True, separators=(",", ":"), allow_nan=False)
 
     def query(model):
@@ -128,7 +184,7 @@ def run_probe(routes, snapshot_loader, client_factory=TopBillingClient):
         start = monotonic()
         try:
             reply = client._call(TOPBILLING_CHAT_URL, body={
-                "model": model, "messages": [{"role": "system", "content": INSTRUCTION},
+                "model": model, "messages": [{"role": "system", "content": instruction},
                                              {"role": "user", "content": content}]}, timeout=60)
             choice = reply["choices"][0]
             if not isinstance(choice, dict):
