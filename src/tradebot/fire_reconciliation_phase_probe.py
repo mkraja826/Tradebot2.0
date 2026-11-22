@@ -16,7 +16,7 @@ from pathlib import Path
 import re
 
 from tradebot.delta import DeltaDemo, DEMO_API
-from tradebot.fire_bracket_evidence import _saved, BracketEvidenceError
+from tradebot.fire_bracket_evidence import _saved, BracketEvidenceError, VALID_FIRE_ID
 from tradebot.fire_inventory import read_inventory, _read_rows, InventoryEvidenceError
 from tradebot.fire_reconciliation import (
     ReconciliationError, analyse, identifier, normalize_fill,
@@ -24,6 +24,7 @@ from tradebot.fire_reconciliation import (
 )
 
 MAX_AGE = timedelta(days=7)
+MAX_TARGET_AGE = timedelta(days=60)
 MIN_AGE = timedelta(minutes=10)
 _REASON = re.compile(r"[a-z0-9_]{1,80}\Z")
 
@@ -132,6 +133,7 @@ def _base_report():
         "stages_passed": [],
         "eligible_recent_btc_receipts": 0,
         "local_flat_btc_receipts": 0,
+        "historical_cutoff_applied": False,
         "locally_unverified_bracket_receipts": 0,
         "authenticated_order_gets": 0,
         "fill_count": None,
@@ -151,8 +153,14 @@ def _base_report():
     }
 
 
-def probe_single_recent_btc(exchange, data_dir, *, now=None):
-    """Select one recent locally-flat BTC FIRE and inspect GET phases in order."""
+def probe_single_recent_btc(exchange, data_dir, *, now=None, fire_id=None):
+    """Inspect one verified BTC receipt using a bounded DEMO GET history.
+
+    No explicit ID: original latest-recent behavior. With a valid explicit ID,
+    allow an older existing receipt (<=60 days); never broaden the broker query
+    beyond seven days from the original request, even when rerun much later.
+    The resulting observation is still not a durable financial attestation.
+    """
     out = _base_report()
 
     def block(stage, reason):
@@ -160,6 +168,9 @@ def probe_single_recent_btc(exchange, data_dir, *, now=None):
         out["reason"] = reason
         return out
 
+    if fire_id is not None and (type(fire_id) is not str
+                                or VALID_FIRE_ID.fullmatch(fire_id) is None):
+        return block("preflight", "invalid_requested_fire_id")
     if (getattr(exchange, "base_url", None) != DEMO_API
             or getattr(exchange, "allow_orders", None) is not False):
         return block("preflight", "read_only_delta_demo_required")
@@ -190,6 +201,8 @@ def probe_single_recent_btc(exchange, data_dir, *, now=None):
     out["local_flat_btc_receipts"] = len(btc)
     selected = None
     for item in btc:
+        if fire_id is not None and item["fire_id"] != fire_id:
+            continue
         if item["local_financial_report_present"]:
             continue
         try:
@@ -197,7 +210,7 @@ def probe_single_recent_btc(exchange, data_dir, *, now=None):
             age = now.astimezone(timezone.utc) - t
         except (ValueError, TypeError, OverflowError):
             return block("receipt_selection", "invalid_receipt_timestamp")
-        if not MIN_AGE < age < MAX_AGE:
+        if not MIN_AGE < age < (MAX_AGE if fire_id is None else MAX_TARGET_AGE):
             continue
         try:
             saved, fingerprint = _saved(root, "BTCUSD", item["fire_id"])
@@ -209,7 +222,9 @@ def probe_single_recent_btc(exchange, data_dir, *, now=None):
             selected = (item, saved, fingerprint)
 
     if selected is None:
-        return block("receipt_selection", "no_recent_local_bracket_candidate")
+        return block("receipt_selection",
+                     "requested_receipt_not_eligible" if fire_id is not None
+                     else "no_recent_local_bracket_candidate")
 
     item, saved, fingerprint = selected
     row = by_id.get(item["fire_id"])
@@ -221,7 +236,13 @@ def probe_single_recent_btc(exchange, data_dir, *, now=None):
             return block("receipt_selection", "original_btc_receipt_invalid")
         trade = dict(payload, id=item["fire_id"], created_at=row[1], status=row[3])
         start_us = timestamp_us(trade["created_at"])
-        end_us = timestamp_us(now.astimezone(timezone.utc).isoformat())
+        observed_end_us = timestamp_us(now.astimezone(timezone.utc).isoformat())
+        # A 60-day-old receipt must NOT silently turn into a 60-day account
+        # history request. Seven days is the original provenance boundary;
+        # any late settlement outside that window remains unresolved.
+        max_end_us = start_us + 7 * 86400 * 1_000_000 - 1
+        end_us = min(observed_end_us, max_end_us)
+        out["historical_cutoff_applied"] = end_us != observed_end_us
         if not 0 < end_us - start_us < 7 * 86400 * 1_000_000:
             return block("receipt_selection", "bounded_history_window_invalid")
     except (ValueError, ReconciliationError, TypeError):
@@ -341,13 +362,15 @@ def probe_single_recent_btc(exchange, data_dir, *, now=None):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data-dir", default="data")
+    parser.add_argument("--fire-id", default=None,
+                        help="Optional original completed BTC FIRE ID (32 lowercase hex)")
     args = parser.parse_args(argv)
     exchange = DeltaDemo(
         api_key=os.environ.get("DELTA_DEMO_API_KEY", ""),
         api_secret=os.environ.get("DELTA_DEMO_API_SECRET", ""),
         allow_orders=False,
     )
-    result = probe_single_recent_btc(exchange, args.data_dir)
+    result = probe_single_recent_btc(exchange, args.data_dir, fire_id=args.fire_id)
     print(json.dumps(result, sort_keys=True, separators=(",", ":")))
     return 0 if result["status"] == (
         "provisional_read_only_financial_analysis_complete") else 2
