@@ -63,7 +63,7 @@ def _require_signed_anchor_receipts(db, day_start, week_start, cutoff_us):
         start_us = stamp(start)
         row = db.execute(
             "SELECT observed_us,equity_usd FROM equity_evidence "
-            "WHERE observed_us>=? AND observed_us<=? AND observed_us<=? "
+            "WHERE observed_us>=? AND observed_us<? AND observed_us<=? "
             "ORDER BY observed_us LIMIT 1",
             (start_us, start_us + 300_000_000, cutoff_us)
         ).fetchone()
