@@ -19,6 +19,7 @@ from tradebot.candle_archive import CandleArchive
 from tradebot.delta import DEMO_API, DeltaDemo
 from tradebot.fire_account_guard import require_flat_demo_account
 from tradebot.signed_margin_mode import signed_account_margin_mode
+from tradebot.market import _age_seconds, MarketDataError
 
 REQUIRED_BTC_PERIODS = (
     "day", "previous_day", "week", "previous_week", "month", "previous_month",
@@ -55,11 +56,11 @@ def btc_required_period_quality(exchange, data_dir, *, now=None):
         mark = Decimal(str(ticker["mark_price"]))
         if not mark.is_finite() or mark <= 0:
             raise ValueError("btc_mark_unverified")
-        observed = ticker["timestamp"]
-        if type(observed) not in (float, int):
-            raise ValueError("btc_quote_time_unverified")
-        age = datetime.now(timezone.utc).timestamp() - observed
-        if not 0 <= age <= 30:
+        # Delta ticker timestamps are delivered as numeric strings by some
+        # API representations, and market.py already normalizes seconds,
+        # milliseconds and microseconds. Preserve its clock-skew validation.
+        age = _age_seconds(ticker.get("timestamp"), instant)
+        if age > 30:
             raise ValueError("btc_quote_stale")
         path = Path(data_dir) / "delta-demo-candles.sqlite"
         levels = ReadOnlyArchive(path).levels(
@@ -79,7 +80,7 @@ def btc_required_period_quality(exchange, data_dir, *, now=None):
             quality[key] = status
         return quality
     except (ValueError, TypeError, OverflowError, KeyError,
-            InvalidOperation, sqlite3.Error, OSError):
+            InvalidOperation, MarketDataError, sqlite3.Error, OSError):
         raise ValueError("btc_original_archive_or_quote_unverified") from None
 
 
