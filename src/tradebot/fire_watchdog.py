@@ -6,7 +6,9 @@ loses protective SL/TP, attempts a BTC-only reduce-only closeout.
 """
 import argparse
 from datetime import datetime, timezone
+from contextlib import closing
 import json
+import sqlite3
 import os
 from pathlib import Path
 import time
@@ -22,7 +24,7 @@ from tradebot.fire_execution import (
 
 # Static, non-sensitive runtime identity. Check the current *process* journal
 # after an upgrade: a source checkout alone does not prove the daemon reloaded.
-WATCHDOG_RUNTIME_VERSION = "watchdog-telemetry-v2-20261122"
+WATCHDOG_RUNTIME_VERSION = "watchdog-telemetry-v3-20261122"
 
 
 def watchdog_tick(exchange, store, *, pause=None):
@@ -81,9 +83,19 @@ def watchdog_tick(exchange, store, *, pause=None):
     position = active_position(exchange, product_id)
     orders = exchange.open_orders()
     if position is None and not orders:
+        # If the prior tick persisted a protection failure and the process
+        # crashed while trying reduce-only closeout, we cannot prove whether
+        # that closeout or an unrelated broker exit flattened the position.
+        # Do not convert the incident into an ordinary no-exposure receipt.
+        prior_protection_failure = (
+            status == "exposure_unknown"
+            and latest.get("reason_code") == "bracket_missing_or_position_changed"
+        )
+        reason = ("watchdog_protection_failure_flat_verified"
+                  if prior_protection_failure else "verified_no_position_or_orders")
         store.update(press, "flat_verified",
                      protection_verified=False,
-                     reason_code="verified_no_position_or_orders")
+                     reason_code=reason)
         return {"status": "flat_verified"}
 
     plan = receipt["plan"]
@@ -133,6 +145,41 @@ def watchdog_tick(exchange, store, *, pause=None):
     except Exception:
         return {"status": "exposure_unknown",
                 "action": "human_attention_required"}
+
+
+def _durable_emergency_receipts(store):
+    """Recover any completed watchdog emergency that lacks alert delivery.
+
+    Scan the original private FIRE ledger read-only, including older receipts
+    hidden behind a newer terminal press. A crash between broker-confirmed
+    flatness and monitor outbox commit must not permanently lose the incident.
+    """
+    path = Path(store.path)
+    if not path.is_file() or path.is_symlink():
+        raise ValueError("watchdog_fire_ledger_unavailable")
+    with closing(sqlite3.connect(
+            path.absolute().as_uri() + "?mode=ro", uri=True, timeout=2)) as db:
+        db.execute("PRAGMA query_only=ON")
+        db.execute("BEGIN")
+        rows = db.execute(
+            "SELECT press,result FROM fire_requests WHERE status='flat_verified' "
+            "AND (result LIKE '%watchdog_emergency_flat_verified%' "
+            "OR result LIKE '%watchdog_protection_failure_flat_verified%') "
+            "ORDER BY created_at ASC LIMIT 1001"
+        ).fetchall()
+        if len(rows) > 1000:
+            raise ValueError("watchdog_unbounded_incident_history")
+        out = []
+        for press, raw in rows:
+            parsed = json.loads(raw)
+            if type(parsed) is not dict:
+                raise ValueError("watchdog_emergency_receipt_unverified")
+            reason = parsed.get("reason_code")
+            if reason in ("watchdog_emergency_flat_verified",
+                          "watchdog_protection_failure_flat_verified"):
+                out.append((press, reason))
+        db.rollback()
+    return out
 
 
 def main(argv=None):
@@ -189,6 +236,16 @@ def main(argv=None):
             if not monitoring_started:
                 monitoring.start("watchdog")
                 monitoring_started = True
+            # Persist authenticated closeout INCIDENTS before advertising a
+            # healthy cycle. A one-off successful emergency exit must remain
+            # visible to both off-host and Telegram delivery after restart,
+            # even if the monitor collector never polls during that 15s tick.
+            for store, _ in markets:
+                for emergency_press, reason in _durable_emergency_receipts(store):
+                    event = monitoring.record_watchdog_emergency(
+                        emergency_press, reason_code=reason)
+                    if event is not None:
+                        print(json.dumps(event), flush=True)
             monitoring.heartbeat("watchdog", "healthy" if healthy else "watchdog_protection_unverified")
         except Exception:
             tick_at = time.monotonic()

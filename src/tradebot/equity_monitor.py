@@ -37,6 +37,8 @@ ALERTS = READ_FAILURES | {
     "operations_evidence_unavailable", "operations_clock_inconsistent",
     "watchdog_heartbeat_stale", "equity_collector_heartbeat_stale",
     "watchdog_restart_loop", "equity_collector_restart_loop", "watchdog_protection_unverified",
+    "watchdog_emergency_flat_verified",
+    "watchdog_protection_failure_flat_verified",
 }
 
 
@@ -62,6 +64,9 @@ class MonitorStore:
                 CREATE TABLE IF NOT EXISTS monitor_events(
                     id INTEGER PRIMARY KEY, at_us INTEGER NOT NULL, code TEXT NOT NULL,
                     transition TEXT NOT NULL, severity TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS watchdog_emergency_events(
+                    press TEXT PRIMARY KEY, event_id INTEGER NOT NULL UNIQUE,
+                    FOREIGN KEY(event_id) REFERENCES monitor_events(id));
             """)
 
     def connect(self):
@@ -82,6 +87,44 @@ class MonitorStore:
                        "ON CONFLICT(service) DO UPDATE SET checked_us=excluded.checked_us, "
                        "status=excluded.status",
                        (service, stamp(at or datetime.now(timezone.utc)), status))
+
+    def record_watchdog_emergency(self, press, *, at=None,
+                                  reason_code="watchdog_emergency_flat_verified"):
+        """Persist one critical outbox event per FIRE press across restarts.
+
+        Unlike active-state alerts, this is a *historical incident*, not an
+        ongoing heartbeat. The equity collector's publish() cannot erase
+        or falsely resolve it; both webhook and Telegram consume the same
+        immutable event row using their independent durable delivery cursors.
+        """
+        from re import fullmatch
+        if type(press) is not str or fullmatch(r"[0-9a-f]{32}", press) is None:
+            raise ValueError("Invalid FIRE incident identity")
+        if reason_code not in (
+                "watchdog_emergency_flat_verified",
+                "watchdog_protection_failure_flat_verified"):
+            raise ValueError("Invalid watchdog incident category")
+        when_us = stamp(at or datetime.now(timezone.utc))
+        with closing(self.connect()) as db:
+            db.execute("BEGIN IMMEDIATE")
+            original = db.execute(
+                "SELECT event_id FROM watchdog_emergency_events WHERE press=?",
+                (press,)).fetchone()
+            if original is not None:
+                db.commit()
+                return None
+            event = db.execute(
+                "INSERT INTO monitor_events(at_us,code,transition,severity) "
+                "VALUES (?,?,?,?)",
+                (when_us, reason_code, "opened", "critical"))
+            db.execute(
+                "INSERT INTO watchdog_emergency_events(press,event_id) VALUES (?,?)",
+                (press, event.lastrowid))
+            db.commit()
+            return {"event": "watchdog_safety_incident", "id": event.lastrowid,
+                    "code": reason_code,
+                    "transition": "opened", "severity": "critical",
+                    "at_us": when_us}
 
     def publish(self, codes, *, at=None):
         """Durably deduplicate active/recovered events, including concurrent runs."""

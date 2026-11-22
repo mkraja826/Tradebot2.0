@@ -32,7 +32,7 @@ import tradebot.fire_watchdog as watchdog
 expected = Path(sys.argv[1]).resolve()
 if (Path(watchdog.__file__).resolve() != expected or
         getattr(watchdog, "WATCHDOG_RUNTIME_VERSION", None)
-        != "watchdog-telemetry-v2-20261122"):
+        != "watchdog-telemetry-v3-20261122"):
     raise SystemExit("REFUSED: watchdog source or runtime version mismatch")
 PY
 

@@ -234,7 +234,106 @@ class WatchdogTests(unittest.TestCase):
 
         self.assertEqual(seen, [(("watchdog_protection_unverified",), 1)])
         self.assertIn("watchdog_runtime_initialized", str(output.call_args_list))
-        self.assertIn("watchdog-telemetry-v2-20261122", str(output.call_args_list))
+        self.assertIn("watchdog-telemetry-v3-20261122", str(output.call_args_list))
+
+    def test_emergency_flat_incident_survives_crash_and_is_emitted_once(self):
+        # Simulate a process dying AFTER a verified emergency broker close but
+        # BEFORE sending its monitor event. The next startup must replay it.
+        press = self.seed()
+        self.store.update(
+            press, "flat_verified", protection_verified=False,
+            reason_code="watchdog_emergency_flat_verified")
+        monitor_path = self.root / "fire-monitoring.sqlite"
+
+        class StopAfterCycle(Exception):
+            pass
+
+        def cycle():
+            with (
+                patch("tradebot.fire_watchdog.FireMarket",
+                      side_effect=lambda symbol, **kwargs: SimpleNamespace(symbol=symbol)),
+                patch("tradebot.fire_watchdog.watchdog_tick",
+                      return_value={"status": "idle_or_terminal"}) as tick,
+                patch("tradebot.fire_watchdog.time.sleep",
+                      side_effect=StopAfterCycle),
+                patch("builtins.print")
+            ):
+                with self.assertRaises(StopAfterCycle):
+                    main(["--database", str(self.store.path)])
+            self.assertEqual(tick.call_count, 2)
+
+        cycle()
+        with sqlite3.connect(monitor_path) as db:
+            rows = db.execute(
+                "SELECT code,transition,severity FROM monitor_events"
+            ).fetchall()
+            identified = db.execute(
+                "SELECT press,event_id FROM watchdog_emergency_events"
+            ).fetchall()
+        self.assertEqual(
+            rows, [("watchdog_emergency_flat_verified", "opened", "critical")])
+        self.assertEqual(len(identified), 1)
+        self.assertEqual(identified[0][0], press)
+
+        # The collector's ordinary ongoing-alert publish must not erase a
+        # historical emergency. A second watchdog startup is idempotent.
+        from tradebot.equity_monitor import MonitorStore
+        self.assertEqual(MonitorStore(monitor_path).publish([]), [])
+        cycle()
+        with sqlite3.connect(monitor_path) as db:
+            self.assertEqual(db.execute(
+                "SELECT count(*) FROM monitor_events"
+            ).fetchone()[0], 1)
+
+    def test_crash_between_broker_flatness_and_final_receipt_never_erases_failure(self):
+        press = self.seed()
+        # Original watchdog already persisted the bracket defect and started
+        # its reduce-only closeout. Exchange is flat after an unobserved crash.
+        self.store.update(
+            press, "exposure_unknown", protection_verified=False,
+            reason_code="bracket_missing_or_position_changed")
+        self.broker.size = 0
+        self.broker.orders = []
+        result = watchdog_tick(self.broker, self.store)
+        self.assertEqual(result["status"], "flat_verified")
+        self.assertEqual(self.broker.closeouts, 0)
+        self.assertEqual(self.store.latest()["reason_code"],
+                         "watchdog_protection_failure_flat_verified")
+        from tradebot.fire_watchdog import _durable_emergency_receipts
+        self.assertEqual(
+            _durable_emergency_receipts(self.store),
+            [(press, "watchdog_protection_failure_flat_verified")])
+        self.assertFalse(self.store.latest()["protection_verified"])
+
+    def test_ordinary_flatness_after_protection_does_not_raise_incident(self):
+        press = self.seed()
+        self.broker.size = 0
+        self.broker.orders = []
+        self.assertEqual(watchdog_tick(self.broker, self.store)["status"],
+                         "flat_verified")
+        self.assertEqual(self.store.latest()["reason_code"],
+                         "verified_no_position_or_orders")
+        from tradebot.fire_watchdog import _durable_emergency_receipts
+        self.assertEqual(_durable_emergency_receipts(self.store), [])
+
+    def test_older_emergency_is_discovered_after_newer_receipt(self):
+        previous = self.seed()
+        self.store.update(
+            previous, "flat_verified",
+            reason_code="watchdog_emergency_flat_verified")
+        fresh_press = self.store.reserve()
+        self.assertNotEqual(previous, fresh_press)
+        from tradebot.fire_watchdog import _durable_emergency_receipts
+        self.assertEqual(_durable_emergency_receipts(self.store),
+                         [(previous, "watchdog_emergency_flat_verified")])
+
+    def test_non_emergency_flat_receipt_is_not_escalated_to_incident(self):
+        press = self.seed()
+        self.store.update(
+            press, "flat_verified",
+            reason_code="verified_no_position_or_orders")
+        from tradebot.fire_watchdog import _durable_emergency_receipts
+        self.assertEqual(_durable_emergency_receipts(self.store), [])
 
     def test_boot_heartbeat_becomes_healthy_after_both_market_ticks(self):
         class StopAfterCycle(Exception):
