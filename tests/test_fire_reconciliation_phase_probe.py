@@ -64,9 +64,9 @@ class M09PhaseProbeTests(unittest.TestCase):
         self.addCleanup(self.rows.stop)
         self.addCleanup(self.inv.stop)
 
-    def probe(self):
+    def probe(self, *, now=None, fire_id=None):
         return probe_single_recent_btc(
-            self.broker, self.root, now=self.target_now)
+            self.broker, self.root, now=now or self.target_now, fire_id=fire_id)
 
     def test_completed_gets_are_only_provisional_not_trade_authority(self):
         report = self.probe()
@@ -328,6 +328,48 @@ class M09PhaseProbeTests(unittest.TestCase):
         self.assertNotIn("CONFIDENTIAL", json.dumps(report))
         self.assertFalse(report["safe_to_enable_fire"])
         self.assertEqual(list(self.root.iterdir()), [])
+
+    def test_explicit_old_receipt_uses_bounded_historical_window(self):
+        later = START + timedelta(days=30)
+        with patch.object(self.broker, "product_fills",
+                          wraps=self.broker.product_fills) as spy:
+            report = self.probe(now=later, fire_id=PRESS)
+        self.assertEqual(report["status"],
+                         "provisional_read_only_financial_analysis_complete")
+        self.assertTrue(report["historical_cutoff_applied"])
+        kwargs = spy.call_args.kwargs
+        self.assertLess(kwargs["end_time_us"],
+                        int(later.timestamp()) * 1_000_000)
+        self.assertEqual(kwargs["end_time_us"],
+                         BASE + 7*86400*1_000_000 - 1)
+        self.assertFalse(report["trade_authorized"])
+        self.assertTrue(all(req[0] == "GET" for req in self.broker.calls))
+        self.assertEqual(list(self.root.iterdir()), [])
+
+    def test_no_explicit_id_keeps_original_seven_day_selection(self):
+        report = self.probe(now=START + timedelta(days=30))
+        self.assertEqual(report["stage"], "receipt_selection")
+        self.assertEqual(report["reason"], "no_recent_local_bracket_candidate")
+        self.assertEqual(self.broker.calls, [])
+
+    def test_invalid_or_nonexistent_requested_id_uses_no_broker_calls(self):
+        for requested, expected in (
+            ("untrusted", "invalid_requested_fire_id"),
+            ("B"*32, "invalid_requested_fire_id"),
+            ("b"*32, "requested_receipt_not_eligible"),
+        ):
+            with self.subTest(fire_id=requested):
+                report = self.probe(fire_id=requested)
+                self.assertEqual(report["reason"], expected)
+                self.assertEqual(self.broker.calls, [])
+                self.assertFalse(report["trade_authorized"])
+
+    def test_older_than_historical_limit_does_not_call_broker(self):
+        report = self.probe(now=START + timedelta(days=70), fire_id=PRESS)
+        self.assertEqual(report["reason"], "requested_receipt_not_eligible")
+        self.assertEqual(self.broker.calls, [])
+        self.assertFalse(report["historical_cutoff_applied"])
+        self.assertFalse(report["safe_to_enable_fire"])
 
     def test_valid_reconciliation_does_not_emit_attribution_hints(self):
         report = self.probe()
