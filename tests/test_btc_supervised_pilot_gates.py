@@ -113,7 +113,10 @@ class PilotReadinessTests(unittest.TestCase):
         fake = DemoTicker()
         with patch("tradebot.btc_supervised_pilot_gates.ReadOnlyArchive") as archive:
             archive.return_value.levels.return_value = {
-                "periods": quality_ok(),
+                "periods": {
+                    key: {"quality_status": status}
+                    for key, status in quality_ok().items()
+                },
             }
             from tradebot.btc_supervised_pilot_gates import btc_required_period_quality
             result = btc_required_period_quality(fake, "/unused", now=NOW)
