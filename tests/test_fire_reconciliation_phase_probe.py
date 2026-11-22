@@ -11,7 +11,7 @@ import unittest
 from unittest.mock import patch
 
 from tradebot.fire_reconciliation_phase_probe import probe_single_recent_btc
-from test_fire_reconciliation import Broker, START, NOW, PRESS
+from test_fire_reconciliation import Broker, START, NOW, PRESS, BASE
 
 
 class M09PhaseProbeTests(unittest.TestCase):
@@ -208,6 +208,62 @@ class M09PhaseProbeTests(unittest.TestCase):
         self.assertEqual(report["stage"], "local_evidence_stability")
         self.assertEqual(report["reason"], "original_btc_receipt_changed")
         self.assertFalse(report["trade_authorized"])
+
+
+    def test_delayed_unreferenced_funding_is_classified_not_waived(self):
+        self.broker.postings[-1]["created_at"] = BASE + 100_000_000
+        report = self.probe()
+        self.assertEqual(report["reason"], "unattributed_wallet_posting")
+        self.assertEqual(report["stage"], "financial_analysis")
+        hints = report["unattributed_wallet_posting_diagnostic"]
+        self.assertEqual(hints["count"], 1)
+        self.assertEqual(hints["examples"], [{
+            "product_scope": "same_product",
+            "timing": "after_last_fill",
+            "order_reference": "absent",
+            "fill_reference": "absent",
+            "posting_kind": "funding",
+        }])
+        self.assertFalse(hints["examples_truncated"])
+        self.assertFalse(report["cashflow_and_commission_consistency_proven_in_memory"])
+        self.assertFalse(report["funding_reconciled"])
+        self.assertFalse(report["safe_to_enable_fire"])
+        self.assertTrue(all(req[0] == "GET" for req in self.broker.calls))
+        self.assertEqual(list(self.root.iterdir()), [])
+
+    def test_account_unscoped_posting_is_classified_without_balance_or_id(self):
+        unknown = self.broker.posting("PRIVATE-POSTING-ID", "commission", "-0.1", 90)
+        unknown["product_id"] = 0
+        unknown["balance"] = "PRIVATE-BALANCE-123"
+        self.broker.postings.append(unknown)
+        report = self.probe()
+        self.assertEqual(report["reason"], "unattributed_wallet_posting")
+        hints = report["unattributed_wallet_posting_diagnostic"]
+        self.assertEqual(hints["count"], 1)
+        self.assertEqual(hints["examples"][0]["product_scope"], "account_unscoped")
+        self.assertEqual(hints["examples"][0]["posting_kind"], "commission")
+        self.assertNotIn("PRIVATE-", json.dumps(report))
+        self.assertNotIn("-0.1", json.dumps(report))
+        self.assertEqual(list(self.root.iterdir()), [])
+
+    def test_multiple_unattributed_postings_show_bounded_categories(self):
+        for n in range(7):
+            unknown = self.broker.posting(f"unscoped-{n}", "commission", "-0.1", 90 + n)
+            unknown["product_id"] = None
+            self.broker.postings.append(unknown)
+        report = self.probe()
+        self.assertEqual(report["reason"], "unattributed_wallet_posting")
+        hints = report["unattributed_wallet_posting_diagnostic"]
+        self.assertEqual(hints["count"], 7)
+        self.assertEqual(len(hints["examples"]), 5)
+        self.assertTrue(hints["examples_truncated"])
+        self.assertFalse(report["trade_authorized"])
+
+    def test_valid_reconciliation_does_not_emit_attribution_hints(self):
+        report = self.probe()
+        self.assertEqual(report["status"], "provisional_read_only_financial_analysis_complete")
+        self.assertIsNone(report["unattributed_wallet_posting_diagnostic"])
+        self.assertFalse(report["safe_to_enable_fire"])
 
 
 if __name__ == "__main__":
