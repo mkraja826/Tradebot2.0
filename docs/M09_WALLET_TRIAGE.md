@@ -39,6 +39,20 @@ On `reason=unattributed_wallet_posting`, the optional
   `funding`, or `other`);
 - `examples_truncated`: whether more than five classifications were found.
 
+- `amount_consistency_clues`: at most five type-scoped exact arithmetic
+  comparisons against selected trade fills: total cashflow, total commissions,
+  one individual fill commission, last-fill funding (if broker supplied), or
+  an observed non-owned fill commission from the same product. True means
+  numbers happen to match; false means they do not; null means not applicable.
+  **An exact match is never transaction ownership evidence.**
+- `unowned_same_product_fills_after_last_fill`: count of non-owned BTC fills
+  observed after the selected exit within the same broker history window.
+- `other_product_fill_history_checked=false`: Gold and other products were
+  not searched by the product-specific fill reader.
+- `amount_matches_prove_broker_attribution=false`: immutable statement that
+  arithmetic cannot replace verifiable wallet provenance.
+
+
 The diagnostic deliberately excludes raw identifiers, timestamps, cash amounts,
 wallet balances, credentials, and broker payloads. A null field means that
 the specific ambiguous-posting diagnosis was not obtained.
