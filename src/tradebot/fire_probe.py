@@ -51,9 +51,16 @@ RESTRICTED_BTC_INSTRUCTION = (
     "contract and integer leverage 1..20, tick-aligned stop_loss and "
     "take_profit; LONG requires stop below best_bid and target above best_ask, "
     "SHORT the reverse. Evaluate 15-minute/hour EMA20, ATR5m, VWAP and the "
-    "single true last_24h high/low only. Do not infer trade authority from "
-    "model output. Risk checks, broker signed isolated margin, verified "
-    "account-wide flatness and broker-side brackets are independent mandates."
+    "single true last_24h high/low only. Evaluate the optional completed-5m "
+    "technical_5m block: RSI14 (momentum), ADX14 and plus/minus DI (trend "
+    "strength), relative_volume20 (participation), MACD 12/26/9 (momentum "
+    "change), and Bollinger 20/2 (volatility). Indicators may conflict; "
+    "avoid mechanical entry rules or treating one signal as sufficient. "
+    "If volume reference is unavailable, do not invent RVOL. Do not infer "
+    "trade authority from "
+    "model output. Owner-declared DEMO margin configuration is not broker "
+    "proof; signed account-wide flatness, wallet equity, actual broker margin "
+    "budget, liquidation checks and broker-side brackets remain mandatory."
 )
 
 
@@ -101,6 +108,21 @@ def instruction_for_snapshot(snapshot):
             or any(context.get(k) is None
                    for k in ("ema_15m", "ema_1h", "atr_5m"))):
         raise PlanError("Unverified restricted BTC FIRE history")
+    if scope.get("unattended_demo_mode") is True:
+        if (scope.get("one_attempt_operator_supervision_required") is not False
+                or scope.get("max_new_order_attempts_per_utc_day") != 2):
+            raise PlanError("Unsupported autonomous demo FIRE scope")
+        return (
+            "BTCUSD Delta India DEMO unattended candidate, at most two "
+            "attempts per UTC day and one contract. Account isolated margin "
+            "is OPERATOR DECLARED, not independently broker-verified. "
+            "Do not interpret this declaration as proof of broker leverage "
+            "or risk protection. The exchange equity, position, live margin, "
+            "SL/TP, liquidation and watchdog controls are separate mandatory "
+            "checks. " + RESTRICTED_BTC_INSTRUCTION
+        )
+    if scope.get("unattended_demo_mode") is not None:
+        raise PlanError("Unsupported autonomous demo FIRE scope")
     return RESTRICTED_BTC_INSTRUCTION
 
 

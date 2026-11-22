@@ -15,6 +15,7 @@ import sqlite3
 from tradebot.candle_archive import STEP
 from tradebot.market_integrity import suspect_candle_times
 from tradebot.fire_indicators import indicators
+from tradebot.btc_technical_indicators import compute_technical_5m
 
 WINDOW_BARS = 288
 NEIGHBOR_BARS = 3
@@ -157,11 +158,13 @@ def load_recent24h_strategy_context(data_dir, *, at, price):
         high = max(v[3] for v in valid)
         low = min(v[4] for v in valid)
         provider_rows = [
-            {"time": t, "high": h, "low": l, "close": close, "volume": vol}
+            {"time": t, "open": opened, "high": h, "low": l,
+             "close": close, "volume": vol}
             for _, t, opened, h, l, close, vol in valid
         ]
         db.rollback()
     features = indicators(provider_rows, at.timestamp(), float(price))
+    features["technical_5m"] = compute_technical_5m(provider_rows)
     # Only point-in-time indicators based on locally verified 24h bars
     # enter GPT-6, never stale month highs or unverified previous-fill PnL.
     if (features.get("ema_15m") is None

@@ -406,6 +406,10 @@ class FireDemoController:
         """Normal six-period policy never claims supervised pilot history."""
         return {}
 
+    def _max_contracts_for_entry(self, budget):
+        """Normal FIRE retains the broker's existing checked risk limit."""
+        return budget["max_contracts_per_entry"]
+
     def _require_account_flat(self, exchange, product_id):
         """Normal FIRE keeps signed isolated-margin and full exposure proofs."""
         return require_flat_demo_account(
@@ -524,7 +528,7 @@ class FireDemoController:
                 decision_quote={k: snapshot["core"].get(k) for k in ("best_bid","best_ask")},
                 thesis=str(raw.get("thesis") or "")[:350])
             stage = "contract_size"
-            if not 1 <= plan["contracts"] <= budget["max_contracts_per_entry"]:
+            if not 1 <= plan["contracts"] <= self._max_contracts_for_entry(budget):
                 raise FireTradeError("Order exceeds market budget")
             stage = "exchange_preflight"
             exchange_quote = _live_preflight(exchange, snapshot, plan)

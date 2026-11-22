@@ -1,0 +1,23 @@
+[Unit]
+Description=Trading Bot 2.0 bounded BTCUSD Delta India DEMO autonomous agent
+After=network-online.target tradebot2-dashboard.service tradebot2-fire-watchdog.service tradebot2-equity-monitor.service
+Wants=network-online.target
+Requires=tradebot2-fire-watchdog.service tradebot2-equity-monitor.service
+
+[Service]
+Type=simple
+User=support
+Group=support
+WorkingDirectory=/home/support/Tradebot2.0
+ExecStart=/bin/bash /home/support/Tradebot2.0/ops/run_btc_autonomous_demo.sh
+Restart=on-failure
+RestartSec=60
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=full
+PrivateTmp=yes
+MemoryMax=768M
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

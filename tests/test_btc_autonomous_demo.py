@@ -1,0 +1,191 @@
+"""Offline tests: autonomous DEMO BTC never escapes bounded gates."""
+from datetime import datetime,timezone,timedelta
+from pathlib import Path
+from tempfile import TemporaryDirectory
+import unittest
+from tradebot.btc_autonomous_demo import is_armed,ARM_CONTENT,run_once,claim_attempt
+
+NOW=datetime(2026,11,23,1,tzinfo=timezone.utc)
+
+class AutoTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp=TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root=Path(self.tmp.name)
+
+    def fake(self, reason="gpt6_wait_no_trade"):
+        class Controller:
+            starts=0
+            def __init__(inner,*args,**kwargs):
+                assert kwargs["enabled"] is True
+            def start(inner,**kwargs):
+                Controller.starts+=1
+                return True,"accepted"
+            def snapshot(inner):
+                return {"status":"rejected_no_order","reason_code":reason,
+                        "orders_submitted":False,"protection_verified":False}
+        return Controller
+
+    def test_disarmed_never_calls_candidate(self):
+        value=run_once(self.root,instant=NOW,armed=lambda:False,
+                       candidate=lambda x:self.fail("candidate called"),
+                       do_execute=True)
+        self.assertEqual(value["status"],"disarmed")
+
+    def test_arming_private_and_exact(self):
+        path=self.root/"arm"
+        self.assertFalse(is_armed(path))
+        path.write_text(ARM_CONTENT+"\n")
+        path.chmod(0o644)
+        self.assertFalse(is_armed(path))
+        path.chmod(0o600)
+        self.assertTrue(is_armed(path))
+        path.write_text("delta-live")
+        self.assertFalse(is_armed(path))
+
+    def test_capped_daily_attempts_and_four_hour_gap(self):
+        self.assertIsNotNone(claim_attempt(self.root,NOW))
+        self.assertIsNone(claim_attempt(self.root,NOW+timedelta(hours=1)))
+        self.assertIsNotNone(claim_attempt(self.root,NOW+timedelta(hours=4)))
+        self.assertIsNone(claim_attempt(self.root,NOW+timedelta(hours=8)))
+        self.assertIsNotNone(claim_attempt(self.root,NOW+timedelta(days=1)))
+
+    def test_dry_run_makes_no_reservation(self):
+        value=run_once(self.root,instant=NOW,armed=lambda:True,
+                       candidate=lambda x:True,receipts_safe=lambda x:True,do_execute=False)
+        self.assertEqual(value["status"],"eligible_read_only_no_order")
+        self.assertIsNotNone(claim_attempt(self.root,NOW))
+
+    def test_missing_signed_preflight_makes_no_reservation(self):
+        value=run_once(self.root,instant=NOW,armed=lambda:True,
+                       candidate=lambda x:False,do_execute=True,
+                       controller_factory=self.fake())
+        self.assertEqual(value["status"],"read_only_preflight_unavailable")
+        self.assertIsNotNone(claim_attempt(self.root,NOW))
+
+    def test_model_failure_halts_automatic_retries(self):
+        runner=self.fake("model_decision_failed")
+        first=run_once(self.root,instant=NOW,armed=lambda:True,
+                       candidate=lambda x:True,receipts_safe=lambda x:True,do_execute=True,
+                       controller_factory=runner)
+        self.assertEqual(first["result"],"rejected_no_order")
+        self.assertTrue((self.root/"btc-auto-demo-halt").exists())
+        second=run_once(self.root,instant=NOW+timedelta(hours=4),
+                        armed=lambda:True,candidate=lambda x:True,receipts_safe=lambda x:True,
+                        do_execute=True,controller_factory=runner)
+        self.assertEqual(second["status"],"halted_pending_operator_review")
+        self.assertEqual(runner.starts,1)
+
+    def test_wait_consumes_budget_without_forcing_trade(self):
+        runner=self.fake()
+        for instant in (NOW,NOW+timedelta(hours=4)):
+            result=run_once(self.root,instant=instant,armed=lambda:True,
+                            candidate=lambda x:True,receipts_safe=lambda x:True,do_execute=True,
+                            controller_factory=runner)
+            self.assertEqual(result["result"],"rejected_no_order")
+        last=run_once(self.root,instant=NOW+timedelta(hours=8),
+                      armed=lambda:True,candidate=lambda x:True,receipts_safe=lambda x:True,
+                      do_execute=True,controller_factory=runner)
+        self.assertEqual(last["status"],"daily_or_interval_budget_exhausted")
+        self.assertEqual(runner.starts,2)
+
+    def test_ambiguous_execution_halts_and_never_retries(self):
+        class Uncertain:
+            def __init__(inner,*args,**kwargs): pass
+            def start(inner,**kwargs): raise RuntimeError("could have filled")
+        result=run_once(self.root,instant=NOW,armed=lambda:True,
+                        candidate=lambda x:True,receipts_safe=lambda x:True,do_execute=True,
+                        controller_factory=Uncertain)
+        self.assertEqual(result["status"],"halted_pending_operator_review")
+        self.assertTrue((self.root/"btc-auto-demo-halt").exists())
+
+    def test_daily_equity_baseline_survives_new_session(self):
+        from tradebot.btc_autonomous_demo import check_daily_equity_limit
+        from tradebot.portfolio_equity_guard import EquityRiskError
+        check_daily_equity_limit(self.root,NOW,"100")
+        check_daily_equity_limit(self.root,NOW+timedelta(hours=4),"99.75")
+        with self.assertRaisesRegex(EquityRiskError,"btc_auto_daily_loss_limit"):
+            check_daily_equity_limit(self.root,NOW+timedelta(hours=8),"99.50")
+
+    def test_daily_equity_baseline_rolls_only_at_new_utc_day(self):
+        from tradebot.btc_autonomous_demo import check_daily_equity_limit
+        check_daily_equity_limit(self.root,NOW,"100")
+        check_daily_equity_limit(self.root,NOW+timedelta(days=1),"99.5")
+
+    def test_disarm_file_symlink_never_arms(self):
+        p=self.root/"arm"
+        other=self.root/"other"
+        other.write_text(ARM_CONTENT+"\n")
+        other.chmod(0o600)
+        p.symlink_to(other)
+        self.assertFalse(is_armed(p))
+
+    def test_execution_contract_size_clamped_to_one(self):
+        from tradebot.btc_autonomous_demo import AutoBTCController
+        bot=AutoBTCController(self.root/"fire-ops.sqlite")
+        self.assertFalse(bot.enabled)
+        self.assertEqual(bot._max_contracts_for_entry(
+            {"max_contracts_per_entry":40}),1)
+        self.assertEqual(bot._max_contracts_for_entry(
+            {"max_contracts_per_entry":0}),0)
+        scope=bot._additional_fire_scope()
+        self.assertEqual(scope["max_contracts_per_entry"],1)
+        self.assertTrue(scope["unattended_demo_mode"])
+        self.assertEqual(scope["max_new_order_attempts_per_utc_day"],2)
+
+    def test_client_preflight_rejects_missing_margin_owner_verification(self):
+        from tradebot.btc_autonomous_demo import check_candidate
+        from tradebot.delta import DEMO_API
+        class ReadOnly:
+            base_url=DEMO_API
+            allow_orders=False
+        approved={
+            "status":"operator_review_candidate_only",
+            "blockers":[],
+            "supervised_session_verified":True,
+            "recent_btc_history_local_quality_verified":True,
+            "signed_isolated_margin_verified":False,
+            "owner_declared_main_isolated_accepted":True,
+            "account_wide_flatness_verified":True,
+            "watchdog_and_collector_active":True,
+            "both_dashboard_fire_endpoints_disabled":True,
+            "trade_authorized":False}
+        self.assertTrue(check_candidate(self.root,
+            broker_factory=lambda **kw:ReadOnly(),
+            preflight=lambda broker,root:approved))
+        denied=dict(approved)
+        denied["owner_declared_main_isolated_accepted"]=False
+        self.assertFalse(check_candidate(self.root,
+            broker_factory=lambda **kw:ReadOnly(),
+            preflight=lambda broker,root:denied))
+
+    def test_prior_fire_receipt_rejects_invalid_model_and_unknown_exposure(self):
+        from tradebot.btc_autonomous_demo import prior_fire_receipts_safe
+        import sqlite3,json
+        with sqlite3.connect(self.root/"fire-ops.sqlite") as db:
+            db.executescript("""CREATE TABLE fire_requests(
+                press TEXT PRIMARY KEY, created_at TEXT, updated_at TEXT,
+                status TEXT, result TEXT);""")
+            db.execute("INSERT INTO fire_requests VALUES(?,?,?,?,?)",(
+                "one",NOW.isoformat(),NOW.isoformat(),
+                "rejected_no_order",json.dumps({"reason_code":"model_decision_failed"})))
+        self.assertFalse(prior_fire_receipts_safe(self.root))
+        with sqlite3.connect(self.root/"fire-ops.sqlite") as db:
+            db.execute("UPDATE fire_requests SET result=? WHERE press='one'",
+                       (json.dumps({"reason_code":"gpt6_wait_no_trade"}),))
+        self.assertTrue(prior_fire_receipts_safe(self.root))
+        with sqlite3.connect(self.root/"fire-ops.sqlite") as db:
+            db.execute("UPDATE fire_requests SET status='protected_active' WHERE press='one'")
+        self.assertFalse(prior_fire_receipts_safe(self.root))
+
+    def test_prior_fire_receipt_rejects_emergency_flat(self):
+        from tradebot.btc_autonomous_demo import prior_fire_receipts_safe
+        import sqlite3,json
+        with sqlite3.connect(self.root/"fire-ops.sqlite") as db:
+            db.executescript("""CREATE TABLE fire_requests(
+                press TEXT PRIMARY KEY, created_at TEXT, updated_at TEXT,
+                status TEXT, result TEXT);""")
+            db.execute("INSERT INTO fire_requests VALUES(?,?,?,?,?)",(
+                "one",NOW.isoformat(),NOW.isoformat(),
+                "flat_verified",json.dumps({"reason_code":"emergency_flat_verified"})))
+        self.assertFalse(prior_fire_receipts_safe(self.root))

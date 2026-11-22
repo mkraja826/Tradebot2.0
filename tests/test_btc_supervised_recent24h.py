@@ -5,7 +5,8 @@ import sqlite3
 import tempfile
 import unittest
 
-from tradebot.btc_supervised_recent24h import inspect_recent_btc_window
+from tradebot.btc_supervised_recent24h import (
+    inspect_recent_btc_window, load_recent24h_strategy_context)
 
 NOW = datetime(2026, 11, 22, 17, 30, tzinfo=timezone.utc)
 END = int(NOW.timestamp()) // 300 * 300
@@ -54,6 +55,29 @@ class RecentBTCWindowTests(unittest.TestCase):
         self.assertEqual(r["first_utc"],
                          datetime.fromtimestamp(FIRST, timezone.utc).isoformat())
         self.assertTrue(r["complete_contiguous_24h"])
+
+    def test_complete_window_contains_all_five_optional_technicals(self):
+        before=self.path.read_bytes()
+        context, levels=load_recent24h_strategy_context(self.root,at=NOW,price=100)
+        self.assertEqual(self.path.read_bytes(),before)
+        tech=context["technical_5m"]
+        self.assertEqual(tech["bars_used"],288)
+        self.assertEqual(tech["rsi14"],50)
+        self.assertEqual(tech["adx14"]["adx14"],0)
+        self.assertEqual(tech["relative_volume20"]["ratio"],1)
+        self.assertEqual(tech["macd_12_26_9"]["histogram"],0)
+        self.assertEqual(tech["bollinger_20_2"]["middle"],100)
+        self.assertFalse(tech["trade_authorized"])
+        self.assertEqual(set(levels["periods"]),{"last_24h"})
+        self.assertFalse(levels["independent_price_validation"])
+
+    def test_future_candle_cannot_contaminate_completed_window(self):
+        context,_=load_recent24h_strategy_context(self.root,at=NOW,price=100)
+        with sqlite3.connect(self.path) as db:
+            db.execute("INSERT INTO candles VALUES ('BTCUSD',?,?,?,?,?,?)",
+                       (END,100,120,98,120,100000))
+        future_context,_=load_recent24h_strategy_context(self.root,at=NOW,price=100)
+        self.assertEqual(context["technical_5m"],future_context["technical_5m"])
 
     def test_missing_five_minute_bar_blocks(self):
         with sqlite3.connect(self.path) as db:
