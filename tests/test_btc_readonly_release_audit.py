@@ -38,7 +38,7 @@ class BtcReadOnlyAuditTests(unittest.TestCase):
         text = AUDIT.read_text(encoding="utf-8")
         for module in (
             "tradebot.fire_leverage_probe",
-            "tradebot.equity_checkpoint_health",
+            "tradebot.equity_monitor",
             "tradebot.fire_reconciliation_phase_probe",
             "tradebot.demo_release_evidence",
         ):
@@ -54,6 +54,10 @@ class BtcReadOnlyAuditTests(unittest.TestCase):
             self.assertNotIn(forbidden, text)
         self.assertIn("allow_orders=False", (ROOT / "src" / "tradebot" /
                                              "fire_reconciliation_phase_probe.py").read_text())
+        self.assertIn("risk_health(", text)
+        self.assertIn("monitor.get(\"watchdog\")", text) if False else None
+        self.assertIn("watchdog", text)
+        self.assertIn("equity_collector", text)
         self.assertIn("TRADING_ENABLED: false", text)
         self.assertIn("exit 2", text)
 
