@@ -36,3 +36,94 @@ First ask for BTC demo market status and candle coverage. Check the quote timest
 - `review_fire(symbol, fire_id)` retrieves the exact recorded decision and asks the broker for evidence on its known order IDs. Closed BTCUSD/XAUTUSD receipts also attempt read-only fill/wallet reconciliation, cached for 60 seconds. Only `is_net_realized_pnl: true` with `financial_reconciliation_status: broker_reconciled` identifies a verified net outcome, including fees and funding as of `reconciliation_as_of_us`. Otherwise the order-level P&L remains explicitly provisional and `reconciliation_reason` explains the gap. External manual closes, unsupported adjustments, or missing identities/position/funding evidence remain unknown. See [reconciliation scope](PROFESSIONAL_UPGRADE.md#increment-8--fill-and-wallet-reconciliation). Compare two trades by reviewing both IDs. Historical protection verification describes the recorded event and current account positions are available separately.
 
 [OpenAI Secure MCP Tunnel setup](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels)
+
+## Optional owner-approved ROOT shell administration (unrestricted, extremely privileged)
+
+The owner explicitly requested and approved a **full VM root shell via the
+private Tb2.0 ChatGPT plugin** on 22 November 2026. This is a different trust
+scope from `fire_demo`: the plugin may be able to read all machine files,
+including broker/API credentials, and replace or destroy any VM service or
+data. If the tunnel or ChatGPT account is compromised, the VM is compromised.
+**Never publish/share this private tunnel or plugin. Do not use on a live
+trading VM until re-reviewed.** Root permission does **not** authorize trades
+or weakening the independent trading-risk controls.
+
+The code only provides a secure *mechanism*, not root permission automatically:
+the current installed stdio plugin must be updated, and the VM owner must
+install the helper under root ownership. No root privileges are supplied by
+a GitHub merge or by ChatGPT alone.
+
+### One-time VM bootstrap by the private tunnel's OS user
+
+If the private tunnel and Tradebot currently run using the existing original
+checkout, first ensure it is clean and intentionally update that checkout
+to a reviewed main commit. Do not overwrite uncommitted work or change
+deploys/services during an active trade:
+
+```bash
+cd "$HOME/Tradebot2.0"
+git status --short
+git pull --ff-only
+.venv/bin/python -m pip install -e '.[plugin]'
+bash ops/install_chat_root_bridge.sh --enable
+```
+
+**Important:** use the ordinary operating-system user whose private
+`tunnel-client run --profile tradingbot` process launches the
+`tradebot-plugin` MCP command. Do not run the installer itself under sudo,
+and do not change to an unrelated user: sudoers grants permission ONLY
+to that named OS identity. The installer will ask for normal local sudo
+permission. It installs a reviewed, root-owned executable at
+`/usr/local/sbin/tb2-root-bridge`, sudoers allowlist at
+`/etc/sudoers.d/tradebot2-chat-root`, and a root-only enable marker at
+`/etc/tradebot2/root-bridge.enabled`. It does not enable FIRE, place a
+broker order, modify keys or restart the dashboard.
+
+Restart **only the private tunnel-client/MCP stdio process** using the
+existing method employed on the VM; reconnect or refresh Tb2.0 in
+ChatGPT so that `admin_root_shell` appears. The pre-existing version of
+the plugin will not gain this tool until a new process loads the updated
+source. A GitHub merge alone changes neither the live dashboard nor plugin.
+
+### How root administration works
+
+- New tool: `admin_root_shell(command, timeout_seconds)`, with a 1–30
+  second timeout and at most 4,096 characters of command text.
+- Executes the command through the installed immutable root-owned
+  `sudo -n /usr/local/sbin/tb2-root-bridge` only, as the tunnel OS identity.
+  Neither dashboard HTTP routes nor the public web app expose shell access.
+- Caller cannot select an arbitrary bridge path, hostname, sudo user,
+  environment, working directory or command interpreter binary.
+- Root helper launches `/bin/bash` with a cleared secret-free environment,
+  bounded execution, best-effort redacted/truncated output and a private
+  `/var/log/tradebot2-root-admin.log` audit of *command hashes*, timestamps,
+  sudo identity and outcome. Root commands can themselves alter these
+  facilities; auditing is not tamper-proof. Output redaction is **not a
+  guarantee** against deliberate secret exfiltration. Never instruct the
+  plugin to print broker secrets, passwords, tokens or private keys.
+- ChatGPT must request explicit permission for each destructive action,
+  including broker mutations, service changes and deletes. The initial
+  owner root-access grant is not permission to execute any particular trade.
+- Privileged execution is disabled by default and fails closed if there is
+  no root-only enable marker, secure sudoers configuration or private tunnel.
+  Do not add a generic HTTP shell endpoint.
+
+### Immediate revocation and incident recovery
+
+To revoke the plugin's ROOT execution authority **without restarting
+the trading dashboard**, run once via SSH:
+
+```bash
+sudo rm -f /etc/tradebot2/root-bridge.enabled
+```
+
+For permanent removal also delete the sudoers allowlist and root bridge
+executable, then revoke/rotate the tunnel credential. If the private plugin
+was shared unintentionally, revoke the tunnel access immediately; do not
+assume disabling a process whose host is already compromised is sufficient.
+
+This full-root path is separate from the one-time isolated-mode PUT
+attempt already consumed. Do not remove
+`data/main-demo-isolated-reaffirm-once.lock` or bypass BTC's normal
+signed-margin, equity, exposure or SL/TP gates merely because root access
+is available.
