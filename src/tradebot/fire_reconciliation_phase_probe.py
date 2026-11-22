@@ -123,6 +123,64 @@ def _unattributed_wallet_hints(postings, fills, order_ids, product_id):
     }
 
 
+def _wallet_reference_linkage(raw_postings, normalized_postings, fills, owned_orders, product_id):
+    """Count actual provider-reference joins; no metadata values leave memory.
+
+    This records evidence identity matches, not a wallet reconciliation.
+    Cashflow remains unowned unless the strict analyser proves it separately.
+    """
+    selected = [f for f in fills if f["order_id"] in set(owned_orders)]
+    if not selected:
+        return None
+    final_fill_time = max(f["at_us"] for f in selected)
+    owned_fill_ids = {f["id"] for f in selected}
+    normalized = {p["id"]: p for p in normalized_postings}
+    names_allowed = frozenset({
+        "order_id", "fill_id", "fill_uuid", "order_uuid", "trade_id",
+        "trade_uuid", "position_id", "reference_id", "source_id",
+        "cashflow_id", "settlement_id", "last_fill_uuid",
+    })
+    report = {
+        "commission_fill_uuid_matched_signed_owned_fill": 0,
+        "commission_fill_uuid_not_matched_owned_fill": 0,
+        "delayed_cashflow_without_proven_order_or_fill_reference": 0,
+        "delayed_cashflow_candidate_reference_field_names": [],
+        "delayed_cashflow_has_other_metadata_fields": False,
+        "financial_attribution_verified": False,
+        "all_unmatched_wallet_transactions_resolved": False,
+        "raw_broker_values_exposed": False,
+    }
+    candidate_fields = set()
+    visited = set()
+    for row in raw_postings:
+        pid = identifier(row.get("id"))
+        if pid in visited:
+            continue
+        visited.add(pid)
+        p = normalized.get(pid)
+        if p is None:
+            raise ReconciliationError("wallet_reference_identity_unverified")
+        meta = row.get("meta_data") or {}
+        if not isinstance(meta, dict):
+            raise ReconciliationError("invalid_posting_metadata")
+        if (p["type"] == "commission" and
+                (row.get("fill_uuid") is not None or meta.get("fill_uuid") is not None)):
+            if p["fill_id"] in owned_fill_ids:
+                report["commission_fill_uuid_matched_signed_owned_fill"] += 1
+            else:
+                report["commission_fill_uuid_not_matched_owned_fill"] += 1
+        if (p["type"] == "cashflow"
+                and p["product_id"] == str(product_id)
+                and p["at_us"] > final_fill_time
+                and p["order_id"] is None and p["fill_id"] is None):
+            report["delayed_cashflow_without_proven_order_or_fill_reference"] += 1
+            candidate_fields.update((set(row) | set(meta)) & names_allowed)
+            if set(meta) - names_allowed:
+                report["delayed_cashflow_has_other_metadata_fields"] = True
+    report["delayed_cashflow_candidate_reference_field_names"] = sorted(candidate_fields)
+    return report
+
+
 def _base_report():
     return {
         "environment": "delta-india-demo",
@@ -143,6 +201,7 @@ def _base_report():
         "funding_reconciled": False,
         "cashflow_and_commission_consistency_proven_in_memory": False,
         "unattributed_wallet_posting_diagnostic": None,
+        "wallet_reference_linkage_diagnostic": None,
         "original_ledger_mutations": False,
         "temporary_ledger_mutations": False,
         "broker_order_mutations": False,
@@ -310,6 +369,15 @@ def probe_single_recent_btc(exchange, data_dir, *, now=None, fire_id=None):
             exc, "broker_wallet_schema_unverified"))
     out["wallet_posting_count"] = len(postings)
     out["stages_passed"].append("wallet_normalization")
+
+    # One-pass provider-reference inventory on the SAME original signed
+    # bounded broker window. No extra GET, persistence, or raw value logging.
+    try:
+        out["wallet_reference_linkage_diagnostic"] = _wallet_reference_linkage(
+            raw_postings, postings, fills, order_ids, pid)
+    except Exception:
+        # A supplementary diagnostic cannot override strict accounting.
+        out["wallet_reference_linkage_diagnostic"] = None
 
     try:
         with localcontext() as ctx:
