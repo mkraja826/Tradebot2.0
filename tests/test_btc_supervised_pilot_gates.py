@@ -1,5 +1,6 @@
 """Offline one-pass supervised BTC DEMO preflight and independence tests."""
 from datetime import datetime, timezone
+from unittest.mock import patch
 from pathlib import Path
 import tempfile
 import unittest
@@ -101,6 +102,34 @@ class PilotReadinessTests(unittest.TestCase):
                 r = self.run_gate(client=client, session=fail,
                                   margin=fail, account=fail, quality=fail)
                 self.assertEqual(r["blockers"], ["readonly_delta_demo_client_required"])
+
+    def test_string_ticker_timestamp_uses_existing_market_parser(self):
+        class DemoTicker(DummyReadOnly):
+            def ticker(self, symbol):
+                self.symbol_seen = symbol
+                return {"symbol": "BTCUSD", "product_id": 27,
+                        "mark_price": "61000.5",
+                        "timestamp": str(int(NOW.timestamp()))}
+        fake = DemoTicker()
+        with patch("tradebot.btc_supervised_pilot_gates.ReadOnlyArchive") as archive:
+            archive.return_value.levels.return_value = {
+                "periods": quality_ok(),
+            }
+            from tradebot.btc_supervised_pilot_gates import btc_required_period_quality
+            result = btc_required_period_quality(fake, "/unused", now=NOW)
+            self.assertEqual(result, quality_ok())
+            self.assertEqual(fake.symbol_seen, "BTCUSD")
+            archive.return_value.levels.assert_called_once()
+
+    def test_stale_string_ticker_does_not_pass(self):
+        class StaleTicker(DummyReadOnly):
+            def ticker(self, symbol):
+                return {"symbol": "BTCUSD", "product_id": 27,
+                        "mark_price": "61000.5",
+                        "timestamp": str(int(NOW.timestamp()) - 120)}
+        from tradebot.btc_supervised_pilot_gates import btc_required_period_quality
+        with self.assertRaisesRegex(ValueError, "btc_original_archive_or_quote_unverified"):
+            btc_required_period_quality(StaleTicker(), "/unused", now=NOW)
 
     def test_missing_original_archive_is_not_created(self):
         with tempfile.TemporaryDirectory() as tmp:
