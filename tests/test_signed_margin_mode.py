@@ -49,6 +49,56 @@ class SignedMarginEvidenceTests(unittest.TestCase):
         self.assertEqual(signed_account_margin_mode(self.broker), "isolated")
         self.assertTrue(all(call[0] == "GET" for call in self.broker.calls))
 
+    def test_main_empty_subaccounts_can_use_explicit_signed_preferences_mode(self):
+        self.broker.preference_response = {
+            "result": {"user_id": 501, "margin_mode": "isolated"}}
+        self.broker.account_response = {"result": []}
+        self.assertEqual(signed_account_margin_mode(self.broker), "isolated")
+        self.assertEqual(len(self.broker.calls), 2)
+        self.assertTrue(all(call[0] == "GET" and call[2] is True
+                            for call in self.broker.calls))
+
+    def test_main_empty_subaccounts_without_explicit_mode_still_blocks(self):
+        self.broker.account_response = {"result": []}
+        with self.assertRaisesRegex(
+                MarginModeEvidenceError, "signed_account_identity_not_unique"):
+            signed_account_margin_mode(self.broker)
+
+    def test_direct_portfolio_or_cross_never_passes_as_isolated(self):
+        for mode in ("portfolio", "cross"):
+            with self.subTest(mode=mode):
+                self.broker.preference_response = {
+                    "result": {"user_id": 501, "margin_mode": mode}}
+                self.broker.account_response = {"result": []}
+                self.assertEqual(signed_account_margin_mode(self.broker), mode)
+
+    def test_conflicting_signed_modes_rejected(self):
+        self.broker.preference_response = {
+            "result": {"user_id": 501, "margin_mode": "isolated"}}
+        self.broker.account_response = {"result": [
+            {"id": 501, "margin_mode": "portfolio"}]}
+        with self.assertRaisesRegex(
+                MarginModeEvidenceError, "signed_margin_mode_conflict"):
+            signed_account_margin_mode(self.broker)
+
+    def test_foreign_subaccounts_never_become_current_user_mode(self):
+        self.broker.preference_response = {
+            "result": {"user_id": 501, "margin_mode": "isolated"}}
+        self.broker.account_response = {"result": [
+            {"id": 999, "margin_mode": "portfolio"}]}
+        self.assertEqual(signed_account_margin_mode(self.broker), "isolated")
+
+    def test_invalid_explicit_preferences_mode_cannot_fall_back_to_subaccount(self):
+        for value in ("ISOLATED", "", True, 3, [], {}):
+            with self.subTest(value=value):
+                self.broker.calls.clear()
+                self.broker.preference_response = {
+                    "result": {"user_id": 501, "margin_mode": value}}
+                with self.assertRaisesRegex(
+                        MarginModeEvidenceError, "signed_margin_mode_unverified"):
+                    signed_account_margin_mode(self.broker)
+                self.assertEqual(len(self.broker.calls), 1)
+
     def test_different_user_subaccount_cannot_supply_mode(self):
         self.broker.account_response = {"result": [
             {"id": 901, "margin_mode": "isolated"},
