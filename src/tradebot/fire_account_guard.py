@@ -42,6 +42,37 @@ def require_flat_demo_account(exchange, *, selected_symbol=None, selected_produc
         raise AccountExposureRejected("Unsupported FIRE instrument")
     if signed_account_margin_mode(exchange) != "isolated":
         raise AccountExposureRejected("Broker isolated-margin account identity not verified")
+    return _require_flat_demo_exposure(
+        exchange, selected_symbol=selected_symbol,
+        selected_product_id=selected_product_id,
+    )
+
+
+def require_flat_demo_account_for_configuration(
+        exchange, *, selected_symbol=None, selected_product_id=None):
+    """Authenticated full-account exposure evidence for *account-setting only*.
+
+    WARNING: This does NOT check margin mode and is NOT an order-entry gate.
+    Normal FIRE calls only require_flat_demo_account, which retains its
+    independent signed isolated-margin check. This narrowly scoped variant
+    permits confirming zero exposure before a permitted margin-mode PUT.
+    """
+    if (getattr(exchange, "base_url", None) != DEMO_API
+            or getattr(exchange, "allow_orders", None) is not False):
+        raise AccountExposureRejected("Demo read-only configuration client required")
+    return _require_flat_demo_exposure(
+        exchange, selected_symbol=selected_symbol,
+        selected_product_id=selected_product_id,
+    )
+
+
+def _require_flat_demo_exposure(exchange, *, selected_symbol=None,
+                                selected_product_id=None):
+    """Internal shared broker exposure proof; never standalone order permit."""
+    if getattr(exchange, "base_url", None) != DEMO_API:
+        raise AccountExposureRejected("Only Delta India DEMO is permitted")
+    if selected_symbol is not None and selected_symbol not in FIRE_SYMBOLS:
+        raise AccountExposureRejected("Unsupported FIRE instrument")
 
     wide_reply = exchange._request(
         "GET", "/v2/positions/margined", auth=True
