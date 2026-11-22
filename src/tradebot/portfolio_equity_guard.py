@@ -16,7 +16,7 @@ import stat
 from tradebot.equity_receipt import EquityReadError, validate_receipt
 
 DAY = 86400
-ANCHOR_WINDOW = 300  # a signed snapshot from the first 5m of a UTC period
+ANCHOR_WINDOW = 300  # half-open [00:00:00, 00:05:00) UTC signed snapshot
 DEFAULT_LIMITS = (Decimal("0.02"), Decimal("0.05"), Decimal("0.08"))
 
 
@@ -153,13 +153,13 @@ def require_receipt_backed_history(db, instant):
         period_us = stamp(period)
         row = db.execute(
             "SELECT observed_us,equity_usd FROM equity_evidence "
-            "WHERE observed_us>=? AND observed_us<=? AND observed_us<=? "
+            "WHERE observed_us>=? AND observed_us<? AND observed_us<=? "
             "ORDER BY observed_us LIMIT 1",
             (period_us, period_us + ANCHOR_WINDOW * 1_000_000, current_us)
         ).fetchone()
         if row is not None:
             validate_historical(row)
-        elif not period_us <= current_us <= period_us + ANCHOR_WINDOW * 1_000_000:
+        elif not period_us <= current_us < period_us + ANCHOR_WINDOW * 1_000_000:
             raise EquityRiskError("missing_opening_equity_checkpoint")
     if latest is not None:
         if type(latest[0]) is not int or latest[0] > current_us:
@@ -285,7 +285,7 @@ class PortfolioEquityGuard:
     def _opening(db, period_start_us, instant_us):
         rows = db.execute(
             "SELECT equity_usd,origin FROM equity_evidence WHERE observed_us>=? "
-            "AND observed_us<=? AND observed_us<=? ORDER BY observed_us LIMIT 1",
+            "AND observed_us<? AND observed_us<=? ORDER BY observed_us LIMIT 1",
             (period_start_us, period_start_us + ANCHOR_WINDOW*1000000, instant_us)
         ).fetchone()
         if rows and rows[1] != "delta_demo_signed_wallet":
