@@ -18,6 +18,7 @@ import re
 from tradebot.delta import DeltaDemo, DEMO_API
 from tradebot.fire_bracket_evidence import _saved, BracketEvidenceError, VALID_FIRE_ID
 from tradebot.fire_inventory import read_inventory, _read_rows, InventoryEvidenceError
+from tradebot.financial_reference_crosscheck import crosscheck_foreign_fill_refs
 from tradebot.fire_reconciliation import (
     ReconciliationError, analyse, identifier, normalize_fill,
     normalize_posting, timestamp_us, unique, EXTERNAL, number,
@@ -261,6 +262,7 @@ def _base_report():
         "unattributed_wallet_posting_diagnostic": None,
         "wallet_reference_linkage_diagnostic": None,
         "overlapping_wallet_posting_diagnostic": None,
+        "account_wide_fill_reference_crosscheck": None,
         "original_ledger_mutations": False,
         "temporary_ledger_mutations": False,
         "broker_order_mutations": False,
@@ -464,6 +466,14 @@ def probe_single_recent_btc(exchange, data_dir, *, now=None, fire_id=None):
                     postings, fills, order_ids, pid)
             except Exception:
                 # Supplementary classification is never an accounting waiver.
+                pass
+            # Account-wide signed GET may identify a foreign fill reference
+            # omitted by a product filter. Diagnosis never changes analyse().
+            try:
+                out["account_wide_fill_reference_crosscheck"] = (
+                    crosscheck_foreign_fill_refs(
+                        exchange, postings, fills, order_ids, pid, start_us, end_us))
+            except Exception:
                 pass
         return block("financial_analysis", reason)
     out["cashflow_and_commission_consistency_proven_in_memory"] = True
