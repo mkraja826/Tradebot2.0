@@ -25,6 +25,7 @@ from tradebot.fire_inventory import (
     RECONCILIATION_DATABASE, MAX_ROWS, _identity,
 )
 from tradebot.demo_upgrade_preflight import SAFE_TERMINAL
+from tradebot.signed_margin_mode import signed_account_margin_mode
 
 SYMBOLS = ("BTCUSD", "XAUTUSD")
 SAMPLE_INTERVAL_SECONDS = 11
@@ -125,10 +126,7 @@ def _positions_for_product(exchange, pid):
 
 def _sample(exchange):
     """Authenticated unfiltered margin, full open orders and two real-time markets."""
-    profile = _get(exchange, "/v2/profile").get("result")
-    if not isinstance(profile, dict):
-        raise BrokerInventoryError("account_profile_unverified")
-    isolated = profile.get("margin_mode") == "isolated"
+    isolated = signed_account_margin_mode(exchange) == "isolated"
 
     wide = _get(exchange, "/v2/positions/margined")
     rows = wide.get("result")
