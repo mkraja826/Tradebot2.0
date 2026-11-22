@@ -81,6 +81,30 @@ class MonitorTests(unittest.TestCase):
                 "SELECT count(*) FROM monitor_events"
             ).fetchone()[0], 1)
 
+    def test_ambiguous_crash_recovery_alert_has_distinct_persistent_code(self):
+        press = "c" * 32
+        first = self.store.record_watchdog_emergency(
+            press, at=self.now,
+            reason_code="watchdog_protection_failure_flat_verified")
+        self.assertEqual(first["code"], "watchdog_protection_failure_flat_verified")
+        self.assertEqual(first["severity"], "critical")
+        self.assertNotIn(press, json.dumps(first))
+        self.assertIsNone(self.store.record_watchdog_emergency(
+            press, at=self.now + timedelta(seconds=5),
+            reason_code="watchdog_emergency_flat_verified"))
+        with sqlite3.connect(self.path) as db:
+            codes = db.execute(
+                "SELECT code FROM monitor_events").fetchall()
+        self.assertEqual(codes, [("watchdog_protection_failure_flat_verified",)])
+
+    def test_unknown_watchdog_incident_category_fails_closed(self):
+        with self.assertRaises(ValueError):
+            self.store.record_watchdog_emergency(
+                "d" * 32, reason_code="private_untrusted_reason")
+        with sqlite3.connect(self.path) as db:
+            self.assertEqual(db.execute(
+                "SELECT count(*) FROM monitor_events").fetchone()[0], 0)
+
     def test_invalid_emergency_press_never_creates_event(self):
         for press in ("", "not-an-id", "SECRET_KEY_PRIVATE", "A" * 32, None):
             with self.subTest(press=press):
