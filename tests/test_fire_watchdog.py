@@ -36,8 +36,10 @@ class Broker:
     def _request(self, method, path, *, params=None, auth=False):
         if method != "GET" or not auth:
             raise AssertionError("Unexpected broker call")
-        if path == "/v2/profile":
-            return {"result": {"margin_mode": "isolated"}}
+        if path == "/v2/users/trading_preferences":
+            return {"result": {"user_id": 501}}
+        if path == "/v2/sub_accounts":
+            return {"result": [{"id": 501, "margin_mode": "isolated"}]}
         if path != "/v2/positions/margined":
             raise AssertionError("Unexpected broker path")
         assert params == {"product_ids": "27"}

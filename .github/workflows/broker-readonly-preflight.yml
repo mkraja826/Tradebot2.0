@@ -52,6 +52,39 @@ jobs:
         run: |
           python -m unittest discover -s tests -p 'test_fire_leverage_probe.py' -v
           python -m unittest discover -s tests -p 'test_fire_broker_inventory.py' -v
+      - name: Signed DEMO account identity endpoint — sanitized status only
+        shell: bash
+        run: |
+          set -eu
+          set +x
+          python - <<'PY'
+          import os
+          from urllib.error import HTTPError
+          from tradebot.delta import DeltaDemo, DeltaError
+
+          broker = DeltaDemo(
+              api_key=os.environ["DELTA_DEMO_API_KEY"],
+              api_secret=os.environ["DELTA_DEMO_API_SECRET"],
+              allow_orders=False,
+          )
+          try:
+              response = broker._request(
+                  "GET", "/v2/users/trading_preferences", auth=True
+              )
+              assert isinstance(response.get("result"), dict)
+              assert response["result"].get("user_id")
+          except Exception as exc:
+              cause = exc.__cause__ if isinstance(exc, DeltaError) else None
+              if isinstance(cause, HTTPError):
+                  code = cause.code
+                  allowlist = {400, 401, 403, 404, 408, 429, 500, 502, 503}
+                  print("SIGNED_ACCOUNT_IDENTITY_HTTP_STATUS:",
+                        code if code in allowlist else "other")
+              else:
+                  print("SIGNED_ACCOUNT_IDENTITY_UNVERIFIED")
+              raise SystemExit(2)
+          print("SIGNED_ACCOUNT_IDENTITY_GET: succeeded")
+          PY
       - name: Authenticated Delta India DEMO — strictly GET-only broker preflight
         shell: bash
         run: |

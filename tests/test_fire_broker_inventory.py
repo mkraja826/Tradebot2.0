@@ -45,12 +45,17 @@ class FakeBroker(DeltaDemo):
             raise AssertionError("Broker inventory attempted a mutation or unsigned read")
         if path == self.fail_path:
             raise RuntimeError("PRIVATE PROVIDER SECRET")
-        if path == "/v2/profile":
+        if path == "/v2/users/trading_preferences":
             self.profile_reads += 1
             if self.profile_reads == 2 and self.second_sample_hook:
                 self.second_sample_hook()
             return {"result": (None if self.malformed_profile else
-                              {"margin_mode": "cross" if self.cross_margin else "isolated"})}
+                              {"user_id": 501})}
+        if path == "/v2/sub_accounts":
+            return {"result": [{
+                "id": 501,
+                "margin_mode": "cross" if self.cross_margin else "isolated",
+            }]}
         if path == "/v2/positions/margined":
             return {"result": list(self.margined)}
         if path == "/v2/orders":
