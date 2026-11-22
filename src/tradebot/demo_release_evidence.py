@@ -12,7 +12,8 @@ from pathlib import Path
 import subprocess
 
 from tradebot.delta import DEMO_API, DeltaDemo
-from tradebot.equity_checkpoint_health import checkpoint_health
+from tradebot.commissioning_equity import signed_equity_readiness
+from tradebot.equity_monitor import risk_health
 from tradebot.fire_bracket_evidence import VALID_FIRE_ID, audit_bracket_fields
 from tradebot.fire_broker_inventory import observe_broker_inventory
 from tradebot.fire_commission_preflight import _fire_disabled, _services_active
@@ -26,11 +27,54 @@ def _clock_synchronized():
     )
     return result.returncode == 0 and result.stdout.strip() == "yes"
 
+def _monitor_evidence_healthy(health):
+    """Only real fresh watchdog + collector heartbeats pass the audit."""
+    if type(health) is not dict or type(health.get("monitoring")) is not dict:
+        return False
+    monitor = health["monitoring"]
+    if monitor.get("alert_codes") != []:
+        return False
+    for name, max_age in (("watchdog", 90), ("equity_collector", 180)):
+        age = monitor.get(name + "_age_seconds")
+        if (monitor.get(name) != "healthy"
+                or type(age) not in (int, float)
+                or not 0 <= age <= max_age):
+            return False
+    return True
+
+
+def _risk_evidence_healthy(health):
+    """No inferred checkpoint, missing immutable receipt or stale monitoring."""
+    return (
+        type(health) is dict
+        and health.get("status") == "healthy"
+        and health.get("checkpoint_prerequisites_met") is True
+        and health.get("trade_authorized") is False
+        and health.get("blocking_conditions") == []
+        and _monitor_evidence_healthy(health)
+    )
+
+
+def _wallet_budget_within_limits(result):
+    """Budget assessment must be signed-wallet-only and NEVER trade authority."""
+    return (
+        type(result) is dict
+        and result.get("approved") is True
+        and result.get("reason") == "within_observed_equity_limits"
+        and result.get("source") == "delta_demo_signed_wallet"
+        and result.get("mode") == "read_only"
+        and result.get("evidence_persisted") is False
+        and result.get("is_reconciled_realized_pnl") is False
+        and result.get("trade_authorized") is False
+        and _risk_evidence_healthy(result.get("health"))
+    )
+
 
 def observe_demo_release(
     exchange, data_dir, *, fire_id, clock_check=_clock_synchronized,
     service_check=_services_active, fire_disabled_check=_fire_disabled,
-    health_check=checkpoint_health, inventory_check=observe_broker_inventory,
+    health_check=risk_health, budget_check=signed_equity_readiness,
+    inventory_check=observe_broker_inventory,
     bracket_check=audit_bracket_fields, pause=None,
 ):
     """Gather safe evidence; a clean result is still NEVER trade authority.
@@ -53,6 +97,8 @@ def observe_demo_release(
             "clock_synchronized": False, "services_active": False,
             "both_fire_endpoints_disabled": False,
             "equity_checkpoint_prerequisites_met": False,
+            "monitor_heartbeats_verified": False,
+            "fresh_wallet_loss_budget_within_limits": False,
             "two_flat_broker_samples_observed": False,
             "historical_order_fields_match": False,
             "final_host_and_equity_still_healthy": False,
@@ -94,19 +140,32 @@ def observe_demo_release(
             blockers.append(code)
     try:
         health = health_check(root / "fire-equity-risk.sqlite")
-        checks["equity_checkpoint_prerequisites_met"] = (
-            type(health) is dict and health.get("status") == "healthy"
-            and health.get("checkpoint_prerequisites_met") is True
-            and health.get("trade_authorized") is False
-            and health.get("blocking_conditions") == []
-        )
+        checks["monitor_heartbeats_verified"] = _monitor_evidence_healthy(health)
+        checks["equity_checkpoint_prerequisites_met"] = _risk_evidence_healthy(health)
     except Exception:
         pass
+    if not checks["monitor_heartbeats_verified"]:
+        blockers.append("watchdog_or_equity_collector_heartbeat_unverified")
     if not checks["equity_checkpoint_prerequisites_met"]:
         blockers.append("signed_equity_checkpoint_health_unverified")
     if blockers:
         report["blockers"] = sorted(set(blockers))
         return report
+
+    # Fresh authenticated wallet GET and read-only comparison with the real
+    # opening anchors and shared drawdown limits. No amounts, receipts or
+    # account identifiers enter this diagnostic's public output.
+    try:
+        assessment = budget_check(exchange, root)
+        checks["fresh_wallet_loss_budget_within_limits"] = (
+            _wallet_budget_within_limits(assessment))
+    except Exception:
+        checks["fresh_wallet_loss_budget_within_limits"] = False
+    if not checks["fresh_wallet_loss_budget_within_limits"]:
+        blockers.append("fresh_signed_wallet_loss_budget_unverified")
+        report["blockers"] = sorted(set(blockers))
+        return report
+    report["fresh_wallet_risk_assessment_completed"] = True
 
     # Full-account + two-market GET-only broker observation. Always bounded,
     # with two timed sweeps and independent local SQLite evidence checks.
@@ -175,11 +234,7 @@ def observe_demo_release(
                 clock_check() is True
                 and service_check() is True
                 and fire_disabled_check() is True
-                and type(final_health) is dict
-                and final_health.get("status") == "healthy"
-                and final_health.get("checkpoint_prerequisites_met") is True
-                and final_health.get("trade_authorized") is False
-                and final_health.get("blocking_conditions") == []
+                and _risk_evidence_healthy(final_health)
             )
         except Exception:
             checks["final_host_and_equity_still_healthy"] = False

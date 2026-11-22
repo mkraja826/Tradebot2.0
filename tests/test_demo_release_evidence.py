@@ -22,6 +22,26 @@ def healthy(_path):
     return {
         "status": "healthy", "checkpoint_prerequisites_met": True,
         "trade_authorized": False, "blocking_conditions": [],
+        "monitoring": {
+            "watchdog": "healthy", "watchdog_age_seconds": 3.0,
+            "equity_collector": "healthy",
+            "equity_collector_age_seconds": 8.0,
+            "alert_codes": [],
+        },
+    }
+
+
+def within_budget(_exchange, _root):
+    return {
+        "approved": True,
+        "reason": "within_observed_equity_limits",
+        "source": "delta_demo_signed_wallet",
+        "mode": "read_only", "evidence_persisted": False,
+        "is_reconciled_realized_pnl": False, "trade_authorized": False,
+        "health": healthy(None), "read_receipt": {
+            "SECRET_RESPONSE": "SECRET_BALANCE_ACCOUNT_NEVER_PUBLISH",
+        },
+        "equity_usd": "SECRET_ACCOUNT_BALANCE_NEVER_PUBLISH",
     }
 
 
@@ -65,7 +85,7 @@ class DemoEvidenceTests(unittest.TestCase):
             "fire_id": FIRE_ID, "clock_check": lambda: True,
             "service_check": lambda: True,
             "fire_disabled_check": lambda: True,
-            "health_check": healthy,
+            "health_check": healthy, "budget_check": within_budget,
             "inventory_check": inventory,
             "bracket_check": bracket,
             "pause": lambda _: None,
@@ -88,7 +108,10 @@ class DemoEvidenceTests(unittest.TestCase):
         self.assertFalse(report["ready_for_unattended_trading"])
         self.assertFalse(report["broker_order_mutations"])
         self.assertFalse(report["local_ledger_mutations"])
-        self.assertFalse(report["fresh_wallet_risk_assessment_completed"])
+        self.assertTrue(report["fresh_wallet_risk_assessment_completed"])
+        self.assertTrue(report["checks"]["monitor_heartbeats_verified"])
+        self.assertTrue(report["checks"]["fresh_wallet_loss_budget_within_limits"])
+        self.assertNotIn("SECRET_", json.dumps(report))
         self.assertFalse(report["broker_wide_fill_and_funding_reconciliation_complete"])
         self.assertFalse(report["historical_continuous_protection_proven"])
         self.assertTrue(report["independent_risk_review_required"])
@@ -151,6 +174,117 @@ class DemoEvidenceTests(unittest.TestCase):
         health = lambda _p: {**healthy(None), "trade_authorized": True}
         report = self.observe(health_check=health)
         self.assertIn("signed_equity_checkpoint_health_unverified", report["blockers"])
+
+    def test_missing_or_stale_watchdog_heartbeat_blocks_before_wallet_or_broker(self):
+        for status, age, codes in (
+            ("stale", 91.0, ["watchdog_heartbeat_stale"]),
+            ("healthy", 91.0, []),
+            ("healthy", -1.0, []),
+            ("healthy", "0", []),
+            ("healthy", None, []),
+        ):
+            with self.subTest(status=status,age=age):
+                health = healthy(None)
+                health["monitoring"]["watchdog"] = status
+                health["monitoring"]["watchdog_age_seconds"] = age
+                health["monitoring"]["alert_codes"] = codes
+                budget_calls = []
+                def budget(*args):
+                    budget_calls.append(args)
+                    return within_budget(*args)
+                report = self.observe(
+                    health_check=lambda _p: health, budget_check=budget)
+                self.assertIn(
+                    "watchdog_or_equity_collector_heartbeat_unverified",
+                    report["blockers"])
+                self.assertFalse(report["checks"]["monitor_heartbeats_verified"])
+                self.assertFalse(report["fresh_wallet_risk_assessment_completed"])
+                self.assertEqual(budget_calls, [])
+                self.assertEqual(self.inventory_calls, [])
+                self.assertEqual(self.bracket_calls, [])
+
+    def test_no_monitoring_row_is_not_interpreted_as_a_healthy_service(self):
+        result = self.observe(health_check=lambda _p: {
+            "status": "healthy",
+            "checkpoint_prerequisites_met": True,
+            "trade_authorized": False,
+            "blocking_conditions": [],
+        })
+        self.assertFalse(result["checks"]["monitor_heartbeats_verified"])
+        self.assertIn(
+            "watchdog_or_equity_collector_heartbeat_unverified",
+            result["blockers"])
+        self.assertEqual(self.inventory_calls, [])
+
+    def test_stale_collector_heartbeat_stops_before_signed_wallet_read(self):
+        health = healthy(None)
+        health["monitoring"]["equity_collector_age_seconds"] = 181.
+        budget_calls = []
+        report = self.observe(
+            health_check=lambda _p: health,
+            budget_check=lambda *args: budget_calls.append(args))
+        self.assertIn(
+            "watchdog_or_equity_collector_heartbeat_unverified",
+            report["blockers"])
+        self.assertEqual(budget_calls, [])
+        self.assertEqual(self.inventory_calls, [])
+
+    def test_fresh_wallet_budget_loss_limit_stops_broker_inventory(self):
+        failed = {**within_budget(None,None), "approved": False,
+                  "reason": "loss_limit_daily", "equity_usd": "PRIVATE_980"}
+        report = self.observe(budget_check=lambda *_args: failed)
+        self.assertIn("fresh_signed_wallet_loss_budget_unverified",
+                      report["blockers"])
+        self.assertFalse(report["checks"]["fresh_wallet_loss_budget_within_limits"])
+        self.assertFalse(report["fresh_wallet_risk_assessment_completed"])
+        self.assertFalse(report["trade_authorized"])
+        self.assertNotIn("PRIVATE_980", json.dumps(report))
+        self.assertEqual(self.inventory_calls, [])
+        self.assertEqual(self.bracket_calls, [])
+
+    def test_wallet_budget_provenance_and_no_ledger_write_are_required(self):
+        for key, value in (
+            ("trade_authorized", True), ("mode","order_enabled"),
+            ("evidence_persisted",True), ("is_reconciled_realized_pnl",True),
+            ("source","unknown"), ("approved", False),
+            ("health", {**healthy(None), "status": "monitoring_degraded"}),
+        ):
+            with self.subTest(key=key):
+                report = self.observe(
+                    budget_check=lambda *_args: {
+                        **within_budget(None,None), key:value})
+                self.assertIn(
+                    "fresh_signed_wallet_loss_budget_unverified",
+                    report["blockers"])
+                self.assertEqual(self.inventory_calls, [])
+                self.assertFalse(report["trade_authorized"])
+
+    def test_wallet_failure_is_sanitized_and_no_broker_inventory(self):
+        def broken(*args, **kwargs):
+            raise RuntimeError("SECRET_ACCOUNT_NUMBER_123")
+        report = self.observe(budget_check=broken)
+        self.assertIn(
+            "fresh_signed_wallet_loss_budget_unverified",
+            report["blockers"])
+        self.assertNotIn("SECRET_ACCOUNT_NUMBER_123", json.dumps(report))
+        self.assertEqual(self.inventory_calls, [])
+        self.assertFalse(report["trade_authorized"])
+
+    def test_monitor_heartbeat_change_during_broker_sweep_blocks_report(self):
+        reports = iter((healthy(None), {
+            **healthy(None),
+            "monitoring": {
+                **healthy(None)["monitoring"],
+                "watchdog_age_seconds": 100.0,
+            }
+        }))
+        report = self.observe(health_check=lambda _p: next(reports))
+        self.assertTrue(report["checks"]["fresh_wallet_loss_budget_within_limits"])
+        self.assertFalse(report["checks"]["final_host_and_equity_still_healthy"])
+        self.assertIn(
+            "host_or_equity_changed_during_broker_observation",
+            report["blockers"])
+        self.assertFalse(report["trade_authorized"])
 
     def test_broken_clock_or_service_exception_never_exposes_secrets(self):
         def boom():

@@ -56,18 +56,33 @@ run_check 'Broker leverage and isolated-margin compatibility' \
 run_check 'Existing equity receipt/checkpoint health' \
   "$PY" -c '
 import json, sys
-from tradebot.equity_checkpoint_health import checkpoint_health
+from tradebot.equity_monitor import risk_health
 try:
-    result = checkpoint_health(sys.argv[1])
+    result = risk_health(sys.argv[1])
     safe = {name: result.get(name) for name in (
         "status", "daily_checkpoint", "weekly_checkpoint",
         "observation_status", "latest_receipt_status", "database_integrity",
         "checkpoint_prerequisites_met", "blocking_conditions", "alert_codes",
         "trade_authorized",
     )}
+    monitor = result.get("monitoring") if type(result.get("monitoring")) is dict else {}
+    safe["monitoring"] = {
+        "watchdog": monitor.get("watchdog"),
+        "equity_collector": monitor.get("equity_collector"),
+        "alert_codes": monitor.get("alert_codes"),
+    }
+    watched = all(
+        monitor.get(name) == "healthy"
+        and type(monitor.get(name + "_age_seconds")) in (int, float)
+        and 0 <= monitor[name + "_age_seconds"] <= limit
+        for name, limit in (("watchdog",90),("equity_collector",180))
+    )
     print(json.dumps(safe, sort_keys=True))
     sys.exit(0 if result.get("status") == "healthy"
              and result.get("checkpoint_prerequisites_met") is True
+             and result.get("blocking_conditions") == []
+             and monitor.get("alert_codes") == []
+             and watched
              and result.get("trade_authorized") is False else 2)
 except Exception:
     print(json.dumps({"status": "blocked", "reason": "equity_health_unavailable",
