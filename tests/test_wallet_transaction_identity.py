@@ -14,10 +14,12 @@ UUID_B = "123e4567-e89b-42d3-a456-426614174001"
 
 
 def wallet_record(**kw):
-    return dict(uuid=UUID_A, created_at="2026-11-22T00:00:00+00:00",
-                asset_symbol="USD", amount="-0.01",
-                transaction_type="commission", product_id=27,
-                meta_data={"order_id": 100}, **kw)
+    row = dict(uuid=UUID_A, created_at="2026-11-22T00:00:00+00:00",
+               asset_symbol="USD", amount="-0.01",
+               transaction_type="commission", product_id=27,
+               meta_data={"order_id": 100})
+    row.update(kw)
+    return row
 
 
 class SimulatedDemo(DeltaDemo):
