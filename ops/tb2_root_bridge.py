@@ -85,11 +85,9 @@ def _clean_output(raw):
 def main(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("--timeout", type=int, required=True)
-    parser.add_argument("separator")
     parser.add_argument("command")
     args = parser.parse_args(argv)
-    if (args.separator != "--"
-            or not 1 <= args.timeout <= 30
+    if (not 1 <= args.timeout <= 30
             or not args.command.strip()
             or len(args.command) > 4096
             or "\x00" in args.command):
