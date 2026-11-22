@@ -378,6 +378,34 @@ class FireDemoController:
         self.pause = pause
         self.spawn = spawn or (lambda f: Thread(target=f, daemon=True).start())
 
+    def _decision_context(self, exchange, collected, midpoint):
+        """Normal FIRE uses its existing independent provider context."""
+        return decision_context(exchange, self.store, self.symbol,
+                                collected.timestamp(), midpoint)
+
+    def _historical_levels(self, collected, midpoint):
+        """Preserve all six normal FIRE periods and strict quality gates."""
+        if self.archive is None:
+            raise FireTradeError("Historical candle archive not configured")
+        try:
+            levels = self.archive.levels(self.symbol, collected.timestamp(), midpoint)
+        except (sqlite3.Error, ValueError, TypeError):
+            raise FireTradeError("Historical levels unavailable") from None
+        periods = levels.get("periods") if isinstance(levels, dict) else None
+        required = ("day", "previous_day", "week", "previous_week",
+                    "month", "previous_month")
+        if not isinstance(periods, dict) or any(
+            not isinstance(periods.get(key), dict)
+            or periods[key].get("quality_status") != "provisionally_valid"
+            for key in required
+        ):
+            raise FireTradeError("Unverified historical levels; no FIRE order")
+        return levels
+
+    def _additional_fire_scope(self):
+        """Normal six-period policy never claims supervised pilot history."""
+        return {}
+
     def snapshot(self):
         result = self.store.latest()
         return {**result, "symbol": self.symbol,
@@ -441,26 +469,11 @@ class FireDemoController:
             self.store.update(press, "reasoning", risk_assessment={
                 "equity_monitor": equity_precheck})
             midpoint = (float(snapshot["core"]["best_bid"]) + float(snapshot["core"]["best_ask"])) / 2
-            context = decision_context(exchange, self.store, self.symbol, collected.timestamp(), midpoint)
-            # Historical data integrity is mandatory, not an optional plugin.
-            # A direct FireDemoController or missed dashboard wiring must
-            # never enter the GPT-6 decision path without an archive.
+            context = self._decision_context(exchange, collected, midpoint)
+            # Strategy-specific history must be validated by the controller,
+            # not by a dashboard toggle or a model-generated assertion.
             stage = "historical_data_integrity"
-            if self.archive is None:
-                raise FireTradeError("Historical candle archive not configured")
-            try:
-                levels = self.archive.levels(self.symbol, collected.timestamp(), midpoint)
-            except (sqlite3.Error, ValueError, TypeError):
-                raise FireTradeError("Historical levels unavailable") from None
-            periods = levels.get("periods") if isinstance(levels, dict) else None
-            required = ("day", "previous_day", "week", "previous_week",
-                        "month", "previous_month")
-            if not isinstance(periods, dict) or any(
-                not isinstance(periods.get(key), dict)
-                or periods[key].get("quality_status") != "provisionally_valid"
-                for key in required
-            ):
-                raise FireTradeError("Unverified historical levels; no FIRE order")
+            levels = self._historical_levels(collected, midpoint)
             context["historical_levels"] = levels
             self.store.update(press, "reasoning", indicators=context)
             model_snapshot = {**snapshot, "indicators": context, "fire_execution_scope": {
@@ -471,6 +484,7 @@ class FireDemoController:
                 "dynamic_leverage_enabled": True,
                 "min_leverage": 1, "max_leverage": 20,
                 "separate_learning_model_has_no_trade_authority": True,
+                **self._additional_fire_scope(),
             }}
             stage = "save_model_input"
             self.store.record_model_input(press, model_snapshot)
