@@ -79,7 +79,7 @@ class WalletTransactionUUIDTests(unittest.TestCase):
             {"uuid": ""}, {"uuid": "invalid-uuid"},
             {"uuid": "00000000-0000-0000-0000-00000000000G"},
             {"uuid": " " + UUID_A + " "},
-            {"uuid": UUID_A[:8] + "-" + UUID_A[9:]},
+            {"uuid": UUID_A[:8] + "_" + UUID_A[9:]},
         ]
         for row in examples:
             with self.subTest(row=row):
