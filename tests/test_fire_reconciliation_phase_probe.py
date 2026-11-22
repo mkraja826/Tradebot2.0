@@ -385,6 +385,43 @@ class M09PhaseProbeTests(unittest.TestCase):
         self.assertEqual(report["reason"], "unsupported_wallet_fill_uuid_kind")
         self.assertFalse(report["trade_authorized"])
 
+    def test_overlapping_external_posting_classification_does_not_leak_references(self):
+        # A broker wallet fee from an unknown fill in the selected position
+        # interval must remain blocked (never treated as our own fee).
+        fee = self.broker.postings[2]
+        fee["meta_data"] = {
+            "fill_uuid": "c7b384f4-3d1c-4a19-b7fe-12c6b2b1040d",
+            "private_token": "SECRET-SHOULD-NOT-APPEAR",
+        }
+        report = self.probe()
+        self.assertEqual(report["stage"], "financial_analysis")
+        self.assertEqual(report["reason"], "overlapping_external_postings")
+        hints = report["overlapping_wallet_posting_diagnostic"]
+        self.assertEqual(hints["same_product_in_position_unowned_reference_count"], 1)
+        self.assertEqual(hints["kinds"]["commission"], 1)
+        self.assertEqual(hints["fill_reference_present"], 1)
+        self.assertEqual(hints["fill_reference_not_in_signed_fill_window"], 1)
+        self.assertEqual(hints["fill_reference_in_other_signed_fill"], 0)
+        self.assertFalse(hints["wallet_ownership_proven"])
+        self.assertFalse(hints["can_remove_blocker"])
+        self.assertFalse(report["is_net_realized_pnl"])
+        self.assertFalse(report["trade_authorized"])
+        self.assertFalse(report["safe_to_enable_fire"])
+        self.assertNotIn("SECRET-SHOULD-NOT-APPEAR", json.dumps(report))
+        self.assertNotIn("c7b384f4", json.dumps(report))
+        self.assertEqual(list(self.root.iterdir()), [])
+
+    def test_overlapping_order_reference_classified_without_ownership(self):
+        posting = self.broker.postings[2]
+        posting["meta_data"] = {"order_id": "PRIVATE-OTHER-ORDER"}
+        report = self.probe()
+        self.assertEqual(report["reason"], "overlapping_external_postings")
+        hints = report["overlapping_wallet_posting_diagnostic"]
+        self.assertEqual(hints["same_product_in_position_unowned_reference_count"], 1)
+        self.assertEqual(hints["order_reference_present"], 1)
+        self.assertEqual(hints["fill_reference_present"], 0)
+        self.assertNotIn("PRIVATE-OTHER-ORDER", json.dumps(report))
+
     def test_delayed_cashflow_and_commission_get_amount_clues_not_credit(self):
         cash = self.broker.postings[-2]
         cash["created_at"] = BASE + 101_000_000
