@@ -98,6 +98,32 @@ class M09PhaseProbeTests(unittest.TestCase):
         self.assertFalse(report["trade_authorized"])
         self.assertEqual(list(self.root.iterdir()), [])
 
+    def test_prior_wallet_commissions_are_not_counted_as_unowned_postfill(self):
+        # Original 2026 VM audit displayed 4 unmatched UUIDs, but only one
+        # delayed commission was among the 2 unresolved postings. Earlier
+        # transactions may have fill_uuid references for different trades.
+        own_uuid = "c7b384f4-3d1c-4a19-b7fe-12c6b2b1040d"
+        self.broker.fills[3]["id"] = own_uuid
+        for i in range(3):
+            self.broker.postings[i]["meta_data"] = {
+                "fill_uuid": "4d777777-2222-4444-aaaa-555555555555"
+            }
+        fee = self.broker.postings[3]
+        fee["created_at"] = BASE + 92_000_000
+        fee["meta_data"] = {"fill_uuid": own_uuid}
+        cash = self.broker.postings[-2]
+        cash["created_at"] = BASE + 93_000_000
+        cash["meta_data"] = {}
+        report = self.probe()
+        self.assertEqual(report["reason"], "unattributed_wallet_posting")
+        evidence = report["wallet_reference_linkage_diagnostic"]
+        self.assertEqual(evidence["commission_fill_uuid_matched_signed_owned_fill"], 1)
+        self.assertEqual(evidence["commission_fill_uuid_not_matched_owned_fill"], 0)
+        self.assertEqual(
+            evidence["delayed_cashflow_without_proven_order_or_fill_reference"], 1)
+        self.assertFalse(evidence["financial_attribution_verified"])
+        self.assertFalse(report["is_net_realized_pnl"])
+
     def test_unowned_commission_uuid_is_not_mistaken_for_selected_trade(self):
         fee = self.broker.postings[3]
         fee["created_at"] = BASE + 92_000_000
