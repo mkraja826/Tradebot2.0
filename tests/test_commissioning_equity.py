@@ -8,11 +8,11 @@ import unittest
 from unittest.mock import Mock, patch
 
 from equity_fixtures import receipt_for
-from tradebot.commissioning_equity import signed_equity_readiness
+from tradebot.commissioning_equity import signed_equity_readiness, _require_signed_anchor_receipts
 from tradebot.delta import DEMO_API
 from tradebot.equity_monitor import MonitorStore, risk_health
 from tradebot.equity_receipt import EquityReadError
-from tradebot.portfolio_equity_guard import PortfolioEquityGuard, EquityRiskError
+from tradebot.portfolio_equity_guard import PortfolioEquityGuard, EquityRiskError, stamp
 
 
 class CommissioningEquityTests(unittest.TestCase):
@@ -46,6 +46,45 @@ class CommissioningEquityTests(unittest.TestCase):
 
     def check(self):
         return signed_equity_readiness(self.exchange, self.root, now=self.now)
+
+    def test_commissioning_anchor_validation_rejects_exact_utc_0005(self):
+        boundary = self.now.replace(minute=5)
+        # Real transport receipts at exactly the five-minute end are valid
+        # observations but NOT the earlier daily/weekly opening checkpoints.
+        self.guard.observe_verified_read(
+            "1000", receipt_for("1000", boundary), now=boundary)
+        later = self.now - timedelta(seconds=1)
+        self.guard.observe_verified_read(
+            "1000", receipt_for("1000", later), now=later)
+        before = self.snapshot()
+        with closing(sqlite3.connect(self.path)) as db:
+            monday = self.now.replace(hour=0, minute=0, second=0, microsecond=0)
+            with self.assertRaisesRegex(
+                    EquityRiskError, "equity_opening_checkpoint_missing"):
+                _require_signed_anchor_receipts(
+                    db, monday, monday, stamp(self.now))
+        result = self.check()
+        self.assertFalse(result["approved"])
+        self.assertFalse(result["trade_authorized"])
+        self.exchange.wallet_balances.assert_not_called()
+        self.assertEqual(self.snapshot(), before)
+
+    def test_commissioning_anchor_last_microsecond_is_in_window(self):
+        opening = datetime(2026,11,23,0,4,59,999999,tzinfo=timezone.utc)
+        self.guard.observe_verified_read(
+            "1000", receipt_for("1000", opening), now=opening)
+        later = self.now - timedelta(seconds=1)
+        self.guard.observe_verified_read(
+            "1000", receipt_for("1000", later), now=later)
+        before = self.snapshot()
+        with closing(sqlite3.connect(self.path)) as db:
+            monday = self.now.replace(hour=0, minute=0, second=0, microsecond=0)
+            _require_signed_anchor_receipts(db, monday, monday, stamp(self.now))
+        self.assertEqual(self.snapshot(), before)
+        result = self.check()
+        self.assertTrue(result["approved"])
+        self.assertFalse(result["trade_authorized"])
+        self.assertEqual(self.snapshot(), before)
 
     def test_fresh_risk_approval_has_no_authority_and_does_not_write_evidence(self):
         self.seed()
