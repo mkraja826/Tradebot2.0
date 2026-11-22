@@ -140,6 +140,106 @@ class CandleArchiveTests(unittest.TestCase):
         self.assertEqual(reason, ("conflicting_duplicate",))
         self.assertIsNone(active)
 
+    def _fully_scan(self):
+        self.archive.sync_page(self.exchange, "BTCUSD", self.end)
+        for _ in range(40):
+            if not self.archive.sync_page(self.exchange, "BTCUSD", self.end):
+                return
+        self.fail("Mock backfill never completed")
+
+    def test_scanned_internal_gap_is_recovered_from_actual_broker_bar(self):
+        self._fully_scan()
+        missing = self.end - 2 * STEP
+        with self.archive.connect() as db:
+            db.execute("DELETE FROM candles WHERE symbol=? AND t=?",
+                       ("BTCUSD", missing))
+            db.commit()
+        self.exchange._request.reset_mock()
+        self.assertTrue(self.archive.sync_page(self.exchange, "BTCUSD", self.end))
+        broker = [call for call in self.exchange._request.call_args_list
+                  if call.args[1] == "/v2/history/candles"]
+        self.assertEqual(len(broker), 1)
+        self.assertEqual(broker[0].kwargs["params"]["start"], missing)
+        self.assertEqual(broker[0].kwargs["params"]["end"], missing + STEP - 1)
+        with self.archive.connect() as db:
+            self.assertEqual(db.execute(
+                "SELECT h,l FROM candles WHERE symbol=? AND t=?",
+                ("BTCUSD", missing)).fetchone(), (4, 2))
+            self.assertEqual(db.execute(
+                "SELECT count(*) FROM candle_gap_attempts WHERE symbol='BTCUSD'"
+            ).fetchone()[0], 1)
+        self.assertFalse(self.archive.sync_page(self.exchange, "BTCUSD", self.end))
+
+    def test_unavailable_broker_gap_is_not_fabricated_and_is_throttled(self):
+        self._fully_scan()
+        missing = self.end - STEP
+        with self.archive.connect() as db:
+            db.execute("DELETE FROM candles WHERE symbol=? AND t=?",
+                       ("BTCUSD", missing))
+            db.commit()
+        original = self.exchange._request.side_effect
+
+        def no_broker_bar(method, path, params=None):
+            if path == "/v2/history/candles" and params["start"] == missing:
+                return {"result": []}
+            return original(method, path, params)
+
+        self.exchange._request.side_effect = no_broker_bar
+        self.exchange._request.reset_mock()
+        self.assertFalse(self.archive.sync_page(self.exchange, "BTCUSD", self.end))
+        first_gets = self.exchange._request.call_count
+        self.assertFalse(self.archive.sync_page(self.exchange, "BTCUSD", self.end))
+        self.assertEqual(self.exchange._request.call_count, first_gets)
+        with self.archive.connect() as db:
+            self.assertIsNone(db.execute(
+                "SELECT h FROM candles WHERE symbol=? AND t=?",
+                ("BTCUSD", missing)).fetchone())
+            self.assertEqual(db.execute(
+                "SELECT count(*) FROM candle_gap_attempts WHERE symbol='BTCUSD'"
+            ).fetchone()[0], 1)
+
+    def test_intentional_quarantine_never_recovered_as_missing_gap(self):
+        self._fully_scan()
+        bad = self.end - STEP
+        with self.archive.connect() as db:
+            row = db.execute(
+                "SELECT symbol,t,o,h,l,c,v FROM candles WHERE symbol=? AND t=?",
+                ("BTCUSD", bad)).fetchone()
+            db.execute(
+                "INSERT INTO candle_quarantine VALUES (?,?,?,?,?,?,?,?)",
+                (*row, "manual_review_required"))
+            db.execute("DELETE FROM candles WHERE symbol=? AND t=?",
+                       ("BTCUSD", bad))
+            db.commit()
+        self.exchange._request.reset_mock()
+        self.assertFalse(self.archive.sync_page(self.exchange, "BTCUSD", self.end))
+        self.assertEqual(self.exchange._request.call_count, 0)
+        status = self.archive.levels("BTCUSD", self.end, 3)["periods"]["day"]
+        self.assertEqual(status["quality_status"], "quarantined")
+
+    def test_gap_backfill_enforces_global_request_cap(self):
+        self._fully_scan()
+        gaps = [self.end - n * STEP for n in range(1, 8)]
+        with self.archive.connect() as db:
+            db.executemany(
+                "DELETE FROM candles WHERE symbol=? AND t=?",
+                [("BTCUSD", stamp) for stamp in gaps])
+            db.commit()
+        base = self.exchange._request.side_effect
+
+        def gaps_unavailable(method, path, params=None):
+            if path == "/v2/history/candles" and params["start"] in gaps:
+                return {"result": []}
+            return base(method, path, params)
+
+        self.exchange._request.side_effect = gaps_unavailable
+        self.exchange._request.reset_mock()
+        for _ in range(10):
+            self.assertFalse(self.archive.sync_page(self.exchange, "BTCUSD", self.end))
+        calls = [call for call in self.exchange._request.call_args_list
+                 if call.args[1] == "/v2/history/candles"]
+        self.assertEqual(len(calls), 4)
+
     def test_normal_neighbor_ranges_not_flagged(self):
         rows = [("BTCUSD",i*300,3,4,2,3,1) for i in range(5)]
         self.assertEqual(suspect_candle_times(rows),{})
