@@ -285,7 +285,7 @@ class FireServiceTests(unittest.TestCase):
         launcher = (ROOT / "ops/run_fire_watchdog.sh").read_text()
         self.assertIn('export PYTHONPATH="$PROJECT/src"', launcher)
         self.assertIn("WATCHDOG_RUNTIME_VERSION", launcher)
-        self.assertIn("watchdog-telemetry-v2-20261122", launcher)
+        self.assertIn("watchdog-telemetry-v3-20261122", launcher)
         self.assertLess(launcher.index('export PYTHONPATH="$PROJECT/src"'),
                         launcher.index('import tradebot.fire_watchdog as watchdog'))
         self.assertLess(launcher.index('import tradebot.fire_watchdog as watchdog'),
