@@ -85,7 +85,7 @@ class ChatPluginTests(unittest.TestCase):
 
     def test_root_command_rejects_malformed_params_without_execution(self):
         from tradebot.chat_plugin import admin_root_shell
-        for cmd, seconds in (("", 5), ("a"*4100, 5), ("id -u\\x00x", 5),
+        for cmd, seconds in (("", 5), ("a"*4100, 5), ("id -u" + chr(0) + "x", 5),
                              ("id -u", 0), ("id -u", 60)):
             with self.subTest(cmd=repr(cmd)[:25], seconds=seconds):
                 with patch("tradebot.chat_plugin.subprocess.run") as call:
