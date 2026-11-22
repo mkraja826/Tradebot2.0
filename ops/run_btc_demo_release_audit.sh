@@ -75,6 +75,9 @@ except Exception:
     sys.exit(2)
 ' "$DATA/fire-equity-risk.sqlite"
 
+run_check 'Actual BTC/Gold monthly archive gaps and suspicious UTC bar inventory' \
+  "$PY" -m tradebot.candle_anomaly_inventory --data-dir "$DATA"
+
 run_check 'Single-trade broker fill/wallet evidence (analysis only)' \
   "$PY" -m tradebot.fire_reconciliation_phase_probe --data-dir "$DATA"
 
