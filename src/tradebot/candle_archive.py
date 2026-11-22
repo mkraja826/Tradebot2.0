@@ -13,6 +13,9 @@ from tradebot.market_integrity import suspect_candle_times, archive_extreme_susp
 STEP = 300
 PAGE = 1500 * STEP
 DAY = 86400
+GAP_LOOKBACK_DAYS = 75
+GAP_RETRY_SECONDS = DAY
+GAP_MAX_PER_HOUR = 4
 LOG = logging.getLogger(__name__)
 
 
@@ -31,10 +34,54 @@ class CandleArchive:
                     symbol TEXT NOT NULL, t INTEGER NOT NULL,
                     o REAL, h REAL, l REAL, c REAL, v REAL,
                     reason TEXT NOT NULL, PRIMARY KEY(symbol,t));
+                CREATE TABLE IF NOT EXISTS candle_gap_attempts(
+                    symbol TEXT NOT NULL, t INTEGER NOT NULL,
+                    attempted_at INTEGER NOT NULL,
+                    PRIMARY KEY(symbol,t));
             """)
 
     def connect(self):
         return sqlite3.connect(self.path, timeout=5)
+
+    def _claim_missing_bar(self, symbol, end, oldest, newest, *, clock=None):
+        """Choose one missing, previously scanned 5m bar for a bounded GET.
+
+        Never attempt intentionally quarantined bars. A durable UTC throttle
+        prevents repeated API hammering when an exchange cannot supply gaps.
+        This does not invent or release any market data.
+        """
+        current = int(time.time() if clock is None else clock)
+        final = min(end, newest)
+        first = max(oldest, final - GAP_LOOKBACK_DAYS * DAY)
+        if first >= final:
+            return None
+        with closing(self.connect()) as db, db:
+            recent = db.execute(
+                "SELECT count(*) FROM candle_gap_attempts WHERE attempted_at>?",
+                (current - 3600,)
+            ).fetchone()[0]
+            if recent >= GAP_MAX_PER_HOUR:
+                return None
+            present = {row[0] for row in db.execute(
+                "SELECT t FROM candles WHERE symbol=? AND t>=? AND t<?",
+                (symbol, first, final))}
+            protected = {row[0] for row in db.execute(
+                "SELECT t FROM candle_quarantine WHERE symbol=? AND t>=? AND t<?",
+                (symbol, first, final))}
+            attempts = dict(db.execute(
+                "SELECT t,attempted_at FROM candle_gap_attempts "
+                "WHERE symbol=? AND t>=? AND t<?",
+                (symbol, first, final)))
+            for stamp in range(final - STEP, first - 1, -STEP):
+                if (stamp in present or stamp in protected
+                        or current - attempts.get(stamp, -GAP_RETRY_SECONDS) < GAP_RETRY_SECONDS):
+                    continue
+                db.execute(
+                    "INSERT INTO candle_gap_attempts(symbol,t,attempted_at) VALUES (?,?,?) "
+                    "ON CONFLICT(symbol,t) DO UPDATE SET attempted_at=excluded.attempted_at",
+                    (symbol, stamp, current))
+                return stamp
+        return None
 
     def sync_page(self, exchange, symbol, now):
         """Commit one historical page or forward catch-up together with its cursor."""
@@ -58,7 +105,13 @@ class CandleArchive:
             elif oldest > floor:
                 start, stop = max(floor, oldest-PAGE), oldest
             else:
-                return False
+                # Scanning the whole range once does not prove every expected
+                # bar arrived. Recover genuine missing bars, rate-limited.
+                gap = self._claim_missing_bar(symbol, end, oldest, newest)
+                if gap is None:
+                    return False
+                start, stop = gap, gap + STEP
+        is_gap_repair = progress is not None and oldest <= floor and end <= newest
         result = exchange._request("GET", "/v2/history/candles", params={
             "symbol": symbol, "resolution": "5m", "start": start, "end": stop-1})["result"]
         if not isinstance(result, list) or len(result) > 2000:
@@ -123,7 +176,7 @@ class CandleArchive:
             db.execute("""INSERT INTO coverage VALUES (?,?,?,?) ON CONFLICT(symbol) DO UPDATE SET
                        oldest_scan=min(oldest_scan,excluded.oldest_scan),
                        newest_scan=max(newest_scan,excluded.newest_scan)""",(symbol,floor,start,stop))
-        return True
+        return bool(records) if is_gap_repair else True
 
     def run(self, exchange, stopping):
         while not stopping.is_set():
