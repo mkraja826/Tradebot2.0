@@ -36,7 +36,7 @@ def _fire_disabled():
 
 
 def commissioning_preflight(
-    exchange, data_dir, *, pause=None,
+    exchange, data_dir, *, pause=None, monotonic=None,
     check_services=_services_active,
     check_fire=_fire_disabled,
     check_equity=signed_equity_readiness,
@@ -69,9 +69,12 @@ def commissioning_preflight(
         return report
 
     try:
-        gate = verify_staging_samples(
-            exchange, data_dir, **({"pause": pause} if pause is not None else {})
-        )
+        options = {}
+        if pause is not None:
+            options["pause"] = pause
+        if monotonic is not None:
+            options["monotonic"] = monotonic
+        gate = verify_staging_samples(exchange, data_dir, **options)
         report["broker_flat_two_samples"] = bool(
             gate.get("broker_flat_two_samples") is True
             and gate.get("samples_checked") == 2

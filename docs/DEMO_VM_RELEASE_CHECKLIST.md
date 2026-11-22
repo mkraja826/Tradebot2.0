@@ -54,9 +54,13 @@ restart an active watchdog merely because source CI passed.
    `ops/disable_fire_demo.sh` procedure, with the watchdog still running.
    This script restarts the dashboard, so coordinate it with active positions
    and verify the independent watchdog first. Do not stop the watchdog.
-3. **After broker-confirmed flatness**, back up the private `data/` SQLite
-   files (including WAL/SHM consistency) and the existing VM code/config.
-   Do not copy credentials to GitHub, logs or chat.
+3. Preserve the private original `data/` files using the SQLite online
+   backup tool in `docs/VM_WAL_BACKUP_PROTECTED_ROLLOUT.md` (never a plain
+   `cp *.sqlite` while WAL is active). Backups can be taken safely before
+   broker flatness as preservation-only evidence, **not** deployment
+   permission. A stronger signed two-sweep broker-flatness check is required
+   for any subsequent protected deployment. Do not copy private backups,
+   credentials or logs to GitHub or chat.
 4. Install the latest tested repository commit in a staging worktree/venv
    while leaving existing services untouched. Run offline tests.
 5. Load the VM's *existing private* demo API environment in the isolated
@@ -66,10 +70,16 @@ restart an active watchdog merely because source CI passed.
    to reduce stale-margin false-flat signals. It requires account-wide
    GET /v2/positions/margined, both filtered real-time GET /v2/positions
    (unfiltered returns HTTP 400 on Delta India Demo), an isolated-margin
-   signed profile, all account orders, and terminal SQLite FIRE receipts.
-   Exit code 2 means **DO NOT RESTART**. Even exit 0 is only a candidate
-   for manual staging: independently verify that NEW FIRE permission is
-   disabled and the watchdog is healthy. Do not run this check on a live
+   **signed current-account identity matched to its subaccount**
+   (never deprecated `/v2/profile`), all account orders, and terminal
+   SQLite FIRE receipts. The two observations must be separated by a
+   verified **monotonic elapsed** interval of at least 11 seconds.
+   Exit code 2 means **DO NOT RESTART**. Exit 0 is at most a
+   read-only, point-in-time account-flat observation; the gate deliberately
+   **does not authorize any service restart**. Independently verify new
+   FIRE permission is disabled, the protective watchdog is active, current
+   positions/orders are still zero, and the backups have been restored in
+   a supervised offline test before any manual promotion. Do not run this check on a live
    service code path or print any API credentials.
 6. A zero exit code means **only** that no currently open broker
    positions/orders or unresolved local FIRE requests were found. It does
