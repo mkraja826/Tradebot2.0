@@ -233,6 +233,21 @@ class ReaffirmationTests(unittest.TestCase):
                 require_flat_demo_account(self.client)
         self.assertEqual(self.client.calls, [])
 
+    def test_existing_order_capable_fire_client_still_uses_full_exposure_guard(self):
+        # Standard FIRE performs its signed isolated-margin proof first,
+        # then runs the same account-wide scans with an order-capable client.
+        broker = FlatDemoBroker()
+        broker.allow_orders = True
+        with patch(
+            "tradebot.fire_account_guard.signed_account_margin_mode",
+            return_value="isolated",
+        ):
+            checked = require_flat_demo_account(broker)
+        self.assertTrue(checked["account_flat_verified"])
+        self.assertEqual(checked["checked_markets"], ["BTCUSD", "XAUTUSD"])
+        with self.assertRaises(AccountExposureRejected):
+            require_flat_demo_account_for_configuration(broker)
+
     def test_configuration_flatness_is_not_margin_verification(self):
         flat=require_flat_demo_account_for_configuration(self.client)
         self.assertTrue(flat["account_flat_verified"])
