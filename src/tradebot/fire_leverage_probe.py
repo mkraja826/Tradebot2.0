@@ -11,6 +11,7 @@ import os
 from tradebot.delta import DEMO_API
 from tradebot.fire_market import FireMarket
 from tradebot.fire_broker_inventory import _sample
+from tradebot.signed_margin_mode import signed_account_margin_mode
 
 
 SYMBOLS = ("BTCUSD", "XAUTUSD")
@@ -66,14 +67,17 @@ def audit_leverage_broker(markets):
         state = {"symbol": symbol, "configured_leverage": None,
                  "position_contracts": None, "open_orders": None,
                  "margin_mode": None, "liquidation_price": None,
+                 "unverified_stage": None,
                  "margin_evidence_verified": False}
         result["markets"][symbol] = state
         market = markets[symbol]
         try:
+            stage = "product_lookup"
             pid = market.product_id
             if type(pid) is not int or pid <= 0 or pid in identities.values():
                 raise ValueError("invalid or shared product ID")
             identities[symbol] = pid
+            stage = "leverage_setting"
             setting = market._request(
                 "GET", f"/v2/products/{pid}/orders/leverage", auth=True
             )["result"]
@@ -84,16 +88,16 @@ def audit_leverage_broker(markets):
             if leverage < 1 or leverage != leverage.to_integral_value():
                 raise ValueError("invalid leverage")
             state["configured_leverage"] = str(leverage)
-            # The profile is a separate signed request; the margined position
-            # schema doesn't promise a margin_mode key.
-            profile = market._request("GET", "/v2/profile", auth=True)["result"]
-            if not isinstance(profile, dict) or profile.get("margin_mode") not in ("isolated", "portfolio"):
-                raise ValueError("unknown account margin mode")
-            state["margin_mode"] = profile["margin_mode"]
+            # /v2/profile has rejected API keys since 2026-08-19.
+            # Match signed user preferences to the same signed subaccount ID;
+            # empty position lists must NEVER imply isolated margin.
+            stage = "signed_margin_mode"
+            state["margin_mode"] = signed_account_margin_mode(market)
             if state["margin_mode"] != "isolated":
                 result["blockers"].append(symbol.lower() + "_isolated_margin_required")
             if leverage > 20:
                 result["blockers"].append(symbol.lower() + "_leverage_above_20x")
+            stage = "selected_market_positions"
             positions = market.positions()
             if not isinstance(positions, list) or any(
                     not isinstance(r, dict) or str(r.get("product_id")) != str(pid)
@@ -106,6 +110,7 @@ def audit_leverage_broker(markets):
                 raise ValueError("multiple selected-product positions")
             total = sum(sizes)
             state["position_contracts"] = int(total)
+            stage = "selected_market_orders"
             orders = market.open_orders()
             if not isinstance(orders, list) or any(
                     not isinstance(row, dict)
@@ -118,6 +123,7 @@ def audit_leverage_broker(markets):
             if total:
                 live = next(r for r in positions if _number(r.get("size")) != 0)
                 live_entry = _number(live.get("entry_price"))
+                stage = "margined_position_details"
                 reply = market._request(
                     "GET", "/v2/positions/margined",
                     params={"product_ids": str(pid)}, auth=True
@@ -145,7 +151,8 @@ def audit_leverage_broker(markets):
                 # Margin mode was checked on the signed profile even when
                 # there were no active positions.
         except Exception:
-            # Never serialize upstream errors, response bodies, headers or keys.
+            # Fixed stage enum only; never serialize exception text or keys.
+            state["unverified_stage"] = stage
             result["blockers"].append(symbol.lower() + "_broker_evidence_unverified")
 
     # A filtered BTC/Gold view is never evidence that the whole account is
