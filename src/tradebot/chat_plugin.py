@@ -48,6 +48,34 @@ def fire_history(symbol: Market, page: Annotated[int, Field(ge=0,le=1000000)] = 
     return {"symbol":symbol,"page":page,"receipts":data["trades"]}
 
 
+
+@server.tool(annotations=READ)
+def equity_checkpoint_status() -> dict:
+    """Read current UTC daily/weekly signed-wallet checkpoint health.
+
+    This is a diagnostic only: a healthy checkpoint does not release trading.
+    No wallet amounts, receipt details, API keys or ledger contents are returned.
+    """
+    data = dashboard("/api/risk/checkpoints")
+    if not isinstance(data, dict):
+        raise ValueError("Dashboard checkpoint response unavailable")
+    safe_fields = (
+        "status", "as_of", "daily_checkpoint", "weekly_checkpoint",
+        "observation_status", "latest_receipt_status", "database_integrity",
+        "checkpoint_prerequisites_met", "blocking_conditions", "alert_codes",
+        "latest_observation_age_seconds", "daily_next_window_start_utc",
+        "weekly_next_window_start_utc",
+    )
+    return {
+        "environment": "delta-india-demo",
+        "mode": "read_only_checkpoint_health",
+        **{name: data.get(name) for name in safe_fields},
+        "trade_authorized": False,
+        "safe_to_enable_fire": False,
+        "ready_for_unattended_trading": False,
+    }
+
+
 @server.tool(annotations=WRITE)
 def fire_demo(symbol: Market, fire_id: UUID) -> dict:
     """Request one GPT-decided demo trade. Generate a UUID for this explicit request and retain it.
