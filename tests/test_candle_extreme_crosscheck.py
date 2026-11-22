@@ -51,6 +51,14 @@ class ExtremeCrosscheckTests(unittest.TestCase):
                         "BTCUSD", origin + n*300, 60000., high, 59900., 60000., 1.))
             db.commit()
 
+    def test_release_audit_includes_crossvenue_context(self):
+        # Dedicated assertion avoids a merge conflict with equity release
+        # guards adding different checks to the shared operator audit test.
+        root = Path(__file__).resolve().parents[1]
+        audit = (root / "ops" / "run_btc_demo_release_audit.sh").read_text()
+        self.assertIn("tradebot.candle_extreme_crosscheck", audit)
+        self.assertIn("TRADING_ENABLED: false", audit)
+
     def test_selects_exact_extreme_utc_buckets_from_both_months(self):
         self.populate()
         first = self.path.read_bytes()
