@@ -1,0 +1,66 @@
+name: Signed DEMO broker exposure and 20x compatibility — read-only
+
+on:
+  # Run once when this audited workflow first lands on main.
+  # Future source changes do not auto-trigger broker requests.
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/broker-readonly-preflight.yml"
+  # Manual repeat is permitted, but cannot change any broker settings.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tradebot2-broker-readonly-preflight
+  cancel-in-progress: false
+
+jobs:
+  signed-get-only:
+    if: github.repository == 'mkraja826/Tradebot2.0' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      DELTA_DEMO_API_KEY: ${{ secrets.DELTA_DEMO_API_KEY }}
+      DELTA_DEMO_API_SECRET: ${{ secrets.DELTA_DEMO_API_SECRET }}
+      TRADEBOT_ARMED_ORDERS: "false"
+      TRADEBOT_FIRE_DEMO_EXECUTION: "false"
+      TRADEBOT_GOLD_FIRE_DEMO_EXECUTION: "false"
+      ENABLE_DEMO_ORDERS: "false"
+      PYTHONDONTWRITEBYTECODE: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Verify authenticated DEMO credentials are configured
+        shell: bash
+        run: |
+          set -eu
+          set +x
+          if [[ -z "${DELTA_DEMO_API_KEY:-}" || -z "${DELTA_DEMO_API_SECRET:-}" ]]; then
+            printf 'BLOCKED: DEMO credentials unavailable to readonly CI\n' >&2
+            exit 2
+          fi
+      - name: Install audited source
+        run: python -m pip install --disable-pip-version-check -e .
+      - name: Exercise offline leverage and full-account inventory tests
+        run: |
+          python -m unittest discover -s tests -p 'test_fire_leverage_probe.py' -v
+          python -m unittest discover -s tests -p 'test_fire_broker_inventory.py' -v
+      - name: Authenticated Delta India DEMO — strictly GET-only broker preflight
+        shell: bash
+        run: |
+          set -eu
+          set +x
+          # The audited source constructs allow_orders=False for both markets.
+          # Prints only allowlisted leverage/margin/count fields and blocker codes.
+          python -m tradebot.fire_leverage_probe
+          printf 'SIGNED_BROKER_GET_SAMPLE_CONSISTENT: true\n'
+          printf 'FULL_ACCOUNT_TWO_SWEEPS_PROVEN: false\n'
+          printf 'WALLET_RECONCILIATION_COMPLETE: false\n'
+          printf 'TRADING_ENABLED: false\n'
