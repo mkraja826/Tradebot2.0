@@ -137,6 +137,19 @@ class ControllerSafetyTests(unittest.TestCase):
         self.assertEqual(set(levels["periods"]),{"last_24h"})
         self.assertEqual(ctrl._additional_fire_scope()["strategy_history_version"],
                          STRATEGY_VERSION)
+        with patch(
+            "tradebot.btc_supervised_execution.read_coinbase_spot",
+            return_value={
+                "source": "coinbase_exchange_btc_usd_spot",
+                "bid": "100", "ask": "100.02",
+                "observed_at": datetime.now(timezone.utc).isoformat(),
+            }
+        ):
+            screen = ctrl._pre_model_market_screen(
+                {"core":{"ticker":{"symbol":"BTCUSD","mark_price":"100.01"},
+                         "best_bid":"100","best_ask":"100.02"}}, ctx)
+        self.assertEqual(screen["external_spot_reference"]["status"],
+                         "spot_reference_corroborated")
         payload = {
             "environment":"delta-india-demo",
             "core":{"ticker":{"symbol":"BTCUSD",
@@ -148,18 +161,35 @@ class ControllerSafetyTests(unittest.TestCase):
                 "attached_stop_loss_and_take_profit_required":True,
             },
             "indicators":{**ctx,"historical_levels":levels,
-                "local_market_screen":ctrl._pre_model_market_screen(
-                    {"core":{"ticker":{"symbol":"BTCUSD","mark_price":"100.01"},
-                             "best_bid":"100","best_ask":"100.02"}},ctx)},
+                "local_market_screen":screen},
         }
         prompt=instruction_for_snapshot(payload)
         self.assertNotEqual(prompt,INSTRUCTION)
         self.assertNotIn("month highs",prompt)
         self.assertIn("last 24 hours",prompt)
+        saved_reference = dict(screen["external_spot_reference"])
+        del payload["indicators"]["local_market_screen"]["external_spot_reference"]
+        with self.assertRaises(PlanError):
+            instruction_for_snapshot(payload)
+        payload["indicators"]["local_market_screen"]["external_spot_reference"] = (
+            saved_reference)
         payload["indicators"]["historical_levels"]["periods"]["month"] = {
             "quality_status":"provisionally_valid"}
         with self.assertRaises(PlanError):
             instruction_for_snapshot(payload)
+
+    def test_missing_public_spot_blocks_supervised_pre_model_screen(self):
+        from tradebot.btc_public_reference import PublicReferenceRejected
+        ctrl = SupervisedBTCController(self.root/"no-execution.sqlite")
+        example = {"core": {"ticker": {
+            "symbol": "BTCUSD", "mark_price": "100.01"},
+            "best_bid": "100", "best_ask": "100.02"}}
+        with patch(
+                "tradebot.btc_supervised_execution.read_coinbase_spot",
+                side_effect=PublicReferenceRejected("public_reference_unavailable")):
+            with self.assertRaisesRegex(
+                    PublicReferenceRejected,"public_reference_unavailable"):
+                ctrl._pre_model_market_screen(example, recent_features())
 
     def test_regular_fire_still_checks_all_six_periods(self):
         class FakeArchive:

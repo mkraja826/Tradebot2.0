@@ -9,6 +9,7 @@ independent watchdog remain in force.
 from tradebot.btc_supervised_equity_guard import SupervisedSessionEquityGuard
 from tradebot.btc_supervised_recent24h import load_recent24h_strategy_context
 from tradebot.btc_market_screen import screen_btc_market
+from tradebot.btc_public_reference import (read_coinbase_spot, corroborate_delta_quote)
 from tradebot.fire_execution import FireDemoController, FireTradeError
 
 STRATEGY_VERSION = "btc-demo-recent24h-v1"
@@ -53,7 +54,11 @@ class SupervisedBTCController(FireDemoController):
 
     def _pre_model_market_screen(self, snapshot, context):
         # Deterministic no-AI rejection before the GPT-6 request.
-        return screen_btc_market(snapshot, context)
+        local = screen_btc_market(snapshot, context)
+        # A keyless public GET can reject dislocated Delta prices before GPT.
+        # This is independent spot context, not a Delta perp print attestation.
+        reference = corroborate_delta_quote(snapshot, read_coinbase_spot())
+        return {**local, "external_spot_reference": reference}
 
     def _additional_fire_scope(self):
         return {"strategy_history_version": STRATEGY_VERSION,

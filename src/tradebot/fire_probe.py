@@ -90,6 +90,14 @@ def instruction_for_snapshot(snapshot):
             or context["local_market_screen"].get("status") != "passed"
             or context["local_market_screen"].get("independent_price_verified") is not False
             or context["local_market_screen"].get("trade_authorized") is not False
+            or not isinstance(context["local_market_screen"].get(
+                "external_spot_reference"), dict)
+            or context["local_market_screen"]["external_spot_reference"].get(
+                "status") != "spot_reference_corroborated"
+            or context["local_market_screen"]["external_spot_reference"].get(
+                "independent_perpetual_trade_print_verified") is not False
+            or context["local_market_screen"]["external_spot_reference"].get(
+                "trade_authorized") is not False
             or any(context.get(k) is None
                    for k in ("ema_15m", "ema_1h", "atr_5m"))):
         raise PlanError("Unverified restricted BTC FIRE history")
