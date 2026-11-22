@@ -20,7 +20,7 @@ from tradebot.fire_bracket_evidence import _saved, BracketEvidenceError
 from tradebot.fire_inventory import read_inventory, _read_rows, InventoryEvidenceError
 from tradebot.fire_reconciliation import (
     ReconciliationError, analyse, identifier, normalize_fill,
-    normalize_posting, timestamp_us, unique,
+    normalize_posting, timestamp_us, unique, EXTERNAL,
 )
 
 MAX_AGE = timedelta(days=7)
@@ -36,6 +36,50 @@ def _safe_reason(exc, default):
         if _REASON.fullmatch(code):
             return code
     return default
+
+
+
+def _unattributed_wallet_hints(postings, fills, order_ids, product_id):
+    """Classify ambiguous economic postings without returning broker identities.
+
+    Mirrors only analyse()'s unattributed-posting predicate. This is a
+    read-only clue, NOT attribution proof or permission to ignore postings.
+    Values, timestamps, posting/order/fill IDs and account data stay private.
+    """
+    owned = set(order_ids)
+    selected = [f for f in fills if f["order_id"] in owned]
+    if not selected:
+        return None
+    first, last = selected[0]["at_us"], selected[-1]["at_us"]
+    owned_fills = {f["id"] for f in selected}
+    other_orders = {f["order_id"] for f in fills if f["order_id"] not in owned}
+    other_fills = {f["id"] for f in fills if f["order_id"] not in owned}
+    categories = []
+    for p in postings:
+        if p["type"] in EXTERNAL:
+            continue
+        oid, fid = p["order_id"], p["fill_id"]
+        linked = oid in owned or fid in owned_fills
+        within = first <= p["at_us"] <= last
+        same_product = p["product_id"] == str(product_id)
+        if linked or (same_product and within):
+            continue
+        if p["at_us"] < first or not (same_product or p["product_id"] is None):
+            continue
+        if (oid in other_orders or fid in other_fills) and not within:
+            continue
+        categories.append({
+            "product_scope": "same_product" if same_product else "account_unscoped",
+            "timing": "within_position" if within else "after_last_fill",
+            "order_reference": "present" if oid is not None else "absent",
+            "fill_reference": "present" if fid is not None else "absent",
+            "posting_kind": p["type"] if p["type"] in
+                            ("cashflow", "commission", "funding") else "other",
+        })
+    if not categories:
+        return None
+    return {"count": len(categories), "examples": categories[:5],
+            "examples_truncated": len(categories) > 5}
 
 
 def _base_report():
@@ -56,6 +100,7 @@ def _base_report():
         "is_net_realized_pnl": False,
         "funding_reconciled": False,
         "cashflow_and_commission_consistency_proven_in_memory": False,
+        "unattributed_wallet_posting_diagnostic": None,
         "original_ledger_mutations": False,
         "temporary_ledger_mutations": False,
         "broker_order_mutations": False,
@@ -217,6 +262,14 @@ def probe_single_recent_btc(exchange, data_dir, *, now=None):
         # This is diagnostic-only, NOT a durable financial review.
         if isinstance(exc, ReconciliationError) and reason == "missing_broker_funding_total":
             out["cashflow_and_commission_consistency_proven_in_memory"] = True
+        if isinstance(exc, ReconciliationError) and reason == "unattributed_wallet_posting":
+            try:
+                out["unattributed_wallet_posting_diagnostic"] = _unattributed_wallet_hints(
+                    postings, fills, order_ids, pid)
+            except Exception:
+                # Never disclose broker data or change the original blocker if
+                # the supplementary diagnostic itself cannot classify it.
+                pass
         return block("financial_analysis", reason)
     out["cashflow_and_commission_consistency_proven_in_memory"] = True
     out["stages_passed"].append("financial_analysis")
