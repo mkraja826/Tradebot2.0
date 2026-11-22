@@ -20,6 +20,7 @@ from tradebot.delta import DEMO_API, DeltaDemo
 from tradebot.fire_account_guard import require_flat_demo_account
 from tradebot.signed_margin_mode import signed_account_margin_mode
 from tradebot.operator_account_mode import read_manual_mode
+from tradebot.btc_supervised_recent24h import inspect_recent_btc_window
 from tradebot.market import _age_seconds, MarketDataError
 
 REQUIRED_BTC_PERIODS = (
@@ -102,6 +103,8 @@ def inspect_btc_pilot_gates(
         "owner_declared_account_mode": "not_configured",
         "account_wide_flatness_verified": False,
         "btc_required_periods_provisionally_valid": False,
+        "btc_recent24h_local_candidate_only": False,
+        "btc_recent24h_source_verified_independently": False,
         "btc_period_quality": {},
         "independent_btc_trade_price_verification": False,
         "watchdog_protection_lifecycle_verified": False,
@@ -170,6 +173,17 @@ def inspect_btc_pilot_gates(
         if not report["account_wide_flatness_verified"]:
             report["blockers"].append("account_wide_exposure_unverified")
 
+    # Alternate 24h research input only, never a substitute for the six
+    # period checks required by ordinary FIRE or signed trade-price proof.
+    try:
+        recent = inspect_recent_btc_window(data_dir, now=instant)
+        report["btc_recent24h_local_candidate_only"] = (
+            recent.get("status") == "recent24h_local_candidate_only"
+            and recent.get("complete_contiguous_24h") is True
+            and recent.get("independently_verified_btc_perpetual_prices") is False
+            and recent.get("safe_to_enable_fire") is False)
+    except Exception:
+        pass
     try:
         quality = quality_fn(exchange, data_dir, now=instant)
         if type(quality) is dict and set(quality) == set(REQUIRED_BTC_PERIODS):

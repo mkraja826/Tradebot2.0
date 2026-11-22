@@ -56,6 +56,33 @@ class PilotReadinessTests(unittest.TestCase):
                      "durable_one_attempt_controller_commissioned"):
             self.assertFalse(r[name])
 
+    @patch("tradebot.btc_supervised_pilot_gates.read_manual_mode")
+    @patch("tradebot.btc_supervised_pilot_gates.inspect_recent_btc_window")
+    def test_owner_declaration_and_clean_24h_never_bypass_fire(self, recent, manual):
+        manual.return_value = {"status": "owner_declared_not_broker_verified"}
+        recent.return_value = {
+            "status": "recent24h_local_candidate_only",
+            "complete_contiguous_24h": True,
+            "independently_verified_btc_perpetual_prices": False,
+            "safe_to_enable_fire": False,
+        }
+        def history(*args, **kwargs):
+            value = quality_ok()
+            value["month"] = "suspicious_extreme"
+            return value
+        report = self.run_gate(
+            margin=lambda e: (_ for _ in ()).throw(ValueError("unverified")),
+            quality=history)
+        self.assertEqual(report["owner_declared_account_mode"],
+                         "owner_declared_not_broker_verified")
+        self.assertTrue(report["btc_recent24h_local_candidate_only"])
+        self.assertFalse(report["btc_recent24h_source_verified_independently"])
+        self.assertFalse(report["signed_isolated_margin_verified"])
+        self.assertFalse(report["trade_authorized"])
+        self.assertFalse(report["safe_to_enable_fire"])
+        self.assertIn("account_signed_isolated_margin_unverified", report["blockers"])
+        self.assertIn("btc_historical_integrity_unverified", report["blockers"])
+
     def test_existing_main_account_margin_block_stops_flat_gate(self):
         called = []
         def must_not_call(*args, **kwargs):
