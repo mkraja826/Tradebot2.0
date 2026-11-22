@@ -145,7 +145,12 @@ class CommissioningReviewTests(unittest.TestCase):
         for service in ("watchdog", "equity_collector"):
             monitor.heartbeat(service, at=self.now)
         delays = []
-        readiness = partial(commissioning_preflight, pause=delays.append,
+        clock = [100.0]
+        def advance(seconds):
+            delays.append(seconds)
+            clock[0] += seconds
+        readiness = partial(commissioning_preflight, pause=advance,
+                            monotonic=lambda: clock[0],
                             check_services=lambda:True, check_fire=lambda:True,
                             check_equity=partial(signed_equity_readiness, now=self.now))
         before = self.snapshot()
