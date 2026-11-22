@@ -82,11 +82,30 @@ class M09PhaseProbeTests(unittest.TestCase):
         self.assertFalse(report["trade_authorized"])
         self.assertFalse(report["safe_to_enable_fire"])
         self.assertFalse(report["is_net_realized_pnl"])
+        self.assertTrue(report["cashflow_and_commission_consistency_proven_in_memory"])
         self.assertFalse(report["original_ledger_mutations"])
         self.assertFalse(report["temporary_ledger_mutations"])
         self.assertFalse(report["broker_order_mutations"])
         self.assertTrue(all(req[0] == "GET" for req in self.broker.calls))
         self.assertEqual(list(self.root.iterdir()), [])
+
+    def test_missing_broker_funding_retains_cash_fee_proof_but_no_net_pnl(self):
+        del self.broker.fills[-1]["meta_data"]["new_position"]["realized_funding"]
+        report = self.probe()
+        self.assertEqual(report["stage"], "financial_analysis")
+        self.assertEqual(report["reason"], "missing_broker_funding_total")
+        self.assertTrue(report["cashflow_and_commission_consistency_proven_in_memory"])
+        self.assertFalse(report["is_net_realized_pnl"])
+        self.assertFalse(report["funding_reconciled"])
+        self.assertEqual(list(self.root.iterdir()), [])
+
+    def test_missing_funding_with_invalid_fee_is_never_mislabeled_as_verified(self):
+        del self.broker.fills[-1]["meta_data"]["new_position"]["realized_funding"]
+        self.broker.postings[0]["amount"] = "99"
+        report = self.probe()
+        self.assertEqual(report["reason"], "wallet_commission_mismatch")
+        self.assertFalse(report["cashflow_and_commission_consistency_proven_in_memory"])
+        self.assertFalse(report["is_net_realized_pnl"])
 
     def test_enabled_orders_client_rejected_before_any_get(self):
         self.broker.allow_orders = True
