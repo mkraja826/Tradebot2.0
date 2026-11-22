@@ -1,0 +1,30 @@
+name: Open PR safety stack — ephemeral integration
+on:
+  push:
+    branches:
+      - validation/open-pr-stack-27-33
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  composite-safety-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      ENABLE_DEMO_ORDERS: "false"
+      TRADEBOT_FIRE_DEMO_EXECUTION: "false"
+      TRADEBOT_GOLD_FIRE_DEMO_EXECUTION: "false"
+    steps:
+      - name: Checkout review-only validation branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+      - name: Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Verify seven pinned PR heads and run combined tests
+        run: bash ops/verify_open_pr_stack.sh
