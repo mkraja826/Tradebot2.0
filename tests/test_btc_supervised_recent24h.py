@@ -36,9 +36,10 @@ class RecentBTCWindowTests(unittest.TestCase):
             db.commit()
 
     def check(self):
-        before = self.path.read_bytes()
+        before = self.path.read_bytes() if self.path.exists() else None
         result = inspect_recent_btc_window(self.root, now=NOW)
-        self.assertEqual(self.path.read_bytes(), before)
+        after = self.path.read_bytes() if self.path.exists() else None
+        self.assertEqual(after, before)
         self.assertFalse(result["trade_authorized"])
         self.assertFalse(result["safe_to_enable_fire"])
         self.assertFalse(result["independently_verified_btc_perpetual_prices"])
