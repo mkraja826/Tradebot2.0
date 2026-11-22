@@ -1,31 +1,57 @@
 #!/usr/bin/env bash
-# Installs restart-safe Delta Demo FIRE protective-order watchdog (not an entry bot).
+# Stage a candidate protective watchdog unit ONLY.
+# Never install/enable/restart the active protective watchdog from this script.
 set -euo pipefail
 set +x
 umask 077
+
 if [[ "$(id -u)" -eq 0 ]]; then
-  echo "Run as your normal VM SSH user, not root." >&2; exit 1
-fi
-if ! command -v systemctl >/dev/null; then
-  echo "systemd unavailable." >&2; exit 1
+  printf 'BLOCKED: use the normal VM user, not root\n' >&2
+  exit 2
 fi
 PROJECT="$(cd -- "$(dirname -- "$0")/.." && pwd -P)"
 VM_USER="$(id -un)"
 VM_GROUP="$(id -gn)"
 VM_HOME="$HOME"
-if [[ "$PROJECT" == *' '* || "$PROJECT" == *'%'* ||
-      "$VM_HOME" == *' '* || "$VM_HOME" == *'%'* ]]; then
-  echo "Unsupported special characters in paths." >&2; exit 1
+
+# Values are interpolated into a systemd candidate, not executed by this
+# script. Reject characters that could change systemd directive boundaries.
+for value in "$PROJECT" "$VM_HOME" "$VM_USER" "$VM_GROUP"; do
+  if [[ ! "$value" =~ ^[A-Za-z0-9_./-]+$ ]]; then
+    printf 'BLOCKED: unsafe candidate-unit identity or path\n' >&2
+    exit 2
+  fi
+done
+
+KEY_FILE="$VM_HOME/.config/tradebot2/keys.env"
+DATA="$PROJECT/data"
+if [[ ! -f "$KEY_FILE" || -L "$KEY_FILE" || ! -r "$KEY_FILE" ||
+      "$(stat -c %a "$KEY_FILE")" != 600 ||
+      ! -x "$PROJECT/.venv/bin/python" ||
+      ! -f "$PROJECT/src/tradebot/fire_watchdog.py" ||
+      ! -f "$PROJECT/ops/run_fire_watchdog.sh" ]]; then
+  printf 'BLOCKED: original private DEMO keys and installed watchdog source required\n' >&2
+  exit 2
 fi
-if [[ ! -r "$VM_HOME/.config/tradebot2/keys.env" ||
-      ! -x "$PROJECT/.venv/bin/python" ]]; then
-  echo "Protected credentials and installed virtualenv required." >&2; exit 1
+if [[ ! -d "$DATA" || -L "$DATA" ||
+      ! -f "$DATA/fire-ops.sqlite" || -L "$DATA/fire-ops.sqlite" ||
+      ! -f "$DATA/fire-xaut.sqlite" || -L "$DATA/fire-xaut.sqlite" ||
+      ! -f "$DATA/fire-monitoring.sqlite" || -L "$DATA/fire-monitoring.sqlite" ]]; then
+  printf 'BLOCKED: original existing FIRE/monitoring ledgers required\n' >&2
+  exit 2
 fi
-mkdir -p "$PROJECT/data"
-chmod 700 "$PROJECT/data"
-tmp="$(mktemp)"
-trap 'rm -f "$tmp"' EXIT
-cat > "$tmp" <<EOF
+
+STAGE_PARENT="$VM_HOME/.config/tradebot2"
+STAGE="$STAGE_PARENT/staged-units"
+if [[ -L "$VM_HOME/.config" || -L "$STAGE_PARENT" || -L "$STAGE" ]]; then
+  printf 'BLOCKED: untrusted unit staging destination\n' >&2
+  exit 2
+fi
+mkdir -p -- "$STAGE"
+chmod 700 -- "$STAGE"
+CANDIDATE="$(mktemp "$STAGE/tradebot2-fire-watchdog.service.XXXXXXXX")"
+trap 'rm -f -- "$CANDIDATE"' ERR
+cat > "$CANDIDATE" <<EOF
 [Unit]
 Description=Tradebot 2.0 - Delta India Demo FIRE protection watchdog
 After=network-online.target
@@ -56,10 +82,13 @@ SyslogIdentifier=tradebot2-fire-watchdog
 [Install]
 WantedBy=multi-user.target
 EOF
-sudo install -m 0644 "$tmp" /etc/systemd/system/tradebot2-fire-watchdog.service
-sudo systemctl daemon-reload
-sudo systemctl enable --now tradebot2-fire-watchdog.service
-sudo systemctl restart tradebot2-fire-watchdog.service
-echo "FIRE protective-order watchdog installed (Delta India DEMO only)."
-echo "It does NOT initiate trades or make paid AI requests."
-sudo systemctl --no-pager status tradebot2-fire-watchdog.service
+chmod 600 -- "$CANDIDATE"
+trap - ERR
+
+printf 'WATCHDOG_UNIT_CANDIDATE_STAGED: true\n'
+printf 'CANDIDATE_FILE: %s\n' "$CANDIDATE"
+printf 'SYSTEMD_UNIT_INSTALLED: false\n'
+printf 'WATCHDOG_RESTARTED: false\n'
+printf 'BROKER_STATE_CHANGED: false\n'
+printf 'TRADING_ENABLED: false\n'
+printf 'Operator signoff, two signed broker-flat sweeps, backups and a protected deployment window are required before a separate manual unit promotion.\n'

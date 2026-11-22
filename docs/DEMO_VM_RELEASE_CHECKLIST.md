@@ -14,6 +14,37 @@ any broker exposure/order remains.** Keep protective monitoring active.
 Investigate why the gold watchdog reported missing/changed bracket protection;
 a `flat_verified` receipt is NOT net-P&L verification.
 
+## Watchdog installer hardening (22 November 2026)
+
+**Important:** `ops/install_fire_watchdog_service.sh` previously ran
+`sudo systemctl restart tradebot2-fire-watchdog.service` unconditionally
+after writing the live unit file. That is unsafe while positions are exposed:
+the trading bot's protective watcher must not be interrupted by installing
+or testing a software update.
+
+The installer now **stages only one private systemd unit candidate** under
+`$HOME/.config/tradebot2/staged-units/` (directory 0700, candidate file
+0600), without installing, enabling, reloading, restarting, or stopping any
+running unit. It does not create/chmod the original `data/` directory,
+alter any immutable FIRE ledger, or change trading permissions. It refuses
+to stage when the existing BTC/Gold/monitoring SQLite ledgers and private
+DEMO environment are absent or linked to another path.
+
+Execute this staging step only after the reviewed code has been brought
+onto the VM under a *separate* protected change procedure:
+
+```bash
+bash ops/install_fire_watchdog_service.sh
+```
+
+The result is **a candidate for review, not an installed service**.
+A human operator must separately verify zero account-wide position/order
+exposure, at least two signed broker snapshots, critical incident backups
+(including SQLite WAL continuity), IP-whitelisted authenticated DEMO access,
+and a protection-preserving change window before manually promoting the
+candidate and restarting any service. Never use an automatic installer to
+restart an active watchdog merely because source CI passed.
+
 ## Safe staged order of operations (on the VM, under supervision)
 
 1. Inspect the **broker itself** for every open position and stop/target
