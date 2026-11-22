@@ -1,6 +1,7 @@
 """Private stdio MCP adapter for the local Delta demo dashboard."""
 import json
 import os
+import socket
 import subprocess
 from http.client import HTTPConnection
 from typing import Annotated, Literal
@@ -102,9 +103,9 @@ def admin_root_shell(
 ) -> dict:
     """Run one explicitly user-authorized VM ROOT shell command via the private tunnel.
 
-    Requires one-time LOCAL owner installation of a root-owned bridge, an
-    explicit enabled flag, and precise sudoers permissions for the tunnel OS
-    identity. This is unrestricted root: it can alter or destroy anything on
+    Requires one-time LOCAL owner installation of the root-owned socket
+    adapter and bridge, with explicit local enablement and peer-credential
+    verification. This is unrestricted root: it can alter or destroy anything on
     the VM. Use only for the owner's explicit requested administration, never
     to bypass trading safety gates or retrieve credentials. No execution if
     the privileged bridge is not installed/enabled. No public HTTP route.
@@ -117,34 +118,29 @@ def admin_root_shell(
     # Avoid passing exchange/model secrets from the tunnel/dashboard process.
     # Root helper is an immutable, root-owned executable installed locally;
     # there is no dynamic helper path or argument injection.
-    env = {"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C", "LC_ALL": "C"}
+    # Use a root-owned local socket; tunnel NoNewPrivs prevents sudo elevation.
+    # Root socket verifies kernel SO_PEERCRED and invokes the existing audited bridge.
     try:
-        result = subprocess.run(
-            ["/usr/bin/sudo", "-n", "/usr/local/sbin/tb2-root-bridge",
-             "--timeout", str(timeout_seconds), "--", command],
-            input=b"", capture_output=True, check=False, env=env,
-            cwd="/", timeout=timeout_seconds + 5,
-        )
-    except (OSError, subprocess.TimeoutExpired):
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as channel:
+            channel.settimeout(timeout_seconds + 7)
+            channel.connect('/run/tb2-root-admin.sock')
+            request = json.dumps({"command": command, "timeout_seconds": timeout_seconds})
+            channel.sendall(request.encode("utf-8") + b"\n")
+            chunks = bytearray()
+            while b"\n" not in chunks:
+                block = channel.recv(4096)
+                if not block:
+                    break
+                chunks.extend(block)
+                if len(chunks) > 16384:
+                    raise ValueError("Oversized root bridge reply")
+        reply = json.loads(bytes(chunks).split(b"\n", 1)[0])
+    except (OSError, TimeoutError, ValueError, UnicodeError, IndexError):
         return {
-            "status": "root_bridge_unavailable_or_timed_out",
+            "status": "root_socket_unavailable_or_rejected",
             "root_access_active": False,
-            "exit_code": None, "output": "",
-        }
-    if result.returncode != 0 and not result.stdout:
-        # Never echo sudo stderr (could include usernames/paths or config).
-        return {
-            "status": "root_bridge_not_configured_or_rejected",
-            "root_access_active": False,
-            "exit_code": None, "output": "",
-        }
-    try:
-        reply = json.loads(result.stdout)
-    except (ValueError, UnicodeDecodeError, TypeError):
-        return {
-            "status": "root_bridge_invalid_response",
-            "root_access_active": False,
-            "exit_code": None, "output": "",
+            "exit_code": None,
+            "output": "",
         }
     if not isinstance(reply, dict):
         raise ValueError("Invalid privileged bridge response")
