@@ -10,6 +10,7 @@ import os
 
 from tradebot.delta import DEMO_API
 from tradebot.fire_market import FireMarket
+from tradebot.fire_broker_inventory import _sample
 
 
 SYMBOLS = ("BTCUSD", "XAUTUSD")
@@ -36,10 +37,31 @@ def audit_leverage_broker(markets):
         "ai_calls": 0,
         "safe_to_deploy": False,
         "markets": {},
+        "account_wide": {
+            "sampled": False,
+            "isolated_margin_observed": False,
+            "nonzero_margined_positions": None,
+            "open_orders": None,
+            "margined_fire_consistency": False,
+            "single_sample_not_future_flatness": True,
+        },
+        "trade_authorized": False,
+        "safe_to_enable_fire": False,
         "blockers": [],
     }
     if set(markets) != set(SYMBOLS):
         return {**result, "blockers": ["both_fire_markets_required"]}
+    # Require both real read-only DEMO clients before performing any request.
+    # A partially invalid market must not be used to waive the account read.
+    for symbol in SYMBOLS:
+        market = markets[symbol]
+        if (getattr(market, "base_url", None) != DEMO_API
+                or getattr(market, "allow_orders", None) is not False
+                or getattr(market, "symbol", None) != symbol):
+            result["blockers"].append(symbol.lower() + "_read_only_demo_required")
+    if result["blockers"]:
+        return result
+    identities = {}
     for symbol in SYMBOLS:
         state = {"symbol": symbol, "configured_leverage": None,
                  "position_contracts": None, "open_orders": None,
@@ -47,23 +69,19 @@ def audit_leverage_broker(markets):
                  "margin_evidence_verified": False}
         result["markets"][symbol] = state
         market = markets[symbol]
-        if (getattr(market, "base_url", None) != DEMO_API
-                or getattr(market, "allow_orders", None) is not False
-                or getattr(market, "symbol", None) != symbol):
-            result["blockers"].append(symbol.lower() + "_read_only_demo_required")
-            continue
         try:
             pid = market.product_id
-            if type(pid) is not int or pid <= 0:
-                raise ValueError("invalid product ID")
+            if type(pid) is not int or pid <= 0 or pid in identities.values():
+                raise ValueError("invalid or shared product ID")
+            identities[symbol] = pid
             setting = market._request(
                 "GET", f"/v2/products/{pid}/orders/leverage", auth=True
             )["result"]
             if (not isinstance(setting, dict)
-                    or str(setting.get("product_id", pid)) != str(pid)):
-                raise ValueError("invalid leverage product")
+                    or str(setting.get("product_id")) != str(pid)):
+                raise ValueError("invalid or missing leverage product identity")
             leverage = _number(setting.get("leverage"))
-            if leverage <= 0:
+            if leverage < 1 or leverage != leverage.to_integral_value():
                 raise ValueError("invalid leverage")
             state["configured_leverage"] = str(leverage)
             # The profile is a separate signed request; the margined position
@@ -129,6 +147,58 @@ def audit_leverage_broker(markets):
         except Exception:
             # Never serialize upstream errors, response bodies, headers or keys.
             result["blockers"].append(symbol.lower() + "_broker_evidence_unverified")
+
+    # A filtered BTC/Gold view is never evidence that the whole account is
+    # flat. Reuse the existing signed unfiltered margined-position, exhaustive
+    # open-order pagination and real-time two-market reconciler. This extra
+    # GET-only snapshot does NOT replace the independent 11-second two-sweep
+    # local/broker account inventory in the final release review.
+    if len(identities) == len(SYMBOLS):
+        try:
+            account = _sample(markets["BTCUSD"])
+            if type(account) is not dict:
+                raise ValueError("unverified account sample")
+            if account.get("fire_product_ids") != identities:
+                raise ValueError("broker product identity changed")
+            wide = result["account_wide"]
+            wide["sampled"] = True
+            wide["isolated_margin_observed"] = (
+                account.get("isolated_margin_observed") is True)
+            positions = account.get("account_margined_nonzero_positions")
+            orders = account.get("account_open_orders")
+            if type(positions) is not int or positions < 0:
+                raise ValueError("invalid unfiltered position count")
+            if type(orders) is not int or orders < 0:
+                raise ValueError("invalid unfiltered open order count")
+            wide["nonzero_margined_positions"] = positions
+            wide["open_orders"] = orders
+            wide["margined_fire_consistency"] = (
+                account.get("margined_fire_consistency") is True)
+            if not wide["isolated_margin_observed"]:
+                result["blockers"].append("account_isolated_margin_unverified")
+            if positions:
+                result["blockers"].append("account_has_margined_exposure")
+            if orders:
+                result["blockers"].append("account_has_open_orders")
+            if not wide["margined_fire_consistency"]:
+                result["blockers"].append("account_margined_realtime_positions_conflict")
+            observed = account.get("realtime_fire_sizes")
+            if (type(observed) is not dict
+                    or set(observed) != set(SYMBOLS)):
+                raise ValueError("unverified realtime markets")
+            for symbol in SYMBOLS:
+                selected = result["markets"][symbol]["position_contracts"]
+                if (selected is not None
+                        and _number(observed[symbol]) != selected):
+                    result["blockers"].append(
+                        symbol.lower() + "_exposure_changed_during_probe")
+        except Exception:
+            # Never serialize arbitrary private exchange bodies or errors.
+            result["blockers"].append("account_wide_broker_evidence_unverified")
+    else:
+        result["blockers"].append("both_product_identifications_required")
+
+    result["blockers"] = sorted(set(result["blockers"]))
     return result
 
 
