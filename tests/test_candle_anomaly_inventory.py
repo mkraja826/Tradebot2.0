@@ -36,6 +36,14 @@ class ArchiveInventoryTests(unittest.TestCase):
                 [(symbol, START + i*STEP, 100.0, 102.0, 99.0, 100.0, 1.0)
                  for i in range(n)])
 
+    def test_release_audit_includes_archive_inventory(self):
+        # Dedicated assertion avoids a merge conflict with equity release
+        # guards adding different checks to the shared operator audit test.
+        root = Path(__file__).resolve().parents[1]
+        audit = (root / "ops" / "run_btc_demo_release_audit.sh").read_text()
+        self.assertIn("tradebot.candle_anomaly_inventory", audit)
+        self.assertIn("TRADING_ENABLED: false", audit)
+
     def test_full_small_window_no_issue(self):
         self.add_candles("BTCUSD")
         with sqlite3.connect(self.dbpath) as db:
