@@ -124,7 +124,11 @@ def inspect_btc_pilot_gates(
         return report
 
     try:
-        session = session_fn(exchange, data_dir, now=instant)
+        # Never inject the pre-GET clock into live receipt validation.
+        # Explicit `now` remains an injected offline-test evaluation time.
+        session = session_fn(
+            exchange, data_dir, **({"now": now} if now is not None else {})
+        )
         report["session_candidate_passed"] = (
             type(session) is dict
             and session.get("status") == "baseline_candidate_review_only"
