@@ -8,6 +8,7 @@ No AI or broker mutation takes place here.
 from decimal import Decimal, InvalidOperation
 
 from tradebot.delta import DEMO_API, DeltaDemo
+from tradebot.signed_margin_mode import signed_account_margin_mode
 
 FIRE_SYMBOLS = ("BTCUSD", "XAUTUSD")
 
@@ -39,9 +40,8 @@ def require_flat_demo_account(exchange, *, selected_symbol=None, selected_produc
         raise AccountExposureRejected("Only Delta India DEMO is permitted")
     if selected_symbol is not None and selected_symbol not in FIRE_SYMBOLS:
         raise AccountExposureRejected("Unsupported FIRE instrument")
-    profile = exchange._request("GET", "/v2/profile", auth=True)["result"]
-    if not isinstance(profile, dict) or profile.get("margin_mode") != "isolated":
-        raise AccountExposureRejected("Broker isolated-margin mode not verified")
+    if signed_account_margin_mode(exchange) != "isolated":
+        raise AccountExposureRejected("Broker isolated-margin account identity not verified")
 
     wide_reply = exchange._request(
         "GET", "/v2/positions/margined", auth=True
