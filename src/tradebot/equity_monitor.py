@@ -38,6 +38,7 @@ ALERTS = READ_FAILURES | {
     "watchdog_heartbeat_stale", "equity_collector_heartbeat_stale",
     "watchdog_restart_loop", "equity_collector_restart_loop", "watchdog_protection_unverified",
     "watchdog_emergency_flat_verified",
+    "watchdog_protection_failure_flat_verified",
 }
 
 
@@ -87,7 +88,8 @@ class MonitorStore:
                        "status=excluded.status",
                        (service, stamp(at or datetime.now(timezone.utc)), status))
 
-    def record_watchdog_emergency(self, press, *, at=None):
+    def record_watchdog_emergency(self, press, *, at=None,
+                                  reason_code="watchdog_emergency_flat_verified"):
         """Persist one critical outbox event per FIRE press across restarts.
 
         Unlike active-state alerts, this is a *historical incident*, not an
@@ -98,6 +100,10 @@ class MonitorStore:
         from re import fullmatch
         if type(press) is not str or fullmatch(r"[0-9a-f]{32}", press) is None:
             raise ValueError("Invalid FIRE incident identity")
+        if reason_code not in (
+                "watchdog_emergency_flat_verified",
+                "watchdog_protection_failure_flat_verified"):
+            raise ValueError("Invalid watchdog incident category")
         when_us = stamp(at or datetime.now(timezone.utc))
         with closing(self.connect()) as db:
             db.execute("BEGIN IMMEDIATE")
@@ -110,13 +116,13 @@ class MonitorStore:
             event = db.execute(
                 "INSERT INTO monitor_events(at_us,code,transition,severity) "
                 "VALUES (?,?,?,?)",
-                (when_us, "watchdog_emergency_flat_verified", "opened", "critical"))
+                (when_us, reason_code, "opened", "critical"))
             db.execute(
                 "INSERT INTO watchdog_emergency_events(press,event_id) VALUES (?,?)",
                 (press, event.lastrowid))
             db.commit()
             return {"event": "watchdog_safety_incident", "id": event.lastrowid,
-                    "code": "watchdog_emergency_flat_verified",
+                    "code": reason_code,
                     "transition": "opened", "severity": "critical",
                     "at_us": when_us}
 
