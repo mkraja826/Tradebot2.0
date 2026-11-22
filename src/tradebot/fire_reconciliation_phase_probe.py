@@ -188,6 +188,57 @@ def _wallet_reference_linkage(raw_postings, normalized_postings, fills, owned_or
     return report
 
 
+def _overlapping_posting_hints(postings, fills, owned_orders, product_id):
+    """Classify conflicting in-position references without revealing IDs.
+
+    Mirrors the *specific* strict analyser guard for same-product
+    within-position postings that point to neither a selected owned order
+    nor one of its signed fills. Counts never constitute attribution.
+    """
+    owned = set(owned_orders)
+    selected = [f for f in fills if f["order_id"] in owned]
+    if not selected:
+        return None
+    first = min(f["at_us"] for f in selected)
+    last = max(f["at_us"] for f in selected)
+    owned_fills = {f["id"] for f in selected}
+    other_fills = {f["id"] for f in fills if f["order_id"] not in owned}
+    out = {
+        "same_product_in_position_unowned_reference_count": 0,
+        "kinds": {"commission": 0, "cashflow": 0, "funding": 0, "other": 0},
+        "order_reference_present": 0,
+        "fill_reference_present": 0,
+        "fill_reference_in_other_signed_fill": 0,
+        "fill_reference_not_in_signed_fill_window": 0,
+        "wallet_ownership_proven": False,
+        "can_remove_blocker": False,
+        "raw_broker_values_exposed": False,
+    }
+    for posting in postings:
+        if posting["type"] in EXTERNAL:
+            continue
+        if posting["product_id"] != str(product_id):
+            continue
+        if not first <= posting["at_us"] <= last:
+            continue
+        order_ref, fill_ref = posting["order_id"], posting["fill_id"]
+        if order_ref in owned or fill_ref in owned_fills:
+            continue
+        if order_ref is None and fill_ref is None:
+            continue
+        out["same_product_in_position_unowned_reference_count"] += 1
+        kind = posting["type"] if posting["type"] in out["kinds"] else "other"
+        out["kinds"][kind] += 1
+        out["order_reference_present"] += order_ref is not None
+        out["fill_reference_present"] += fill_ref is not None
+        out["fill_reference_in_other_signed_fill"] += fill_ref in other_fills
+        out["fill_reference_not_in_signed_fill_window"] += (
+            fill_ref is not None and fill_ref not in other_fills
+            and fill_ref not in owned_fills
+        )
+    return out
+
+
 def _base_report():
     return {
         "environment": "delta-india-demo",
@@ -209,6 +260,7 @@ def _base_report():
         "cashflow_and_commission_consistency_proven_in_memory": False,
         "unattributed_wallet_posting_diagnostic": None,
         "wallet_reference_linkage_diagnostic": None,
+        "overlapping_wallet_posting_diagnostic": None,
         "original_ledger_mutations": False,
         "temporary_ledger_mutations": False,
         "broker_order_mutations": False,
@@ -405,6 +457,13 @@ def probe_single_recent_btc(exchange, data_dir, *, now=None, fire_id=None):
             except Exception:
                 # Never disclose broker data or change the original blocker if
                 # the supplementary diagnostic itself cannot classify it.
+                pass
+        if isinstance(exc, ReconciliationError) and reason == "overlapping_external_postings":
+            try:
+                out["overlapping_wallet_posting_diagnostic"] = _overlapping_posting_hints(
+                    postings, fills, order_ids, pid)
+            except Exception:
+                # Supplementary classification is never an accounting waiver.
                 pass
         return block("financial_analysis", reason)
     out["cashflow_and_commission_consistency_proven_in_memory"] = True
