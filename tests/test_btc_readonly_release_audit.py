@@ -67,6 +67,36 @@ class BtcReadOnlyAuditTests(unittest.TestCase):
         self.assertNotIn("git checkout", text)
         self.assertNotIn("systemctl restart", text)
 
+    def test_single_staged_audit_reports_all_independent_blockers(self):
+        text = AUDIT.read_text(encoding="utf-8")
+        self.assertIn('PY="${TRADEBOT_AUDIT_PYTHON:-$ROOT/.venv/bin/python}"', text)
+        self.assertIn("reviewed_source_or_explicit_interpreter_unavailable", text)
+        self.assertIn("tradebot.fire_exposure_only_probe", text)
+        self.assertIn("tradebot.offhost_alerts --data-dir \"$DATA\" --check", text)
+        self.assertIn("journal_present", text)
+        self.assertIn("unsafe_permissions", text)
+        self.assertIn("financial_analysis", (ROOT / "src" / "tradebot" /
+                                              "fire_reconciliation_phase_probe.py").read_text())
+        self.assertIn("TRADING_ENABLED: false", text)
+        self.assertTrue(text.rstrip().endswith("exit 2"))
+        for forbidden in ("chmod 600", "systemctl stop", "git reset",
+                          "git switch", "git pull", "git checkout"):
+            self.assertNotIn(forbidden, text.replace(
+                "# Only inspect git; NEVER pull/checkout/restart services from a diagnostic.",
+                ""))
+
+    def test_full_audit_never_runs_for_missing_directory_with_custom_python(self):
+        import os
+        with TemporaryDirectory() as tmp:
+            result = subprocess.run(
+                ["bash", str(AUDIT), "a"*32, str(Path(tmp) / "absent")],
+                env={**os.environ, "TRADEBOT_AUDIT_PYTHON": "/bin/false"},
+                capture_output=True, text=True, check=False, timeout=5)
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("trusted_existing_data_directory_unavailable",
+                          result.stderr)
+            self.assertNotIn("SIGNED_ACCOUNT_IDENTITY_GET", result.stdout)
+
     def test_auth_check_precedes_broker_and_financial_checks(self):
         text = AUDIT.read_text(encoding="utf-8")
         auth = text.index("tradebot.delta_auth_diagnostic")
