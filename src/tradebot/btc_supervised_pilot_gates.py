@@ -19,6 +19,7 @@ from tradebot.candle_archive import CandleArchive
 from tradebot.delta import DEMO_API, DeltaDemo
 from tradebot.fire_account_guard import require_flat_demo_account
 from tradebot.signed_margin_mode import signed_account_margin_mode
+from tradebot.operator_account_mode import read_manual_mode
 from tradebot.market import _age_seconds, MarketDataError
 
 REQUIRED_BTC_PERIODS = (
@@ -98,6 +99,7 @@ def inspect_btc_pilot_gates(
         "status": "blocked",
         "session_candidate_passed": False,
         "signed_isolated_margin_verified": False,
+        "owner_declared_account_mode": "not_configured",
         "account_wide_flatness_verified": False,
         "btc_required_periods_provisionally_valid": False,
         "btc_period_quality": {},
@@ -140,6 +142,11 @@ def inspect_btc_pilot_gates(
     if not report["session_candidate_passed"]:
         report["blockers"].append("supervised_session_equity_unverified")
 
+    # Owner declaration is informational; never replace signed margin proof.
+    try:
+        report["owner_declared_account_mode"] = read_manual_mode(exchange)["status"]
+    except Exception:
+        pass
     try:
         report["signed_isolated_margin_verified"] = (
             margin_fn(exchange) == "isolated")
