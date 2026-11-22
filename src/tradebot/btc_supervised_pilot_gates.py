@@ -146,7 +146,7 @@ def inspect_btc_pilot_gates(
         # Account guard performs its own complete signed, current-account
         # margin and exposure checks. Do not accept filtered BTC-only flatness.
         try:
-            proof = account_fn(exchange, selected_symbol="BTCUSD")
+            proof = account_fn(exchange)
             report["account_wide_flatness_verified"] = (
                 type(proof) is dict
                 and proof.get("account_flat_verified") is True
