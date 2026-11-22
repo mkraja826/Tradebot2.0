@@ -85,6 +85,23 @@ class BtcReadOnlyAuditTests(unittest.TestCase):
                 "# Only inspect git; NEVER pull/checkout/restart services from a diagnostic.",
                 ""))
 
+    def test_free_remote_alert_options_checked_without_fake_delivery_or_new_network(self):
+        text = AUDIT.read_text(encoding="utf-8")
+        self.assertIn("run_optional_check 'Generic HTTPS", text)
+        self.assertIn("OPTIONAL_NOT_CONFIGURED", text)
+        self.assertIn("not a release gate", text)
+        self.assertIn("tradebot.telegram_alerts tradebot2-telegram-alerts.service", text)
+        self.assertIn("tradebot.healthchecks_ping tradebot2-healthchecks-ping.timer", text)
+        self.assertIn('systemctl is-active --quiet "$unit"', text)
+        self.assertIn('"$PY" -m "$module" --data-dir "$DATA" --check', text)
+        self.assertIn("LOCAL_READY_REMOTE_DELIVERY_UNVERIFIED", text)
+        self.assertIn("private_alert_configuration_unavailable", text)
+        self.assertIn("real external Telegram incident delivery", text)
+        for forbidden in ("--ping", "--test", "--baseline", "systemctl enable",
+                          "systemctl start", "curl ", "wget ", "sendMessage"):
+            self.assertNotIn(forbidden, text)
+        self.assertIn("TRADING_ENABLED: false", text)
+
     def test_full_audit_never_runs_for_missing_directory_with_custom_python(self):
         import os
         with TemporaryDirectory() as tmp:
