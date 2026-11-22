@@ -3,6 +3,7 @@
 Uses test_fire_reconciliation's fully synthetic GET-only broker fixture.
 No real network, private account files or order mutations.
 """
+from copy import deepcopy
 from datetime import timedelta
 import json
 from pathlib import Path
@@ -256,8 +257,77 @@ class M09PhaseProbeTests(unittest.TestCase):
         hints = report["unattributed_wallet_posting_diagnostic"]
         self.assertEqual(hints["count"], 7)
         self.assertEqual(len(hints["examples"]), 5)
+        self.assertEqual(len(hints["amount_consistency_clues"]), 5)
         self.assertTrue(hints["examples_truncated"])
         self.assertFalse(report["trade_authorized"])
+
+    def test_delayed_cashflow_and_commission_get_amount_clues_not_credit(self):
+        cash = self.broker.postings[-2]
+        cash["created_at"] = BASE + 101_000_000
+        cash["meta_data"] = {}
+        closing_fee = self.broker.postings[3]
+        closing_fee["created_at"] = BASE + 102_000_000
+        closing_fee["meta_data"] = {}
+        report = self.probe()
+        self.assertEqual(report["reason"], "unattributed_wallet_posting")
+        hints = report["unattributed_wallet_posting_diagnostic"]
+        self.assertEqual(hints["count"], 2)
+        self.assertEqual([r["posting_kind"] for r in hints["examples"]],
+                         ["cashflow", "commission"])
+        self.assertTrue(hints["amount_consistency_clues"][0][
+            "matches_selected_total_cashflow_exact"])
+        self.assertIsNone(hints["amount_consistency_clues"][0][
+            "matches_selected_single_fill_commission_exact"])
+        self.assertTrue(hints["amount_consistency_clues"][1][
+            "matches_selected_single_fill_commission_exact"])
+        self.assertFalse(hints["amount_consistency_clues"][1][
+            "matches_selected_total_commission_exact"])
+        self.assertFalse(hints["amount_matches_prove_broker_attribution"])
+        self.assertFalse(hints["other_product_fill_history_checked"])
+        self.assertFalse(report["funding_reconciled"])
+        self.assertFalse(report["trade_authorized"])
+        self.assertFalse(report["safe_to_enable_fire"])
+        self.assertFalse(report["is_net_realized_pnl"])
+        self.assertEqual(list(self.root.iterdir()), [])
+
+    def test_same_amount_other_trade_fill_is_explicitly_competing_evidence(self):
+        fee = self.broker.postings[3]
+        fee["created_at"] = BASE + 110_000_000
+        fee["meta_data"] = {}
+        outside = deepcopy(self.broker.fills[2])
+        outside["id"] = "PRIVATE-OTHER-FILL-ID"
+        outside["order_id"] = 999
+        outside["created_at"] = BASE + 90_000_000
+        outside["commission"] = "0.04"
+        self.broker.fills.append(outside)
+        report = self.probe()
+        hints = report["unattributed_wallet_posting_diagnostic"]
+        self.assertEqual(report["reason"], "unattributed_wallet_posting")
+        self.assertEqual(hints["unowned_same_product_fills_after_last_fill"], 1)
+        self.assertTrue(hints["amount_consistency_clues"][0][
+            "matches_selected_single_fill_commission_exact"])
+        self.assertTrue(hints["amount_consistency_clues"][0][
+            "matches_other_same_product_fill_commission_exact"])
+        self.assertFalse(hints["amount_matches_prove_broker_attribution"])
+        self.assertNotIn("PRIVATE-OTHER-FILL-ID", json.dumps(report))
+        self.assertFalse(report["trade_authorized"])
+        self.assertEqual(list(self.root.iterdir()), [])
+
+    def test_inconsistent_post_close_amount_never_claims_evidence_match(self):
+        extra = self.broker.posting("PRIVATE-UNLINKED-ID", "cashflow",
+                                    "12345.6789", 110)
+        extra["meta_data"] = {"unknown_private_key": "CONFIDENTIAL"}
+        self.broker.postings.append(extra)
+        report = self.probe()
+        self.assertEqual(report["reason"], "unattributed_wallet_posting")
+        hints = report["unattributed_wallet_posting_diagnostic"]
+        self.assertFalse(hints["amount_consistency_clues"][0][
+            "matches_selected_total_cashflow_exact"])
+        self.assertNotIn("12345.6789", json.dumps(report))
+        self.assertNotIn("PRIVATE-UNLINKED-ID", json.dumps(report))
+        self.assertNotIn("CONFIDENTIAL", json.dumps(report))
+        self.assertFalse(report["safe_to_enable_fire"])
+        self.assertEqual(list(self.root.iterdir()), [])
 
     def test_valid_reconciliation_does_not_emit_attribution_hints(self):
         report = self.probe()
