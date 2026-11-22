@@ -137,6 +137,17 @@ def _backup_database(source, dest):
                     if time.monotonic() - began > MAX_BACKUP_SECONDS:
                         raise SnapshotBlocked("sqlite_backup_deadline_exceeded")
                 src.backup(dst, pages=256, sleep=0.02, progress=progress)
+        # The SQLite online API faithfully copies the source's WAL journal
+        # setting. Normalize ONLY the new destination to DELETE mode, which
+        # checkpoints its own copied pages and removes destination -wal/-shm.
+        # Never run journal_mode or checkpoint on the original live source.
+        with closing(sqlite3.connect(str(dest), timeout=5)) as standalone:
+            chosen = standalone.execute("PRAGMA journal_mode=DELETE").fetchone()
+            if chosen != ("delete",):
+                raise SnapshotBlocked("backup_cannot_be_made_standalone")
+        if any(Path(str(dest) + suffix).exists()
+               for suffix in ("-wal", "-shm", "-journal")):
+            raise SnapshotBlocked("backup_has_uncheckpointed_destination_sidecars")
         if _verified_private_regular(source)[:2] != original[:2]:
             raise SnapshotBlocked("source_database_replaced_during_backup")
         with closing(sqlite3.connect(
