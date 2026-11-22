@@ -9,9 +9,25 @@ usage() {
 }
 [[ $# -ge 1 && $# -le 2 ]] || usage
 FIRE_ID="$1"
-[[ "$FIRE_ID" =~ ^[0-9a-fA-F]{32}$ ]] || usage
+[[ "$FIRE_ID" =~ ^[0-9a-f]{32}$ ]] || usage
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)" || exit 2
+# The original VM may still be running a pre-merge release-audit checkout.
+# Only inspect git; NEVER pull/checkout/restart services from a diagnostic.
+MINIMUM_REVIEWED_BASE="c9f79d59696e440da73c4425a8efe30fbe08db0f"
+if ! command -v git >/dev/null 2>&1; then
+  printf 'BLOCKED: git_checkout_provenance_unavailable\n' >&2
+  exit 2
+fi
+if [[ "$(git -C "$ROOT" rev-parse --show-toplevel 2>/dev/null)" != "$ROOT" ]] ||
+   ! git -C "$ROOT" merge-base --is-ancestor "$MINIMUM_REVIEWED_BASE" HEAD 2>/dev/null; then
+  printf 'BLOCKED: reviewed_release_audit_source_not_deployed\n' >&2
+  exit 2
+fi
+if [[ -n "$(git -C "$ROOT" status --porcelain --untracked-files=no 2>/dev/null)" ]]; then
+  printf 'BLOCKED: tracked_release_audit_source_is_modified\n' >&2
+  exit 2
+fi
 DATA="${2:-$ROOT/data}"
 if [[ ! -d "$DATA" || -L "$DATA" ]]; then
   printf 'BLOCKED: trusted_existing_data_directory_unavailable\n' >&2
@@ -47,8 +63,11 @@ run_check() {
   fi
 }
 printf 'BTC DEMO RELEASE AUDIT — GET-only; no order authority\n'
-printf 'Historical receipt: %s\n' "$FIRE_ID"
+printf 'Historical receipt: selected existing local BTC FIRE (ID redacted)\n'
 printf 'FIRE and Gold remain disabled; never use this report to unlock trading.\n'
+
+run_check 'Signed DELTA DEMO identity GET from existing approved VM network' \
+  "$PY" -m tradebot.delta_auth_diagnostic
 
 run_check 'Broker leverage and isolated-margin compatibility' \
   "$PY" -m tradebot.fire_leverage_probe
@@ -94,7 +113,7 @@ run_check 'Actual BTC/Gold monthly archive gaps and suspicious UTC bar inventory
   "$PY" -m tradebot.candle_anomaly_inventory --data-dir "$DATA"
 
 run_check 'Single-trade broker fill/wallet evidence (analysis only)' \
-  "$PY" -m tradebot.fire_reconciliation_phase_probe --data-dir "$DATA"
+  "$PY" -m tradebot.fire_reconciliation_phase_probe --data-dir "$DATA" --fire-id "$FIRE_ID"
 
 run_check 'Combined host, equity, account-wide and bracket checks' \
   "$PY" -m tradebot.demo_release_evidence --data-dir "$DATA" --fire-id "$FIRE_ID"
