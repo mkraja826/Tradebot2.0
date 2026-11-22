@@ -37,11 +37,17 @@ class RecoveryTests(unittest.TestCase):
     def test_exact_window_edges_and_missed_windows_after_reboot(self):
         monday = datetime(2026, 11, 23, tzinfo=UTC)
         health = checkpoint_health(self.path, at=monday + timedelta(minutes=5))
-        self.assertEqual(health["daily_checkpoint"], "pending_window")
+        self.assertEqual(health["daily_checkpoint"], "missed_window")
+        self.assertEqual(health["weekly_checkpoint"], "missed_window")
         edge = monday + timedelta(minutes=5)
-        self.guard.observe_verified_read("1000", receipt_for(at=edge), now=edge)
-        self.assertEqual(checkpoint_health(self.path, at=edge)[
-            "weekly_checkpoint"], "verified")
+        observed = self.guard.observe_verified_read(
+            "1000", receipt_for(at=edge), now=edge)
+        self.assertFalse(observed["approved"])
+        self.assertEqual(observed["reason"], "missing_opening_equity_checkpoint")
+        signed_but_late = checkpoint_health(self.path, at=edge)
+        self.assertEqual(signed_but_late["latest_receipt_status"], "verified")
+        self.assertEqual(signed_but_late["weekly_checkpoint"], "missed_window")
+        self.assertFalse(signed_but_late["checkpoint_prerequisites_met"])
         # A new process after next week's missed window cannot turn a later
         # current wallet balance into the opening it did not observe.
         late = monday + timedelta(days=7, minutes=5, microseconds=1)
