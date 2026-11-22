@@ -1,3 +1,51 @@
+
+## One-pass audit from the separate reviewed VM staging worktree
+
+The protected VM has an existing live source directory and a separate
+reviewed detached Git worktree. **Do not** modify/restart the live watchdog
+or execute an in-place `git pull`. When the staged source has been updated
+separately by an operator from the merged, green `main`, the read-only
+release audit can use the existing live Python virtualenv explicitly:
+
+```bash
+ROOT="$HOME/Tradebot2.0"
+STAGE="$HOME/Tradebot2.0-release-stage"
+# Read-only review of the detached source revision and tree:
+git -C "$STAGE" rev-parse HEAD
+git -C "$STAGE" status --porcelain --untracked-files=all -- src/tradebot ops
+(
+  set +x
+  set -a
+  . "$HOME/.config/tradebot2/keys.env"
+  set +a
+  TRADEBOT_AUDIT_PYTHON="$ROOT/.venv/bin/python" \
+    bash "$STAGE/ops/run_btc_demo_release_audit.sh" \
+    b7f242b10c584d6eacc831f9f713eaf8 "$ROOT/data"
+)
+```
+
+The combined audit now continues through **all** independent, read-only
+checks even when isolated margin, financial reconciliation or missing
+source records cause one stage to fail. It collects in one pass:
+signed DEMO identity, signed full-account exposure independent of the
+empty subaccount list, isolated margin/leverage, signed opening equity
+and heartbeat integrity, historical BTC/Gold candle gaps, off-host
+alert configuration (no outbound network), read-only journal permissions,
+the exact original M09 fill+wallet financial evidence and structural
+reference matching, combined host/receipt evidence and public source
+context for suspicious BTC extremes.
+
+The script **always exits nonzero and prints `TRADING_ENABLED: false`**
+even when its diagnostics are consistent. It does not write/read provider
+secrets outside the currently loaded environment, create a missing
+reconciliation database, change journal permissions, call paid models,
+install/restart units, place orders, mutate margin/leverage, or release
+quarantined market bars. Off-host configuration check is not actual
+verified delivery; BTC spot/mark context is not a perpetual trade print.
+
+If a check is blocked, gather its fixed sanitized reason and continue
+resolving it independently, without restoring old code or bypassing gates.
+
 # One-command BTC India DEMO blocker audit (read-only)
 
 This operator launcher aggregates four existing fail-closed diagnostics. It
