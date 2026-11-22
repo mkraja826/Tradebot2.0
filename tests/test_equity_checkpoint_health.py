@@ -88,6 +88,42 @@ class CheckpointHealthTests(unittest.TestCase):
         self.assertIn("missed_daily_checkpoint", result["alert_codes"])
         self.assertIn("missed_weekly_checkpoint", result["alert_codes"])
 
+    def test_exact_five_minute_boundary_is_missed_not_pending(self):
+        # Monday 00:05:00 UTC = 05:35:00 IST, outside the first five minutes.
+        PortfolioEquityGuard(self.db)
+        report = self.check(utc(23, 0, 5))
+        self.assertEqual(report["daily_checkpoint"], "missed_window")
+        self.assertEqual(report["weekly_checkpoint"], "missed_window")
+        self.assertEqual(report["status"], "checkpoint_missed")
+        self.assertIn("missed_daily_checkpoint", report["alert_codes"])
+        self.assertIn("missed_weekly_checkpoint", report["alert_codes"])
+        self.assertFalse(report["checkpoint_prerequisites_met"])
+        self.assertFalse(report["trade_authorized"])
+
+    def test_signed_read_at_exact_five_minutes_is_not_opening_anchor(self):
+        guard = PortfolioEquityGuard(self.db)
+        # A real, immutable signed wallet reading may be stored at 00:05,
+        # but it must not retroactively count as daily/weekly opening equity.
+        result = self.record(guard, "1000", utc(23, 0, 5))
+        self.assertFalse(result["approved"])
+        self.assertEqual(result["reason"], "missing_opening_equity_checkpoint")
+        report = self.check(utc(23, 0, 5))
+        self.assertEqual(report["latest_receipt_status"], "verified")
+        self.assertEqual(report["daily_checkpoint"], "missed_window")
+        self.assertEqual(report["weekly_checkpoint"], "missed_window")
+        self.assertFalse(report["checkpoint_prerequisites_met"])
+        self.assertFalse(report["trade_authorized"])
+
+    def test_last_microsecond_before_five_minutes_is_eligible(self):
+        guard = PortfolioEquityGuard(self.db)
+        just_before_end = datetime(2026,11,23,0,4,59,999999,tzinfo=timezone.utc)
+        result = self.record(guard, "1000", just_before_end)
+        self.assertTrue(result["approved"])
+        health = self.check(just_before_end)
+        self.assertEqual(health["daily_checkpoint"], "verified")
+        self.assertEqual(health["weekly_checkpoint"], "verified")
+        self.assertFalse(health["trade_authorized"])
+
     def test_signed_openings_and_recent_observation_are_healthy(self):
         guard = PortfolioEquityGuard(self.db)
         self.record(guard, "1000", utc(16, 0, 1))
