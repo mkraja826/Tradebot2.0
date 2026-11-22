@@ -12,6 +12,11 @@ FIRE_ID="$1"
 [[ "$FIRE_ID" =~ ^[0-9a-f]{32}$ ]] || usage
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)" || exit 2
+DATA="${2:-$ROOT/data}"
+if [[ ! -d "$DATA" || -L "$DATA" ]]; then
+  printf 'BLOCKED: trusted_existing_data_directory_unavailable\n' >&2
+  exit 2
+fi
 # The original VM may still be running a pre-merge release-audit checkout.
 # Only inspect git; NEVER pull/checkout/restart services from a diagnostic.
 MINIMUM_REVIEWED_BASE="c9f79d59696e440da73c4425a8efe30fbe08db0f"
@@ -32,11 +37,6 @@ if ! SOURCE_STATUS="$(git -C "$ROOT" status --porcelain --untracked-files=all --
 fi
 if [[ -n "$SOURCE_STATUS" ]]; then
   printf 'BLOCKED: executable_release_audit_source_is_modified\n' >&2
-  exit 2
-fi
-DATA="${2:-$ROOT/data}"
-if [[ ! -d "$DATA" || -L "$DATA" ]]; then
-  printf 'BLOCKED: trusted_existing_data_directory_unavailable\n' >&2
   exit 2
 fi
 PY="$ROOT/.venv/bin/python"
