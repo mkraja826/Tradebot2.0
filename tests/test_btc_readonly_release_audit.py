@@ -34,6 +34,49 @@ class BtcReadOnlyAuditTests(unittest.TestCase):
                           result.stderr)
             self.assertFalse(missing.exists())
 
+    def test_uppercase_fire_id_rejected_before_vm_and_broker_checks(self):
+        result = subprocess.run(
+            ["bash", str(AUDIT), "A" * 32],
+            capture_output=True, text=True, check=False, timeout=5)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("Usage:", result.stderr)
+        self.assertNotIn("SIGNED_ACCOUNT_IDENTITY_GET", result.stdout)
+
+    def test_selected_fire_id_is_passed_to_historical_reconciliation(self):
+        text = AUDIT.read_text(encoding="utf-8")
+        self.assertIn(
+            'tradebot.fire_reconciliation_phase_probe --data-dir "$DATA" --fire-id "$FIRE_ID"',
+            text)
+        self.assertIn(
+            'tradebot.demo_release_evidence --data-dir "$DATA" --fire-id "$FIRE_ID"',
+            text)
+        self.assertIn("Historical receipt: selected existing local BTC FIRE", text)
+        self.assertNotIn('Historical receipt: %s', text)
+
+    def test_vm_source_provenance_and_clean_executables_are_required(self):
+        text = AUDIT.read_text(encoding="utf-8")
+        self.assertIn("MINIMUM_REVIEWED_BASE=", text)
+        self.assertIn("git -C \"$ROOT\" merge-base --is-ancestor", text)
+        self.assertIn(
+            "git -C \"$ROOT\" status --porcelain --untracked-files=all -- src/tradebot ops",
+            text)
+        self.assertIn("source_integrity_cannot_be_checked", text)
+        self.assertNotIn("git pull", text.replace(
+            "# Only inspect git; NEVER pull/checkout/restart services from a diagnostic.",
+            ""))
+        self.assertNotIn("git checkout", text)
+        self.assertNotIn("systemctl restart", text)
+
+    def test_auth_check_precedes_broker_and_financial_checks(self):
+        text = AUDIT.read_text(encoding="utf-8")
+        auth = text.index("tradebot.delta_auth_diagnostic")
+        broker = text.index("tradebot.fire_leverage_probe")
+        finance = text.index("tradebot.fire_reconciliation_phase_probe")
+        self.assertLess(auth, broker)
+        self.assertLess(broker, finance)
+        self.assertIn("TRADING_ENABLED: false", text)
+        self.assertIn("exit 2", text)
+
     def test_only_get_only_existing_diagnostics_and_no_execution_switches(self):
         text = AUDIT.read_text(encoding="utf-8")
         for module in (
