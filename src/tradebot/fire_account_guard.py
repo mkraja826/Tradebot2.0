@@ -42,7 +42,7 @@ def require_flat_demo_account(exchange, *, selected_symbol=None, selected_produc
         raise AccountExposureRejected("Unsupported FIRE instrument")
     if signed_account_margin_mode(exchange) != "isolated":
         raise AccountExposureRejected("Broker isolated-margin account identity not verified")
-    return require_flat_demo_account_for_configuration(
+    return _require_flat_demo_exposure(
         exchange, selected_symbol=selected_symbol,
         selected_product_id=selected_product_id,
     )
@@ -60,6 +60,17 @@ def require_flat_demo_account_for_configuration(
     if (getattr(exchange, "base_url", None) != DEMO_API
             or getattr(exchange, "allow_orders", None) is not False):
         raise AccountExposureRejected("Demo read-only configuration client required")
+    return _require_flat_demo_exposure(
+        exchange, selected_symbol=selected_symbol,
+        selected_product_id=selected_product_id,
+    )
+
+
+def _require_flat_demo_exposure(exchange, *, selected_symbol=None,
+                                selected_product_id=None):
+    """Internal shared broker exposure proof; never standalone order permit."""
+    if getattr(exchange, "base_url", None) != DEMO_API:
+        raise AccountExposureRejected("Only Delta India DEMO is permitted")
     if selected_symbol is not None and selected_symbol not in FIRE_SYMBOLS:
         raise AccountExposureRejected("Unsupported FIRE instrument")
 
