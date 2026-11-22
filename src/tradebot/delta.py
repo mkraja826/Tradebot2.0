@@ -9,6 +9,7 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
+from uuid import UUID
 
 DEMO_API = "https://cdn-ind.testnet.deltaex.org"
 
@@ -305,6 +306,26 @@ class DeltaDemo:
                     or not isinstance(meta, dict) or "after" not in meta):
                 raise DeltaError("Invalid account history page")
             for row in page:
+                # Delta India DEMO wallet transactions can return a broker
+                # "uuid" instead of the example-documented numeric "id".
+                # Only on this endpoint, accept the broker-supplied UUID as
+                # its stable identity. Canonicalize valid UUIDs across pages
+                # to preserve duplicate and evidence-ownership checks. No
+                # synthetic IDs, guessed timestamps or row hashes are used.
+                if path == "/v2/wallet/transactions" and "id" not in row:
+                    raw_uuid = row.get("uuid")
+                    if type(raw_uuid) is not str or not (
+                            len(raw_uuid) == 32
+                            or (len(raw_uuid) == 36 and
+                                raw_uuid[8] == "-" and raw_uuid[13] == "-"
+                                and raw_uuid[18] == "-" and raw_uuid[23] == "-")):
+                        raise DeltaError("Missing verified wallet transaction UUID")
+                    try:
+                        broker_uuid = UUID(raw_uuid)
+                    except (ValueError, AttributeError):
+                        raise DeltaError("Invalid wallet transaction UUID") from None
+                    # An original exchange UUID, not a newly generated ID.
+                    row = dict(row, id=str(broker_uuid))
                 identifier = row.get("id")
                 if type(identifier) not in (str, int) or not str(identifier).strip():
                     raise DeltaError("Missing account history ID")
