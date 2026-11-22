@@ -42,6 +42,30 @@ GET succeeds, and a permitted HTTP status code if it fails. No raw provider
 response text, user identifiers, account IDs, credentials or balances appear
 in the workflow logs.
 
+## Main-account empty-subaccount readback correction (22 Nov 2026)
+
+The approved original VM returned an authenticated empty `/v2/sub_accounts`
+array for the DEMO Main account even though the account UI showed
+`Main / Isolated`. This is not proof of margin state. Delta's separate
+official MCP context describes `get_trading_preferences` as providing a margin
+mode, but the public REST example does **not** guarantee such a field. If and
+only if the actual signed `trading_preferences.result` contains a valid
+explicit `margin_mode` for its own validated `user_id`, the helper can now
+accept that **direct** current-user evidence despite zero matching
+`sub_accounts` rows. It still performs both signed GETs, requires a valid
+subaccount list and fails on duplicate, invalid or conflicting modes.
+
+When preferences omit `margin_mode`, the existing two-endpoint strict behavior
+remains and the main account's isolated mode is **unverified**. No inference
+from `default_auto_topup`, the UI, zero balances, no positions, or another
+user's subaccount is allowed. Signed direct `portfolio` or `cross` mode is
+never translated into isolated. No API POST/PUT, account adjustment,
+service restart, live trading or margin-mode override is introduced.
+
+This is a conditional code path and **not** proof that the original DEMO VM
+actually returns an explicit mode. After merge and separate staging, the
+read-only `fire_leverage_probe` must establish the real broker result.
+
 ## Limitations and rollout
 
 Delta documents `GET /v2/sub_accounts` for the parent/main user. If the
