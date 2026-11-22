@@ -104,9 +104,11 @@ class M09PhaseProbeTests(unittest.TestCase):
         # transactions may have fill_uuid references for different trades.
         own_uuid = "c7b384f4-3d1c-4a19-b7fe-12c6b2b1040d"
         self.broker.fills[3]["id"] = own_uuid
-        for i in range(3):
+        for i, prefix in enumerate(("1", "2", "3")):
+            prior_uuid = prefix + "d777777-2222-4444-aaaa-555555555555"
+            self.broker.fills[i]["id"] = prior_uuid
             self.broker.postings[i]["meta_data"] = {
-                "fill_uuid": "4d777777-2222-4444-aaaa-555555555555"
+                "fill_uuid": prior_uuid
             }
         fee = self.broker.postings[3]
         fee["created_at"] = BASE + 92_000_000
