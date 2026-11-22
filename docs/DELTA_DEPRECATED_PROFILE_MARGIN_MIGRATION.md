@@ -3,9 +3,10 @@
 ## Confirmed provider contract break
 
 Delta India's official API documentation states in the **19 August 2026**
-changelog that `GET /v2/profile` is no longer available to API keys. Three
+changelog that `GET /v2/profile` is no longer available to API keys. Four
 Tradebot 2.0 components still read that endpoint and could never validate
 isolated margin through current authenticated API requests:
+`fire_account_guard.require_flat_demo_account`,
 `fire_leverage_probe`, `fire_broker_inventory`, and
 `fire_leverage.verify_liquidation_clearance`.
 
