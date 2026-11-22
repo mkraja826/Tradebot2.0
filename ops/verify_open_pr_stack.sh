@@ -57,14 +57,78 @@ git config user.email "read-only-integration-ci@users.noreply.github.com"
 git switch --detach "$EXPECTED_BASE"
 git switch -c temporary-pr-stack-check
 
+resolve_reviewed_test_collision() {
+  local number="$1"
+  local conflicts
+  conflicts="$(git diff --name-only --diff-filter=U)"
+  if [[ "$conflicts" != "tests/test_btc_readonly_release_audit.py" ]]; then
+    printf 'BLOCKED: unexpected conflict files in PR #%s: %s\n' "$number" "$conflicts" >&2
+    return 1
+  fi
+  # Only explicit known additive test collisions are allowed. Validate the
+  # full incoming stage against the reviewed base before writing a union;
+  # never use git -X ours, -X theirs, or a generic conflict-marker deletion.
+  python - "$number" <<'PY'
+import subprocess
+import sys
+from pathlib import Path
+
+pr = int(sys.argv[1])
+path = "tests/test_btc_readonly_release_audit.py"
+def stage(n):
+    return subprocess.check_output(["git", "show", f":{n}:{path}"], text=True)
+
+base, ours, theirs = stage(1), stage(2), stage(3)
+needle = '            "tradebot.fire_reconciliation_phase_probe",'
+if ours.count(needle) != 1 or base.count(needle) != 1:
+    raise SystemExit("BLOCKED: unknown audit test context")
+
+if pr == 29:
+    extra = '            "tradebot.candle_extreme_crosscheck",\n'
+    expected = base.replace(needle, extra + needle)
+    if (theirs != expected or extra in ours or
+            '            "tradebot.candle_anomaly_inventory",' not in ours):
+        raise SystemExit("BLOCKED: unreviewed PR29 audit-test collision")
+    result = ours.replace(needle, extra + needle)
+elif pr == 31:
+    old = '            "tradebot.equity_checkpoint_health",'
+    new = '            "tradebot.equity_monitor",'
+    oldcheck = '        self.assertIn("TRADING_ENABLED: false", text)'
+    added = ('        self.assertIn("risk_health(", text)\n'
+             '        self.assertIn("watchdog", text)\n'
+             '        self.assertIn("equity_collector", text)\n')
+    expected = base.replace(old, new).replace(oldcheck, added + oldcheck)
+    if (theirs != expected or ours.count(old) != 1 or
+            ours.count(oldcheck) != 1
+            or '            "tradebot.candle_anomaly_inventory",' not in ours
+            or '            "tradebot.candle_extreme_crosscheck",' not in ours):
+        raise SystemExit("BLOCKED: unreviewed PR31 audit-test collision")
+    result = ours.replace(old, new).replace(oldcheck, added + oldcheck)
+else:
+    raise SystemExit("BLOCKED: no approved conflict resolution for this PR")
+
+if "<<<<<<<" in result or "=======" in result or ">>>>>>>" in result:
+    raise SystemExit("BLOCKED: merge markers remain")
+Path(path).write_text(result, encoding="utf-8")
+PY
+  git add tests/test_btc_readonly_release_audit.py
+  if git diff --name-only --diff-filter=U | grep -q .; then
+    printf 'BLOCKED: unresolved paths remain after narrow conflict repair\n' >&2
+    return 1
+  fi
+  git commit -m "CI-only reviewed additive audit test collision PR #$number"
+}
+
 for i in "${!PR_NUMBERS[@]}"; do
   number="${PR_NUMBERS[$i]}"
   sha="${PR_SHAS[$i]}"
   printf '\n=== Integrating PR #%s into ephemeral CI branch ===\n' "$number"
   if ! git merge --no-ff --no-edit -m "CI-only merge PR #$number" "$sha"; then
-    printf '\nBLOCKED: merge conflict after PR #%s; no main changes made\n' "$number" >&2
-    git diff --name-only --diff-filter=U >&2
-    exit 3
+    printf '\nFound integration conflict at PR #%s; applying audited narrow rule if available\n' "$number" >&2
+    if ! resolve_reviewed_test_collision "$number"; then
+      printf 'BLOCKED: conflict cannot be safely resolved; no main changes made\n' >&2
+      exit 3
+    fi
   fi
 done
 
