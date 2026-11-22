@@ -49,3 +49,28 @@ This patch does **not** remedy programmatic isolated-margin verification,
 missing reconciliation reports, BTC/Gold historical quality, authenticated
 opening-equity checkpoints, watchdog runtime deployment or independently
 verified off-host alert delivery.
+
+## Single-pass redacted wallet-reference evidence
+
+The staged `tradebot.fire_reconciliation_phase_probe` now performs a
+supplementary *in-memory* structural check on the **same signed order,
+fill and wallet transaction window** already fetched for strict accounting.
+The new `wallet_reference_linkage_diagnostic` reports only:
+- how many commission `fill_uuid` values match signed fills owned by the
+  selected original trade, versus unmatched UUIDs;
+- how many post-fill same-product cashflows still have no direct order/fill
+  reference;
+- a fixed allowlist of *field names*, never field values, from remaining
+  cashflow metadata that might be relevant for a provider query;
+- whether other unrecognized metadata fields are present.
+
+It never prints transaction IDs, account IDs, UUID values, balances,
+commissions, raw provider bodies or metadata values. A commission UUID match
+alone is **not** sufficient to reconcile an unlinked cashflow. The printed
+`financial_attribution_verified`, `all_unmatched_wallet_transactions_resolved`
+and all trade authorization fields remain `false`, regardless of counts.
+
+This lets one pre-approved VM GET-only diagnostic report both unresolved
+wallet rows without requiring a separate manual metadata inspection after
+every change. A lack of documented authoritative cashflow linkage requires
+broker confirmation, not a timing or amount-based assumption.
