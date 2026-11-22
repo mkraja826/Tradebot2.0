@@ -71,6 +71,54 @@ Do **not** use or rename it as a completed backup. Only directories named
 completed snapshots; confirm their copies are on persistent storage and
 subject to an approved restore test before any production change.
 
+## Independent snapshot verification and isolated restore rehearsal
+
+A snapshot that was successfully created must also survive independent
+verification **before** any approved VM rollout. The verifier is a separate
+module from the backup writer and validates the finalized private manifest
+against every actual file (including unexpected/unlisted sidecars or files).
+
+On the original approved VM, use the exact private `snapshot-...` directory
+reported by the backup command. The snapshot must remain owned by the
+operator, unreadable by other users, and **outside** the live `data/`.
+
+```bash
+cd ~/Tradebot2.0 || exit 1
+umask 077
+export PYTHONPATH="$PWD/src"
+
+# Check private manifest, SHA-256 hashes, all database integrity and schemas
+# using immutable SQLite reads. Never write or touch the backed-up snapshot.
+.venv/bin/python -m tradebot.vm_backup_restore_check \
+  --snapshot "$HOME/.config/tradebot2/private-backups/snapshot-CHOOSE-EXACT-FOLDER"
+
+# Optional, explicit: copy all backup files to a newly-created private
+# ephemeral restore workspace, reopen each restored DB read-only and check
+# integrity, schema and hashes. The ephemeral copies are removed afterwards.
+mkdir -p "$HOME/.config/tradebot2/private-restore-rehearsal"
+chmod 700 "$HOME/.config/tradebot2/private-restore-rehearsal"
+.venv/bin/python -m tradebot.vm_backup_restore_check \
+  --snapshot "$HOME/.config/tradebot2/private-backups/snapshot-CHOOSE-EXACT-FOLDER" \
+  --restore-rehearsal-root "$HOME/.config/tradebot2/private-restore-rehearsal"
+```
+
+Use the **actual** snapshot directory name, not the placeholder. Failure of
+any check blocks deployment. The verifier rejects symlinks, hardlinks,
+permissive files, unknown files, duplicate or malformed manifest keys,
+missing original databases, checksum mismatches, unusable SQLite snapshots,
+foreign-key failures and unaccounted WAL/SHM sidecars. The optional rehearsal
+writes only private temporary copies **outside** the original data and
+snapshot and does not overwrite, replace, truncate or restore anything
+in the active application directories.
+
+`backup_independently_verified` confirms only the tested individual copies.
+It **does not certify cross-database atomicity, historical accounting
+completeness, current signed account-wide flatness, protected systemd
+rollout, external alert delivery, or trading readiness.** Independent
+operator review and a further current broker-flatness check are mandatory
+before service promotion. Never paste snapshots or manifest contents into
+chat, public CI, or GitHub issue comments.
+
 ## Stronger deployment-candidate evidence (GETs only)
 
 Once an approved key is loaded **on the VM with a whitelisted egress IP**,
