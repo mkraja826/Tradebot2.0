@@ -6,7 +6,7 @@ On the original authenticated Delta India DEMO VM (22 November 2026):
 - Signed `GET /v2/users/trading_preferences` succeeded.
 - Signed `GET /v2/sub_accounts` succeeded but returned **zero rows**.
 - The strict account-margin helper therefore correctly rejected the result
-  with `signed_account_identity_not_unique` (zero matches, not duplicates).
+  with `signed_current_account_margin_mode_unavailable` (zero matches, not duplicates).
 - Both BTCUSD and XAUTUSD leverage settings were read back as 20x, but margin
   mode, position sizes and account-wide pending orders were UNKNOWN.
 

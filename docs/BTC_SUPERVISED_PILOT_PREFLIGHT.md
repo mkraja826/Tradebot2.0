@@ -44,6 +44,6 @@ an explicit operator signoff for supervised DEMO execution.
 
 Current original-VM evidence: session equity checks agreed at 0% drawdown
 in two fresh authenticated reads, but Main-account isolated margin returned
-`signed_account_identity_not_unique` and BTC historic months were
+`signed_current_account_margin_mode_unavailable` and BTC historic months were
 suspicious. The preflight must not convert either into success. The ordinary
 week-anchored FIRE controller remains untouched and explicitly disabled.

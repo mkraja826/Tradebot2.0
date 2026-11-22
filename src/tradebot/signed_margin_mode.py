@@ -64,7 +64,11 @@ def signed_account_margin_mode(exchange):
         # matching main account. Use ONLY an explicit signed mode on the
         # authenticated current user's preferences, never other account rows.
         if direct_mode is None:
-            raise MarginModeEvidenceError("signed_account_identity_not_unique")
+            # Empty (or foreign-only) subaccount listings do not establish the
+            # main user's margin mode. Keep a distinct diagnosis from the
+            # genuine duplicate-identity case above. Fail closed.
+            raise MarginModeEvidenceError(
+                "signed_current_account_margin_mode_unavailable")
         return direct_mode
     mode = found[0].get("margin_mode")
     if mode not in ("isolated", "portfolio", "cross"):

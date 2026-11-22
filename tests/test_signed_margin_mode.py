@@ -61,7 +61,7 @@ class SignedMarginEvidenceTests(unittest.TestCase):
     def test_main_empty_subaccounts_without_explicit_mode_still_blocks(self):
         self.broker.account_response = {"result": []}
         with self.assertRaisesRegex(
-                MarginModeEvidenceError, "signed_account_identity_not_unique"):
+                MarginModeEvidenceError, "signed_current_account_margin_mode_unavailable"):
             signed_account_margin_mode(self.broker)
 
     def test_direct_portfolio_or_cross_never_passes_as_isolated(self):
@@ -104,7 +104,7 @@ class SignedMarginEvidenceTests(unittest.TestCase):
             {"id": 901, "margin_mode": "isolated"},
         ]}
         with self.assertRaisesRegex(
-                MarginModeEvidenceError, "signed_account_identity_not_unique"):
+                MarginModeEvidenceError, "signed_current_account_margin_mode_unavailable"):
             signed_account_margin_mode(self.broker)
 
     def test_ambiguous_duplicate_current_account_is_rejected(self):
