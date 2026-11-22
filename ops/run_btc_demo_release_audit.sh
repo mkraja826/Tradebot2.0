@@ -47,8 +47,11 @@ if [[ ! -x "$PY" || ! -f "$ROOT/src/tradebot/fire_reconciliation_phase_probe.py"
   printf 'BLOCKED: reviewed_source_or_explicit_interpreter_unavailable\n' >&2
   exit 2
 fi
-if [[ -n "${TRADEBOT_AUDIT_PYTHON:-}" ]] &&
-   [[ "$PY" != /* || "$PY" == *
+if [[ -n "${TRADEBOT_AUDIT_PYTHON:-}" && "$PY" != /* ]]; then
+  printf 'BLOCKED: invalid_external_python_path\\n' >&2
+  exit 2
+fi
+
 if [[ -z "${DELTA_DEMO_API_KEY:-}" || -z "${DELTA_DEMO_API_SECRET:-}" ]]; then
   printf 'BLOCKED: demo_credentials_not_loaded_in_environment\n' >&2
   exit 2
