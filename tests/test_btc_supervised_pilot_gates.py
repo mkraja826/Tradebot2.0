@@ -85,6 +85,18 @@ class PilotReadinessTests(unittest.TestCase):
         r = self.run_gate(account=other_exposure)
         self.assertIn("account_wide_exposure_unverified", r["blockers"])
 
+    def test_live_pilot_does_not_pass_pre_wallet_clock_to_session(self):
+        called=[]
+        def session(exchange, data_dir, **kwargs):
+            called.append(kwargs)
+            return session_ok()
+        result = inspect_btc_pilot_gates(
+            DummyReadOnly(), "/unused",
+            session_fn=session, margin_fn=lambda x: "isolated",
+            account_fn=account_ok, quality_fn=quality_ok)
+        self.assertEqual(called, [{}])
+        self.assertTrue(result["session_candidate_passed"])
+
     def test_bad_session_cannot_pass_even_if_other_checks_pass(self):
         r = self.run_gate(
             session=lambda *a, **kw: {"status": "blocked",
