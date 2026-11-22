@@ -261,6 +261,59 @@ class M09PhaseProbeTests(unittest.TestCase):
         self.assertTrue(hints["examples_truncated"])
         self.assertFalse(report["trade_authorized"])
 
+    def test_post_close_commission_fill_uuid_links_only_real_signed_fill(self):
+        # Delta DEMO wallet commissions can include meta_data.fill_uuid
+        # instead of meta_data.fill_id. The UUID must match a signed fill
+        # selected through the original owned broker order.
+        uuid = "c7b384f4-3d1c-4a19-b7fe-12c6b2b1040d"
+        self.broker.fills[3]["id"] = uuid
+        late = self.broker.postings[3]
+        late["meta_data"] = {"fill_uuid": uuid}
+        late["created_at"] = BASE + 92_000_000
+        result = self.probe()
+        self.assertEqual(result["status"],
+                         "provisional_read_only_financial_analysis_complete",
+                         result)
+        self.assertFalse(result["is_net_realized_pnl"])
+        self.assertFalse(result["safe_to_enable_fire"])
+        self.assertFalse(result["trade_authorized"])
+        self.assertTrue(result["cashflow_and_commission_consistency_proven_in_memory"])
+        self.assertEqual(list(self.root.iterdir()), [])
+
+    def test_unknown_post_close_commission_fill_uuid_does_not_create_ownership(self):
+        late = self.broker.postings[3]
+        late["meta_data"] = {
+            "fill_uuid": "4d777777-2222-4444-aaaa-555555555555"
+        }
+        late["created_at"] = BASE + 92_000_000
+        result = self.probe()
+        self.assertEqual(result["reason"], "unattributed_wallet_posting")
+        self.assertFalse(result["is_net_realized_pnl"])
+        self.assertFalse(result["cashflow_and_commission_consistency_proven_in_memory"])
+        self.assertEqual(list(self.root.iterdir()), [])
+
+    def test_malformed_or_conflicting_wallet_uuid_never_claims_fill_link(self):
+        fee = self.broker.postings[3]
+        for metadata, reason in (
+            ({"fill_uuid": "not-a-real-uuid"}, "invalid_wallet_fill_uuid"),
+            ({"fill_uuid": "c7b384f4-3d1c-4a19-b7fe-12c6b2b1040d",
+              "fill_id": "different-fill"}, "conflicting_posting_reference"),
+        ):
+            with self.subTest(meta=metadata):
+                fee["meta_data"] = metadata
+                report = self.probe()
+                self.assertEqual(report["stage"], "wallet_normalization")
+                self.assertEqual(report["reason"], reason)
+                self.assertFalse(report["trade_authorized"])
+
+    def test_cashflow_cannot_inherit_fill_uuid_as_ownership(self):
+        cash = self.broker.postings[-2]
+        cash["meta_data"] = {"fill_uuid": "c7b384f4-3d1c-4a19-b7fe-12c6b2b1040d"}
+        report = self.probe()
+        self.assertEqual(report["stage"], "wallet_normalization")
+        self.assertEqual(report["reason"], "unsupported_wallet_fill_uuid_kind")
+        self.assertFalse(report["trade_authorized"])
+
     def test_delayed_cashflow_and_commission_get_amount_clues_not_credit(self):
         cash = self.broker.postings[-2]
         cash["created_at"] = BASE + 101_000_000
