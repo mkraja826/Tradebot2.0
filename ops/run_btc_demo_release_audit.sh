@@ -129,8 +129,69 @@ except Exception:
 run_check 'Actual BTC/Gold monthly archive gaps and suspicious UTC bar inventory' \
   "$PY" -m tradebot.candle_anomaly_inventory --data-dir "$DATA"
 
-run_check 'Existing operator off-host webhook configuration and local monitor health (no network)' \
+# The generic offhost webhook is optional if the operator uses the existing
+# free Telegram incident relay plus Healthchecks.io missing-ping monitor.
+# Its unconfigured state is NOT itself a release blocker for that architecture.
+run_optional_check() {
+  local name="$1" rc=0
+  shift
+  printf '\n=== %s (optional alternative) ===\n' "$name"
+  "$@" || rc=$?
+  if [[ "$rc" -eq 0 ]]; then
+    printf 'CHECK_STATUS: OPTIONAL_LOCAL_CONFIG_READY_NOT_COMMISSIONED\n'
+  else
+    printf 'CHECK_STATUS: OPTIONAL_NOT_CONFIGURED (exit %s; not a release gate)\n' "$rc"
+  fi
+}
+
+# The separate free channels must actually be configured and running, not just
+# appear in source. This is a *local* check: no Telegram/Healthchecks requests,
+# no health ping, no delivery-cursor mutation and no implied remote ack.
+run_free_channel_check() {
+  local name="$1" config="$2" module="$3" unit="$4" rc=0
+  printf '\n=== %s (local-only; NOT external delivery proof) ===\n' "$name"
+  if [[ ! -f "$config" || -L "$config" ||
+        "$(stat -c %a "$config" 2>/dev/null)" != 600 ||
+        "$(stat -c %u "$config" 2>/dev/null)" != "$(id -u)" ]]; then
+    printf 'CHECK_STATUS: BLOCKED (private_alert_configuration_unavailable)\n'
+    BLOCKED=1
+    return
+  fi
+  (
+    set +x
+    set -a
+    # Config is operator-owned 0600, same format used by the deployed services.
+    # shellcheck disable=SC1090
+    source "$config"
+    set +a
+    unset DELTA_DEMO_API_KEY DELTA_DEMO_API_SECRET TB_API_KEY
+    export ENABLE_DEMO_ORDERS=false
+    export TRADEBOT_FIRE_DEMO_EXECUTION=false
+    export TRADEBOT_GOLD_FIRE_DEMO_EXECUTION=false
+    if ! systemctl is-active --quiet "$unit"; then
+      printf 'BLOCKED: local_alert_unit_inactive\n'
+      exit 2
+    fi
+    "$PY" -m "$module" --data-dir "$DATA" --check
+  ) || rc=$?
+  if [[ "$rc" -eq 0 ]]; then
+    printf 'CHECK_STATUS: LOCAL_READY_REMOTE_DELIVERY_UNVERIFIED\n'
+  else
+    printf 'CHECK_STATUS: BLOCKED (local channel check exit %s)\n' "$rc"
+    BLOCKED=1
+  fi
+}
+
+run_optional_check 'Generic HTTPS incident/dead-man webhook configuration' \
   "$PY" -m tradebot.offhost_alerts --data-dir "$DATA" --check
+
+run_free_channel_check 'Free Telegram incident relay' \
+  "$HOME/.config/tradebot2/telegram.env" \
+  tradebot.telegram_alerts tradebot2-telegram-alerts.service
+
+run_free_channel_check 'Free Healthchecks.io external outage timer' \
+  "$HOME/.config/tradebot2/healthchecks.env" \
+  tradebot.healthchecks_ping tradebot2-healthchecks-ping.timer
 
 run_check 'Existing financial journal permissions (read only)' \
   "$PY" -c '
@@ -167,7 +228,7 @@ run_check 'BTC historical extreme vs public mark/1m/spot context — manual revi
 printf '\n=== FINAL ===\n'
 if [[ "$BLOCKED" -eq 0 ]]; then
   printf 'CHECK_STATUS: DIAGNOSTICS_CONSISTENT\n'
-  printf 'Still required: independently verified market-data quality, durable financial reports, protection/rollback review and explicit supervised DEMO release approval.\n'
+  printf 'Still required: real external Telegram incident delivery and Healthchecks missed-ping alarm acknowledgements, independently verified market-data quality, durable financial reports, protection/rollback review and explicit supervised DEMO release approval.\n'
 else
   printf 'CHECK_STATUS: RELEASE_BLOCKED — investigate each check above.\n'
 fi
