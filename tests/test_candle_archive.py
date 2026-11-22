@@ -76,6 +76,70 @@ class CandleArchiveTests(unittest.TestCase):
                 "SELECT l FROM candles WHERE symbol=? AND t=?",
                 ("BTCUSD",bad_at)).fetchone()[0],0.1)
 
+    def test_closed_refetch_revision_quarantines_original_instead_of_replacing(self):
+        self.archive.sync_page(self.exchange, "BTCUSD", self.end)
+        disputed = self.end - 5 * STEP
+        base_read = self.exchange._request.side_effect
+
+        def revised(method, path, params=None):
+            result = base_read(method, path, params)
+            if path == "/v2/history/candles":
+                for candle in result["result"]:
+                    if candle["time"] == disputed:
+                        candle["high"] = 4.5  # valid, non-extreme revision
+            return result
+
+        self.exchange._request.side_effect = revised
+        self.archive.sync_page(self.exchange, "BTCUSD", self.end + STEP)
+        with self.archive.connect() as db:
+            old = db.execute(
+                "SELECT h,reason FROM candle_quarantine WHERE symbol=? AND t=?",
+                ("BTCUSD", disputed)).fetchone()
+            current = db.execute(
+                "SELECT h FROM candles WHERE symbol=? AND t=?",
+                ("BTCUSD", disputed)).fetchone()
+        self.assertEqual(old, (4, "conflicting_historical_refetch"))
+        self.assertIsNone(current)
+        self.assertEqual(
+            self.archive.levels("BTCUSD", self.end + STEP, 3)
+            ["periods"]["previous_day"]["quality_status"], "quarantined")
+
+    def test_identical_closed_refetch_remains_usable(self):
+        self.archive.sync_page(self.exchange, "BTCUSD", self.end)
+        self.archive.sync_page(self.exchange, "BTCUSD", self.end + STEP)
+        with self.archive.connect() as db:
+            count = db.execute(
+                "SELECT count(*) FROM candle_quarantine WHERE symbol='BTCUSD'"
+            ).fetchone()[0]
+            value = db.execute(
+                "SELECT h FROM candles WHERE symbol=? AND t=?",
+                ("BTCUSD", self.end - 5 * STEP)).fetchone()
+        self.assertEqual(count, 0)
+        self.assertEqual(value, (4,))
+
+    def test_conflicting_duplicate_candle_quarantined_before_history_admission(self):
+        original_read = self.exchange._request.side_effect
+        disputed = self.end - 5 * STEP
+
+        def duplicated(method, path, params=None):
+            result = original_read(method, path, params)
+            if path == "/v2/history/candles":
+                row = next(row for row in result["result"] if row["time"] == disputed)
+                result["result"].append({**row, "high": 4.5})
+            return result
+
+        self.exchange._request.side_effect = duplicated
+        self.archive.sync_page(self.exchange, "BTCUSD", self.end)
+        with self.archive.connect() as db:
+            reason = db.execute(
+                "SELECT reason FROM candle_quarantine WHERE symbol=? AND t=?",
+                ("BTCUSD", disputed)).fetchone()
+            active = db.execute(
+                "SELECT 1 FROM candles WHERE symbol=? AND t=?",
+                ("BTCUSD", disputed)).fetchone()
+        self.assertEqual(reason, ("conflicting_duplicate",))
+        self.assertIsNone(active)
+
     def test_normal_neighbor_ranges_not_flagged(self):
         rows = [("BTCUSD",i*300,3,4,2,3,1) for i in range(5)]
         self.assertEqual(suspect_candle_times(rows),{})

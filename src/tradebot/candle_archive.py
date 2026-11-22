@@ -73,17 +73,51 @@ class CandleArchive:
                     not 0 < l <= min(o,c) <= max(o,c) <= h):
                 raise ValueError("Malformed historical candle")
             records.append((symbol,t,o,h,l,c,v))
-        # Quarantine suspicious originals: a refetch cannot release them.
+        # A broker history refetch may revise a previously closed candle.
+        # Never silently overwrite its stored economics or treat a conflicting
+        # duplicate in one response as a trusted replacement. Preserve the
+        # FIRST stored original in quarantine and require human investigation.
         flagged = suspect_candle_times(records)
+        incoming = {row[1]: row for row in records}
         with closing(self.connect()) as db, db:
+            old_rows = db.execute(
+                "SELECT symbol,t,o,h,l,c,v FROM candles "
+                "WHERE symbol=? AND t>=? AND t<?", (symbol,start,stop)
+            ).fetchall()
+            original = {row[1]: row for row in old_rows}
+            for stamp, row in incoming.items():
+                if stamp in original and row != original[stamp]:
+                    flagged[stamp] = "conflicting_historical_refetch"
+            # A page-edge bar may only have one in-page neighbor. Include
+            # previously archived adjacent bars as context, but only ever
+            # quarantine incoming times (not unrelated historical context).
+            boundary = db.execute(
+                "SELECT symbol,t,o,h,l,c,v FROM candles WHERE symbol=? AND "
+                "((t>=? AND t<?) OR (t>=? AND t<?))",
+                (symbol,start-3*STEP,start,stop,stop+3*STEP)
+            ).fetchall()
+            corroborated = suspect_candle_times(records + boundary)
+            for stamp, reason in corroborated.items():
+                if stamp in incoming and stamp not in flagged:
+                    flagged[stamp] = reason
+            # Conflicting GET observations cannot be collapsed into the
+            # latest candle. The first observed row remains the audit source.
+            to_quarantine = [
+                (*(original.get(row[1]) if row[1] in original
+                   and flagged.get(row[1]) == "conflicting_historical_refetch"
+                   else row), flagged[row[1]])
+                for row in records if row[1] in flagged
+            ]
             db.executemany(
                 "INSERT OR IGNORE INTO candle_quarantine VALUES (?,?,?,?,?,?,?,?)",
-                [(*row, flagged[row[1]]) for row in records if row[1] in flagged])
+                to_quarantine)
             db.executemany(
                 "DELETE FROM candles WHERE symbol=? AND t=?",
-                [(row[0], row[1]) for row in records if row[1] in flagged])
+                [(symbol,stamp) for stamp in flagged])
+            # Immutable existing closed candles: identical refetches are
+            # harmless; disputed prices are quarantined instead of replaced.
             db.executemany(
-                "INSERT OR REPLACE INTO candles SELECT ?,?,?,?,?,?,? "
+                "INSERT OR IGNORE INTO candles SELECT ?,?,?,?,?,?,? "
                 "WHERE NOT EXISTS (SELECT 1 FROM candle_quarantine WHERE symbol=? AND t=?)",
                 [(*row, row[0], row[1]) for row in records if row[1] not in flagged])
             db.execute("""INSERT INTO coverage VALUES (?,?,?,?) ON CONFLICT(symbol) DO UPDATE SET
