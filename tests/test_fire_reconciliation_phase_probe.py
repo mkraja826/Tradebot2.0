@@ -68,6 +68,49 @@ class M09PhaseProbeTests(unittest.TestCase):
         return probe_single_recent_btc(
             self.broker, self.root, now=now or self.target_now, fire_id=fire_id)
 
+    def test_one_pass_linkage_reports_commission_uuid_and_unowned_cashflow(self):
+        owned_uuid = "c7b384f4-3d1c-4a19-b7fe-12c6b2b1040d"
+        self.broker.fills[3]["id"] = owned_uuid
+        fee = self.broker.postings[3]
+        fee["created_at"] = BASE + 92_000_000
+        fee["meta_data"] = {"fill_uuid": owned_uuid}
+        cash = self.broker.postings[-2]
+        cash["created_at"] = BASE + 93_000_000
+        cash["meta_data"] = {"position_id": "PRIVATE_POSITION",
+                             "private_account_note": "PRIVATE_BROKER_SECRET"}
+        report = self.probe()
+        self.assertEqual(report["reason"], "unattributed_wallet_posting")
+        info = report["wallet_reference_linkage_diagnostic"]
+        self.assertEqual(info["commission_fill_uuid_matched_signed_owned_fill"], 1)
+        self.assertEqual(info["commission_fill_uuid_not_matched_owned_fill"], 0)
+        self.assertEqual(
+            info["delayed_cashflow_without_proven_order_or_fill_reference"], 1)
+        self.assertEqual(
+            info["delayed_cashflow_candidate_reference_field_names"],
+            ["position_id"])
+        self.assertTrue(info["delayed_cashflow_has_other_metadata_fields"])
+        self.assertFalse(info["financial_attribution_verified"])
+        self.assertFalse(info["all_unmatched_wallet_transactions_resolved"])
+        self.assertFalse(info["raw_broker_values_exposed"])
+        self.assertNotIn("PRIVATE", json.dumps(report))
+        self.assertNotIn(owned_uuid, json.dumps(report))
+        self.assertFalse(report["is_net_realized_pnl"])
+        self.assertFalse(report["trade_authorized"])
+        self.assertEqual(list(self.root.iterdir()), [])
+
+    def test_unowned_commission_uuid_is_not_mistaken_for_selected_trade(self):
+        fee = self.broker.postings[3]
+        fee["created_at"] = BASE + 92_000_000
+        fee["meta_data"] = {
+            "fill_uuid": "4d777777-2222-4444-aaaa-555555555555"}
+        report = self.probe()
+        self.assertEqual(report["reason"], "unattributed_wallet_posting")
+        info = report["wallet_reference_linkage_diagnostic"]
+        self.assertEqual(info["commission_fill_uuid_matched_signed_owned_fill"], 0)
+        self.assertEqual(info["commission_fill_uuid_not_matched_owned_fill"], 1)
+        self.assertFalse(info["financial_attribution_verified"])
+        self.assertFalse(report["safe_to_enable_fire"])
+
     def test_completed_gets_are_only_provisional_not_trade_authority(self):
         report = self.probe()
         self.assertEqual(report["status"],
