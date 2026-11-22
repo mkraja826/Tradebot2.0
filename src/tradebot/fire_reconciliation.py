@@ -212,8 +212,11 @@ def analyse(symbol, trade, product, orders, fills, postings, start_us, end_us):
         cash -= delta * price * multiplier
         fees += number(f["commission"])
     require(balance == 0 and quantity > 0, "position_not_fully_closed")
+    # A missing broker funding total must ALWAYS prevent final net P&L.
+    # First validate the independent cashflow and fee ledger consistency,
+    # so those mismatches are not hidden behind a funding-only omission.
+    # Neither route can create a report or assume an absent total is zero.
     final_funding = selected[-1]["realized_funding"]
-    require(final_funding is not None, "missing_broker_funding_total")
     fill_by_id = {f["id"]: f for f in selected}
     other_orders = {f["order_id"] for f in fills if f["order_id"] not in owned}
     other_fills = {f["id"] for f in fills if f["order_id"] not in owned}
@@ -254,6 +257,9 @@ def analyse(symbol, trade, product, orders, fills, postings, start_us, end_us):
     require(any(p["type"] == "commission" for p in attributed), "missing_commission_posting")
     require(same(totals["cashflow"], cash), "wallet_cashflow_mismatch")
     require(same(totals["commission"], -fees), "wallet_commission_mismatch")
+    # Hard stop AFTER cashflow+fee validation; never default absent funding
+    # to 0 or allow a missing total to become a verified net outcome.
+    require(final_funding is not None, "missing_broker_funding_total")
     require(same(totals["funding"], number(final_funding)), "wallet_funding_mismatch")
     net = sum(totals.values(), ZERO)
     entry_value = sum((number(f["price"]) * number(f["size"]) for f in selected
