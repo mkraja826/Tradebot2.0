@@ -24,8 +24,14 @@ if [[ "$(git -C "$ROOT" rev-parse --show-toplevel 2>/dev/null)" != "$ROOT" ]] ||
   printf 'BLOCKED: reviewed_release_audit_source_not_deployed\n' >&2
   exit 2
 fi
-if [[ -n "$(git -C "$ROOT" status --porcelain --untracked-files=no 2>/dev/null)" ]]; then
-  printf 'BLOCKED: tracked_release_audit_source_is_modified\n' >&2
+# Check tracked AND untracked executable sources, and never swallow a
+# failed status command as an "empty/clean" result.
+if ! SOURCE_STATUS="$(git -C "$ROOT" status --porcelain --untracked-files=all -- src/tradebot ops 2>/dev/null)"; then
+  printf 'BLOCKED: source_integrity_cannot_be_checked\n' >&2
+  exit 2
+fi
+if [[ -n "$SOURCE_STATUS" ]]; then
+  printf 'BLOCKED: executable_release_audit_source_is_modified\n' >&2
   exit 2
 fi
 DATA="${2:-$ROOT/data}"
