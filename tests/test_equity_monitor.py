@@ -40,6 +40,57 @@ class MonitorTests(unittest.TestCase):
         self.assertEqual(events[0]["transition"], "resolved")
         self.assertEqual(new.publish([], at=self.now + timedelta(seconds=302)), [])
 
+    def test_durable_emergency_closeout_is_exact_once_and_does_not_leak_press(self):
+        press = "a" * 32
+        event = self.store.record_watchdog_emergency(press, at=self.now)
+        self.assertEqual(event["code"], "watchdog_emergency_flat_verified")
+        self.assertEqual(event["transition"], "opened")
+        self.assertEqual(event["severity"], "critical")
+        self.assertNotIn(press, json.dumps(event))
+        self.assertIsNone(
+            MonitorStore(self.path).record_watchdog_emergency(
+                press, at=self.now + timedelta(seconds=1)))
+        # Collector reconciles active alerts independently, without deleting
+        # the historical emergency closeout event from the outbox.
+        self.store.publish(["missed_weekly_checkpoint"], at=self.now)
+        self.store.publish([], at=self.now + timedelta(seconds=10))
+        with sqlite3.connect(self.path) as db:
+            incidents = db.execute(
+                "SELECT id,at_us,code,transition,severity FROM monitor_events "
+                "WHERE code='watchdog_emergency_flat_verified'").fetchall()
+            claimed = db.execute(
+                "SELECT event_id FROM watchdog_emergency_events WHERE press=?",
+                (press,)).fetchone()
+        self.assertEqual(len(incidents), 1)
+        self.assertEqual(incidents[0][0], claimed[0])
+        self.assertEqual(incidents[0][3:], ("opened", "critical"))
+
+    def test_concurrent_emergency_event_replays_are_deduplicated(self):
+        press = "b" * 32
+        def replay(_):
+            return MonitorStore(self.path).record_watchdog_emergency(
+                press, at=self.now)
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            results = list(pool.map(replay, range(12)))
+        self.assertEqual(sum(event is not None for event in results), 1)
+        with sqlite3.connect(self.path) as db:
+            self.assertEqual(db.execute(
+                "SELECT count(*) FROM watchdog_emergency_events"
+            ).fetchone()[0], 1)
+            self.assertEqual(db.execute(
+                "SELECT count(*) FROM monitor_events"
+            ).fetchone()[0], 1)
+
+    def test_invalid_emergency_press_never_creates_event(self):
+        for press in ("", "not-an-id", "SECRET_KEY_PRIVATE", "A" * 32, None):
+            with self.subTest(press=press):
+                with self.assertRaises(ValueError):
+                    self.store.record_watchdog_emergency(press)
+        with sqlite3.connect(self.path) as db:
+            self.assertEqual(db.execute(
+                "SELECT count(*) FROM monitor_events"
+            ).fetchone()[0], 0)
+
     def test_alert_concurrency_creates_one_outbox_event(self):
         def publish(_):
             return MonitorStore(self.path).publish(["missed_weekly_checkpoint"], at=self.now)
