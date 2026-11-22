@@ -4,7 +4,7 @@ Delta India stopped API-key access to GET /v2/profile on 2026-08-19.
 Correlate two currently documented authenticated read-only endpoints:
   GET /v2/users/trading_preferences -> current user_id
   GET /v2/sub_accounts -> exactly matching user.id and margin_mode.
-Never infer isolated margin from empty positions or a different account row.
+Never infer isolated margin from empty positions or a different account row.\nOnly signed GETs occur here, including when called after a broker fill by the\nseparately authorized execution controller. Read-only audit callers must still\nrequire allow_orders=False before using this helper.
 """
 from tradebot.delta import DEMO_API
 
@@ -24,8 +24,8 @@ def _user_id(value):
 def signed_account_margin_mode(exchange):
     """Fail closed unless two signed GETs identify exactly one current account."""
     if (getattr(exchange, "base_url", None) != DEMO_API
-            or getattr(exchange, "allow_orders", None) is not False):
-        raise MarginModeEvidenceError("read_only_delta_demo_client_required")
+            or type(getattr(exchange, "allow_orders", None)) is not bool):
+        raise MarginModeEvidenceError("delta_demo_client_required")
 
     # Never call GET /v2/profile: officially inaccessible to API keys.
     preferences = exchange._request(
