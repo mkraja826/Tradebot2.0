@@ -55,6 +55,7 @@ def _base_report():
         "financial_reconciliation_status": "awaiting_complete_broker_evidence",
         "is_net_realized_pnl": False,
         "funding_reconciled": False,
+        "cashflow_and_commission_consistency_proven_in_memory": False,
         "original_ledger_mutations": False,
         "temporary_ledger_mutations": False,
         "broker_order_mutations": False,
@@ -210,8 +211,14 @@ def probe_single_recent_btc(exchange, data_dir, *, now=None):
             result = analyse(
                 "BTCUSD", trade, product, orders, fills, postings, start_us, end_us)
     except Exception as exc:
-        return block("financial_analysis", _safe_reason(
-            exc, "financial_analysis_unverified"))
+        reason = _safe_reason(exc, "financial_analysis_unverified")
+        # The analyser emits this code only AFTER all broker cashflow and
+        # commission postings match the signed fills, and BEFORE net P&L.
+        # This is diagnostic-only, NOT a durable financial review.
+        if isinstance(exc, ReconciliationError) and reason == "missing_broker_funding_total":
+            out["cashflow_and_commission_consistency_proven_in_memory"] = True
+        return block("financial_analysis", reason)
+    out["cashflow_and_commission_consistency_proven_in_memory"] = True
     out["stages_passed"].append("financial_analysis")
 
     # A concurrent receipt rewrite/replacement cannot be treated as a clean
