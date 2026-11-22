@@ -12,6 +12,7 @@ import json
 import os
 from pathlib import Path
 import sqlite3
+from uuid import UUID
 
 from tradebot.delta import DEMO_API
 from tradebot.fire_market import SYMBOLS
@@ -114,6 +115,34 @@ def normalize_posting(raw):
         require(len(values) <= 1, "conflicting_posting_reference")
         refs[key] = next(iter(values), None)
     asset, kind = raw.get("asset_symbol"), raw.get("transaction_type")
+    # Delta India wallet commission metadata can name the *original broker
+    # fill UUID* as fill_uuid rather than fill_id. Only commission postings
+    # may use this exact documented identity alias, never cashflow/funding
+    # or an inferred amount/time match. The analyser still requires that
+    # this UUID matches a signed broker fill owned by the selected order.
+    aliases = [source["fill_uuid"] for source in (raw, meta)
+               if source.get("fill_uuid") is not None]
+    if aliases:
+        require(kind == "commission", "unsupported_wallet_fill_uuid_kind")
+        canonical = []
+        for value in aliases:
+            require(type(value) is str and len(value) in (32, 36),
+                    "invalid_wallet_fill_uuid")
+            try:
+                candidate = str(UUID(value))
+            except (ValueError, AttributeError):
+                raise ReconciliationError("invalid_wallet_fill_uuid") from None
+            canonical.append(candidate)
+        require(len(set(canonical)) == 1,
+                "conflicting_wallet_fill_uuid")
+        current = refs["fill_id"]
+        if current is not None:
+            try:
+                require(str(UUID(current)) == canonical[0],
+                        "conflicting_posting_reference")
+            except (ValueError, AttributeError):
+                raise ReconciliationError("conflicting_posting_reference") from None
+        refs["fill_id"] = canonical[0]
     require(isinstance(asset, str) and asset and isinstance(kind, str) and kind,
             "invalid_posting_currency_or_type")
     # Delta account-wide postings may have null/zero product IDs.
