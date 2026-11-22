@@ -1,6 +1,7 @@
 """No-network fail-closed review for short BTC supervised-session equity."""
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import patch
 import sqlite3
 import tempfile
 import unittest
@@ -87,6 +88,36 @@ class SupervisedSessionTests(unittest.TestCase):
                       "new_session_ledger_mutations", "signed_account_margin_verified",
                       "btc_historical_price_integrity_verified"):
             self.assertFalse(report[field])
+
+    def test_live_wallet_is_validated_against_post_get_clock(self):
+        # Prior code captured time before signed GET and then treated a
+        # genuinely newer broker receipt as a system_clock_jump.
+        broker = ReadOnlyDemo()
+        start = NOW - timedelta(seconds=3)
+        with patch(
+            "tradebot.btc_supervised_session._utc_now",
+            side_effect=[start, NOW],
+        ) as clock:
+            before = self.path.read_bytes()
+            report = inspect_btc_session_candidate(
+                broker, self.root, health_fn=lambda path, at: healthy())
+        self.assertEqual(clock.call_count, 2)
+        self.assertEqual(broker.calls, 1)
+        self.assertEqual(self.path.read_bytes(), before)
+        self.assertEqual(report["status"], "baseline_candidate_review_only")
+        self.assertTrue(report["fresh_session_wallet_baseline_verified"])
+        self.assertFalse(report["trade_authorized"])
+
+    def test_long_signed_wallet_probe_never_reuses_old_health(self):
+        with patch(
+            "tradebot.btc_supervised_session._utc_now",
+            side_effect=[NOW - timedelta(seconds=40), NOW],
+        ):
+            report = inspect_btc_session_candidate(
+                ReadOnlyDemo(), self.root,
+                health_fn=lambda path, at: healthy())
+        self.assertEqual(report["reason"], "wallet_probe_duration_or_clock_unverified")
+        self.assertFalse(report["trade_authorized"])
 
     def test_verified_weekly_anchor_also_supports_candidate(self):
         report, _ = self.candidate(health=healthy(weekly="verified"))
