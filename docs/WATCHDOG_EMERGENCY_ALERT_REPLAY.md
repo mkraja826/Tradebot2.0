@@ -12,6 +12,14 @@ incident, even though the protective orders had failed.
 ## Fix
 - Adds the allowlisted, fixed critical event code
   `watchdog_emergency_flat_verified` to the existing monitoring outbox.
+- If the watchdog persisted a bracket/protection failure and later finds
+  the account flat **after a crash before writing its final exit receipt**,
+  the resulting event uses `watchdog_protection_failure_flat_verified`.
+  This is a confirmed protection failure plus subsequently observed flatness,
+  **not proof** that the watchdog's reduce-only order actually caused the exit.
+  It is still a durable critical alert rather than a silently normal exit.
+- Both fixed event categories are tightly allowlisted. No broker economics,
+  individual order IDs or the original private FIRE press enter notifications.
 - The **verified broker-flat FIRE receipt** remains the primary evidence.
   Its existing durable `reason_code` must match
   `watchdog_emergency_flat_verified`; other voluntary or normal flat exits
