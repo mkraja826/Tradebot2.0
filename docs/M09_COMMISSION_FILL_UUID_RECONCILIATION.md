@@ -91,3 +91,27 @@ unattributed by this after-last-fill diagnostic. Signed fill ownership remains
 an exact equality requirement; no P&L can be claimed from counts or amount
 comparisons. The broker/accounting release remains blocked until the delayed
 cashflow and full fee/funding ownership are authoritatively established.
+
+## Original VM: post-UUID strict blocker is overlapping_external_postings
+
+The 22 Nov 2026 operator rerun showed `financial_analysis:
+overlapping_external_postings`, one unmatched delayed same-product
+commission UUID, and zero delayed cashflows in the *narrowed* supplementary
+counter. This does **not** establish cashflow ownership or zero
+broker-account adjustments. The original strict analyser refuses a posting
+inside the selected position's first-to-last-fill interval if it carries an
+explicit order/fill reference to another or unknown broker event.
+
+To avoid more independent manual diagnostics, the same already-authenticated,
+bounded, GET-only M09 probe now emits
+`overlapping_wallet_posting_diagnostic` **only when** the strict analyser
+blocks with `overlapping_external_postings`. It counts conflicting
+same-product in-position references, by transaction category, and whether a
+fill reference is to an independently signed *other* fill versus absent
+from the bounded signed fill window. It never prints reference IDs/UUIDs,
+account identifiers, financial amounts, emails, or raw wallet metadata.
+
+A verified foreign UUID or other-order reference remains a **hard financial
+release blocker**, not a license to omit the posting or match it by time or
+amount. Source changes must not create a `fire-reconciliation.sqlite` or
+grant a demo execution authorization.
