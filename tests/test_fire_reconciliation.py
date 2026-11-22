@@ -186,6 +186,27 @@ class ReconciliationTests(unittest.TestCase):
         del self.broker.fills[-1]["meta_data"]["new_position"]["realized_funding"]
         self.assert_unknown("missing_broker_funding_total")
 
+    def test_absent_funding_total_does_not_hide_cashflow_mismatch(self):
+        del self.broker.fills[-1]["meta_data"]["new_position"]["realized_funding"]
+        self.broker.postings[-2]["amount"] = "99"
+        report = self.assert_unknown("wallet_cashflow_mismatch")
+        self.assertFalse(report["is_net_realized_pnl"])
+        self.assertFalse(report["funding_reconciled"])
+
+    def test_absent_funding_total_does_not_hide_commission_mismatch(self):
+        del self.broker.fills[-1]["meta_data"]["new_position"]["realized_funding"]
+        self.broker.postings[0]["amount"] = "99"
+        report = self.assert_unknown("wallet_commission_mismatch")
+        self.assertFalse(report["is_net_realized_pnl"])
+        self.assertFalse(report["funding_reconciled"])
+
+    def test_absent_funding_total_still_rejects_unknown_wallet_adjustments(self):
+        del self.broker.fills[-1]["meta_data"]["new_position"]["realized_funding"]
+        self.broker.postings.append(
+            self.broker.posting("tax", "tax", "-0.1", 80, order_id=101))
+        report = self.assert_unknown("unsupported_trade_adjustment")
+        self.assertFalse(report["is_net_realized_pnl"])
+
     def test_zero_funding_requires_broker_total_and_complete_wallet(self):
         self.broker.fills[-1]["meta_data"]["new_position"]["realized_funding"] = "0"
         self.broker.postings.pop()
