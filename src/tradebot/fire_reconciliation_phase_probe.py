@@ -20,7 +20,7 @@ from tradebot.fire_bracket_evidence import _saved, BracketEvidenceError
 from tradebot.fire_inventory import read_inventory, _read_rows, InventoryEvidenceError
 from tradebot.fire_reconciliation import (
     ReconciliationError, analyse, identifier, normalize_fill,
-    normalize_posting, timestamp_us, unique, EXTERNAL,
+    normalize_posting, timestamp_us, unique, EXTERNAL, number,
 )
 
 MAX_AGE = timedelta(days=7)
@@ -40,11 +40,12 @@ def _safe_reason(exc, default):
 
 
 def _unattributed_wallet_hints(postings, fills, order_ids, product_id):
-    """Classify ambiguous economic postings without returning broker identities.
+    """Explain ambiguous postings by redacted numerical crosschecks, NOT attribution.
 
-    Mirrors only analyse()'s unattributed-posting predicate. This is a
-    read-only clue, NOT attribution proof or permission to ignore postings.
-    Values, timestamps, posting/order/fill IDs and account data stay private.
+    This classifier mirrors analyse()'s unattributed posting predicate.
+    An amount matching a real fill is NOT evidence of transaction ownership;
+    unrelated trades can have identical fees or cashflow. The analyser still
+    fails closed and no broker, local receipt or financial ledger is mutated.
     """
     owned = set(order_ids)
     selected = [f for f in fills if f["order_id"] in owned]
@@ -52,9 +53,24 @@ def _unattributed_wallet_hints(postings, fills, order_ids, product_id):
         return None
     first, last = selected[0]["at_us"], selected[-1]["at_us"]
     owned_fills = {f["id"] for f in selected}
-    other_orders = {f["order_id"] for f in fills if f["order_id"] not in owned}
-    other_fills = {f["id"] for f in fills if f["order_id"] not in owned}
-    categories = []
+    other = [f for f in fills if f["order_id"] not in owned]
+    other_orders = {f["order_id"] for f in other}
+    other_fills = {f["id"] for f in other}
+
+    # Derive expected economics only from the same already-normalized fills
+    # passed to the strict broker analyser. Never return any money amounts.
+    expected_cashflow = sum(
+        (-number(f["size"]) if f["side"] == "buy" else number(f["size"]))
+        * number(f["price"]) * number(f["contract_value"])
+        for f in selected
+    )
+    expected_fee = -sum((number(f["commission"]) for f in selected), number(0))
+    selected_fee_amounts = {-number(f["commission"]) for f in selected}
+    other_fee_amounts = {-number(f["commission"]) for f in other}
+    final_funding = selected[-1]["realized_funding"]
+    expected_funding = number(final_funding) if final_funding is not None else None
+
+    categories, comparisons = [], []
     for p in postings:
         if p["type"] in EXTERNAL:
             continue
@@ -76,10 +92,34 @@ def _unattributed_wallet_hints(postings, fills, order_ids, product_id):
             "posting_kind": p["type"] if p["type"] in
                             ("cashflow", "commission", "funding") else "other",
         })
+        if len(comparisons) < 5:
+            amount = number(p["amount"])
+            kind = p["type"]
+            comparisons.append({
+                "matches_selected_total_cashflow_exact":
+                    amount == expected_cashflow if kind == "cashflow" else None,
+                "matches_selected_total_commission_exact":
+                    amount == expected_fee if kind == "commission" else None,
+                "matches_selected_single_fill_commission_exact":
+                    amount in selected_fee_amounts if kind == "commission" else None,
+                "matches_other_same_product_fill_commission_exact":
+                    amount in other_fee_amounts if kind == "commission" else None,
+                "matches_selected_final_funding_exact":
+                    (amount == expected_funding if expected_funding is not None
+                     else None) if kind == "funding" else None,
+            })
     if not categories:
         return None
-    return {"count": len(categories), "examples": categories[:5],
-            "examples_truncated": len(categories) > 5}
+    return {
+        "count": len(categories),
+        "examples": categories[:5],
+        "examples_truncated": len(categories) > 5,
+        "amount_consistency_clues": comparisons,
+        "unowned_same_product_fills_after_last_fill": sum(
+            f["at_us"] > last for f in other),
+        "other_product_fill_history_checked": False,
+        "amount_matches_prove_broker_attribution": False,
+    }
 
 
 def _base_report():
