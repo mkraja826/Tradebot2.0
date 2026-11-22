@@ -1,7 +1,7 @@
 """Read-only FIRE equity checkpoint health, without AI or broker mutations.
 
 A checkpoint is valid ONLY when an immutable, signed-wallet observation
-occurred in the first five minutes after the UTC daily/weekly open. Missing
+occurred strictly before 00:05:00 UTC, in the half-open first five-minute window. Missing
 historical checkpoints must never be fabricated or backfilled from current
 balances. This is a diagnostic, not an authorization to trade.
 """
@@ -120,7 +120,7 @@ def checkpoint_health(path, *, at=None, stale_after_seconds=180):
                 end = start + ANCHOR_WINDOW*1_000_000
                 observation = db.execute(
                     "SELECT observed_us,equity_usd,origin FROM equity_evidence "
-                    "WHERE observed_us>=? AND observed_us<=? AND observed_us<=? "
+                    "WHERE observed_us>=? AND observed_us<? AND observed_us<=? "
                     "ORDER BY observed_us LIMIT 1",
                     (start, end, now_us),
                 ).fetchone()
@@ -130,7 +130,7 @@ def checkpoint_health(path, *, at=None, stale_after_seconds=180):
                         raise ValueError("Unverified observation origin")
                     return ("verified" if receipt_status(observation[0], observation[1]) == "verified"
                             else "unverified_receipt")
-                return "pending_window" if now_us <= end else "missed_window"
+                return "pending_window" if now_us < end else "missed_window"
 
             report["daily_checkpoint"] = state(today)
             report["weekly_checkpoint"] = state(week)

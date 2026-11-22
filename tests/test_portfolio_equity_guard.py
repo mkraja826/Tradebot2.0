@@ -29,6 +29,32 @@ class PortfolioEquityGuardTests(unittest.TestCase):
         self.assertFalse(result["approved"])
         self.assertEqual(result["reason"],"missing_opening_equity_checkpoint")
 
+    def test_admission_rejects_exact_utc_five_minute_open_boundary(self):
+        # Monday's first five minutes are [00:00,00:05), not inclusive of 00:05.
+        at = dt(23, 0, 5)
+        before = self.guard.latest_observed_us()
+        with self.assertRaisesRegex(
+                EquityRiskError, "missing_opening_equity_checkpoint"):
+            self.guard.require_verified_read(
+                "1000", receipt_for("1000", at), now=at)
+        self.assertEqual(self.guard.latest_observed_us(), before)
+        # Existing loss budget is never reset or a new baseline fabricated.
+        observation = self.guard.observe_verified_read(
+            "1000", receipt_for("1000", at), now=at)
+        self.assertFalse(observation["approved"])
+        self.assertEqual(observation["reason"],
+                         "missing_opening_equity_checkpoint")
+        self.assertIsNone(observation["daily_open_equity_usd"])
+        self.assertIsNone(observation["weekly_open_equity_usd"])
+
+    def test_admission_accepts_genuine_last_in_window_microsecond(self):
+        at = datetime(2026,11,23,0,4,59,999999,tzinfo=timezone.utc)
+        report = self.guard.require_verified_read(
+            "1000", receipt_for("1000", at), now=at)
+        self.assertTrue(report["approved"])
+        self.assertEqual(report["daily_open_equity_usd"], "1000")
+        self.assertEqual(report["weekly_open_equity_usd"], "1000")
+
     def test_verified_openings_and_restart_allow_provisional_admission(self):
         self.seed()
         new = PortfolioEquityGuard(self.path)
