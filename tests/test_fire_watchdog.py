@@ -285,6 +285,37 @@ class WatchdogTests(unittest.TestCase):
                 "SELECT count(*) FROM monitor_events"
             ).fetchone()[0], 1)
 
+    def test_crash_between_broker_flatness_and_final_receipt_never_erases_failure(self):
+        press = self.seed()
+        # Original watchdog already persisted the bracket defect and started
+        # its reduce-only closeout. Exchange is flat after an unobserved crash.
+        self.store.update(
+            press, "exposure_unknown", protection_verified=False,
+            reason_code="bracket_missing_or_position_changed")
+        self.broker.size = 0
+        self.broker.orders = []
+        result = watchdog_tick(self.broker, self.store)
+        self.assertEqual(result["status"], "flat_verified")
+        self.assertEqual(self.broker.closeouts, 0)
+        self.assertEqual(self.store.latest()["reason_code"],
+                         "watchdog_protection_failure_flat_verified")
+        from tradebot.fire_watchdog import _durable_emergency_receipts
+        self.assertEqual(
+            _durable_emergency_receipts(self.store),
+            [(press, "watchdog_protection_failure_flat_verified")])
+        self.assertFalse(self.store.latest()["protection_verified"])
+
+    def test_ordinary_flatness_after_protection_does_not_raise_incident(self):
+        press = self.seed()
+        self.broker.size = 0
+        self.broker.orders = []
+        self.assertEqual(watchdog_tick(self.broker, self.store)["status"],
+                         "flat_verified")
+        self.assertEqual(self.store.latest()["reason_code"],
+                         "verified_no_position_or_orders")
+        from tradebot.fire_watchdog import _durable_emergency_receipts
+        self.assertEqual(_durable_emergency_receipts(self.store), [])
+
     def test_older_emergency_is_discovered_after_newer_receipt(self):
         previous = self.seed()
         self.store.update(
@@ -293,7 +324,8 @@ class WatchdogTests(unittest.TestCase):
         fresh_press = self.store.reserve()
         self.assertNotEqual(previous, fresh_press)
         from tradebot.fire_watchdog import _durable_emergency_receipts
-        self.assertEqual(_durable_emergency_receipts(self.store), [previous])
+        self.assertEqual(_durable_emergency_receipts(self.store),
+                         [(previous, "watchdog_emergency_flat_verified")])
 
     def test_non_emergency_flat_receipt_is_not_escalated_to_incident(self):
         press = self.seed()
