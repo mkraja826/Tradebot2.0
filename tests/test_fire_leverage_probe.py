@@ -44,8 +44,10 @@ class FakeMarket:
             if self.leverage_has_product_identity:
                 result["product_id"] = self.product_id
             return {"result": result}
-        if path == "/v2/profile":
-            return {"result": {"margin_mode": self.margin_mode}}
+        if path == "/v2/users/trading_preferences":
+            return {"result": {"user_id": 501}}
+        if path == "/v2/sub_accounts":
+            return {"result": [{"id": 501, "margin_mode": self.margin_mode}]}
         if path == "/v2/positions/margined":
             if params is None:
                 rows = [
