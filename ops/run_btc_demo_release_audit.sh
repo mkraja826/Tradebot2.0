@@ -39,11 +39,19 @@ if [[ -n "$SOURCE_STATUS" ]]; then
   printf 'BLOCKED: executable_release_audit_source_is_modified\n' >&2
   exit 2
 fi
-PY="$ROOT/.venv/bin/python"
-if [[ ! -x "$PY" ]]; then
-  printf 'BLOCKED: virtualenv_python_unavailable\n' >&2
+# An approved staged worktree intentionally has no virtualenv of its own.
+# Only an explicitly selected interpreter may run reviewed staged source;
+# it is NOT a source deployment and never changes the running service.
+PY="${TRADEBOT_AUDIT_PYTHON:-$ROOT/.venv/bin/python}"
+if [[ ! -x "$PY" || ! -f "$ROOT/src/tradebot/fire_reconciliation_phase_probe.py" ]]; then
+  printf 'BLOCKED: reviewed_source_or_explicit_interpreter_unavailable\n' >&2
   exit 2
 fi
+if [[ -n "${TRADEBOT_AUDIT_PYTHON:-}" && "$PY" != /* ]]; then
+  printf 'BLOCKED: invalid_external_python_path\\n' >&2
+  exit 2
+fi
+
 if [[ -z "${DELTA_DEMO_API_KEY:-}" || -z "${DELTA_DEMO_API_SECRET:-}" ]]; then
   printf 'BLOCKED: demo_credentials_not_loaded_in_environment\n' >&2
   exit 2
@@ -74,6 +82,9 @@ printf 'FIRE and Gold remain disabled; never use this report to unlock trading.\
 
 run_check 'Signed DELTA DEMO identity GET from existing approved VM network' \
   "$PY" -m tradebot.delta_auth_diagnostic
+
+run_check 'Independent signed full-account exposure even when margin remains unverified' \
+  "$PY" -m tradebot.fire_exposure_only_probe
 
 run_check 'Broker leverage and isolated-margin compatibility' \
   "$PY" -m tradebot.fire_leverage_probe
@@ -117,6 +128,31 @@ except Exception:
 
 run_check 'Actual BTC/Gold monthly archive gaps and suspicious UTC bar inventory' \
   "$PY" -m tradebot.candle_anomaly_inventory --data-dir "$DATA"
+
+run_check 'Existing operator off-host webhook configuration and local monitor health (no network)' \
+  "$PY" -m tradebot.offhost_alerts --data-dir "$DATA" --check
+
+run_check 'Existing financial journal permissions (read only)' \
+  "$PY" -c '
+import json, os, stat, sys
+from pathlib import Path
+root = Path(sys.argv[1])
+p = root / "trades.jsonl"
+try:
+    d = root.lstat()
+    s = p.lstat()
+    good = (stat.S_ISDIR(d.st_mode) and not (d.st_mode & 0o077)
+            and stat.S_ISREG(s.st_mode) and s.st_nlink == 1
+            and not (s.st_mode & 0o077))
+    print(json.dumps({"status": "private" if good else "unsafe_permissions",
+                      "journal_present": True, "file_mode": oct(s.st_mode & 0o777),
+                      "trade_authorized": False, "file_mutations": False}))
+    sys.exit(0 if good else 2)
+except Exception:
+    print(json.dumps({"status": "journal_source_unavailable",
+                      "trade_authorized": False, "file_mutations": False}))
+    sys.exit(2)
+' "$DATA"
 
 run_check 'Single-trade broker fill/wallet evidence (analysis only)' \
   "$PY" -m tradebot.fire_reconciliation_phase_probe --data-dir "$DATA" --fire-id "$FIRE_ID"
