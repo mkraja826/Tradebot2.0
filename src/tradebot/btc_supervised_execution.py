@@ -11,6 +11,7 @@ from tradebot.btc_supervised_recent24h import load_recent24h_strategy_context
 from tradebot.btc_market_screen import screen_btc_market
 from tradebot.btc_public_reference import (read_coinbase_spot, corroborate_delta_quote)
 from tradebot.fire_execution import FireDemoController, FireTradeError
+from tradebot.fire_account_guard import require_flat_demo_account_operator_declared
 
 STRATEGY_VERSION = "btc-demo-recent24h-v1"
 
@@ -25,6 +26,11 @@ class SupervisedBTCController(FireDemoController):
         )
         self._restricted_levels = None
         self._restricted_at = None
+
+    def _require_account_flat(self, exchange, product_id):
+        """BTC DEMO-only owner-mode attestation plus signed live exposure."""
+        return require_flat_demo_account_operator_declared(
+            exchange, selected_symbol=self.symbol, selected_product_id=product_id)
 
     def _decision_context(self, exchange, collected, midpoint):
         # Fail before any model call when recent source is unavailable.

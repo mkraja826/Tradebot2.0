@@ -48,6 +48,31 @@ def require_flat_demo_account(exchange, *, selected_symbol=None, selected_produc
     )
 
 
+def require_flat_demo_account_operator_declared(
+        exchange, *, selected_symbol=None, selected_product_id=None):
+    """One-attempt BTC DEMO: accept fresh private owner mode declaration.
+
+    This does NOT assert broker margin proof. The full authenticated
+    position/order checks still run at every pre-entry check. Normal FIRE
+    retains its independent signed-margin requirement.
+    """
+    from tradebot.operator_account_mode import read_manual_mode
+    if (getattr(exchange, "base_url", None) != DEMO_API
+            or type(getattr(exchange, "allow_orders", None)) is not bool
+            or selected_symbol != "BTCUSD"):
+        raise AccountExposureRejected("BTC demo client required")
+    owner = read_manual_mode(exchange, allow_order_client=True)
+    if (owner.get("status") != "owner_declared_not_broker_verified"
+            or owner.get("declared_mode") != "isolated"
+            or owner.get("broker_margin_verified") is not False
+            or owner.get("trade_authorized") is not False):
+        raise AccountExposureRejected("Owner declared main isolated mode unavailable")
+    return _require_flat_demo_exposure(
+        exchange, selected_symbol=selected_symbol,
+        selected_product_id=selected_product_id,
+    )
+
+
 def require_flat_demo_account_for_configuration(
         exchange, *, selected_symbol=None, selected_product_id=None):
     """Authenticated full-account exposure evidence for *account-setting only*.

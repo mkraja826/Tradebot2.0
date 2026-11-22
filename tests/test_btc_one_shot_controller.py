@@ -231,7 +231,9 @@ class CommissionSafetyTests(unittest.TestCase):
             "status":"operator_review_candidate_only", "blockers":[],
             "supervised_session_verified":True,
             "recent_btc_history_local_quality_verified":True,
-            "signed_isolated_margin_verified":True,
+            "signed_isolated_margin_verified":False,
+            "owner_declared_main_isolated_accepted":True,
+            "margin_evidence_source":"owner_declaration_not_broker",
             "account_wide_flatness_verified":True,
             "watchdog_and_collector_active":True,
             "both_dashboard_fire_endpoints_disabled":True,
@@ -246,11 +248,11 @@ class CommissionSafetyTests(unittest.TestCase):
         self.assertFalse((self.root/ATTEMPT_FILE).exists())
         self.assertFalse(q["order_submitted"])
 
-    def test_failed_margin_cannot_create_attempt_or_invoke_controller(self):
+    def test_missing_owner_mode_cannot_create_attempt_or_invoke_controller(self):
         q=self.allowed()
-        q["signed_isolated_margin_verified"]=False
+        q["owner_declared_main_isolated_accepted"]=False
         q["status"]="blocked"
-        q["blockers"]=["signed_current_demo_isolated_margin_unverified"]
+        q["blockers"]=["owner_main_isolated_declaration_missing_or_expired"]
         with self.assertRaises(ValueError):
             run_operator_btc_commission(
                 self.root,execute=True,approval=APPROVAL_PHRASE,
@@ -302,10 +304,10 @@ class CommissionSafetyTests(unittest.TestCase):
                 "complete_contiguous_24h":True,
                 "retained_bars":288,"quarantined_bars":0,
                 "suspect_bars":0,"trade_authorized":False},
-            margin_fn=lambda *a: (_ for _ in ()).throw(ValueError("missing")),
-            flat_fn=lambda *a:self.fail("cannot call without signed margin"))
+            manual_mode_fn=lambda *a: (_ for _ in ()).throw(ValueError("missing")),
+            flat_fn=lambda *a:self.fail("cannot call without owner declaration"))
         self.assertEqual(report["blockers"],
-                         ["signed_current_demo_isolated_margin_unverified"])
+                         ["owner_main_isolated_declaration_missing_or_expired"])
         self.assertFalse(report["trade_authorized"])
 
 

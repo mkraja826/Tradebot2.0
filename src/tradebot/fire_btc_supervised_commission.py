@@ -15,9 +15,9 @@ from tradebot.btc_supervised_execution import SupervisedBTCController
 from tradebot.btc_supervised_recent24h import inspect_recent_btc_window
 from tradebot.btc_supervised_session import inspect_btc_session_candidate
 from tradebot.delta import DEMO_API, DeltaDemo
-from tradebot.fire_account_guard import require_flat_demo_account
+from tradebot.fire_account_guard import require_flat_demo_account_for_configuration
 from tradebot.fire_commission_preflight import _services_active, _fire_disabled
-from tradebot.signed_margin_mode import signed_account_margin_mode
+from tradebot.operator_account_mode import read_manual_mode
 
 APPROVAL_PHRASE = "EXECUTE ONE BTC DEMO FIRE"
 ATTEMPT_FILE = "btc-demo-supervised-attempt.lock"
@@ -28,8 +28,8 @@ def readonly_btc_commission_preflight(
         dashboard_disabled=_fire_disabled,
         session_fn=inspect_btc_session_candidate,
         recent_fn=inspect_recent_btc_window,
-        margin_fn=signed_account_margin_mode,
-        flat_fn=require_flat_demo_account):
+        manual_mode_fn=read_manual_mode,
+        flat_fn=require_flat_demo_account_for_configuration):
     report = {
         "mode": "supervised_btc_demo_read_only_preflight",
         "status": "blocked", "blockers": [],
@@ -37,6 +37,8 @@ def readonly_btc_commission_preflight(
         "recent_btc_history_local_quality_verified": False,
         "independent_btc_trade_price_verification": False,
         "signed_isolated_margin_verified": False,
+        "owner_declared_main_isolated_accepted": False,
+        "margin_evidence_source": "owner_declaration_not_broker",
         "account_wide_flatness_verified": False,
         "watchdog_and_collector_active": False,
         "both_dashboard_fire_endpoints_disabled": False,
@@ -72,13 +74,21 @@ def readonly_btc_commission_preflight(
         pass
     if not report["recent_btc_history_local_quality_verified"]:
         blocks.append("restricted_btc_recent24h_history_unverified")
+    # Demo operator policy: the private 0600 declaration replaces ONLY the
+    # API's unavailable margin-mode field. Do not label it broker verified.
     try:
-        report["signed_isolated_margin_verified"] = (
-            margin_fn(exchange) == "isolated")
+        mode = manual_mode_fn(exchange)
+        report["owner_declared_main_isolated_accepted"] = (
+            isinstance(mode, dict)
+            and mode.get("status") == "owner_declared_not_broker_verified"
+            and mode.get("account") == "main"
+            and mode.get("declared_mode") == "isolated"
+            and mode.get("broker_margin_verified") is False
+            and mode.get("trade_authorized") is False)
     except Exception:
         pass
-    if not report["signed_isolated_margin_verified"]:
-        blocks.append("signed_current_demo_isolated_margin_unverified")
+    if not report["owner_declared_main_isolated_accepted"]:
+        blocks.append("owner_main_isolated_declaration_missing_or_expired")
     else:
         try:
             exposure = flat_fn(exchange)
@@ -133,7 +143,9 @@ def run_operator_btc_commission(
         and report.get("blockers") == []
         and report.get("supervised_session_verified") is True
         and report.get("recent_btc_history_local_quality_verified") is True
-        and report.get("signed_isolated_margin_verified") is True
+        and report.get("signed_isolated_margin_verified") is False
+        and report.get("owner_declared_main_isolated_accepted") is True
+        and report.get("margin_evidence_source") == "owner_declaration_not_broker"
         and report.get("account_wide_flatness_verified") is True
         and report.get("watchdog_and_collector_active") is True
         and report.get("both_dashboard_fire_endpoints_disabled") is True

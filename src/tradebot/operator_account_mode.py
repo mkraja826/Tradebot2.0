@@ -6,13 +6,15 @@ import os
 import stat
 from tradebot.delta import DEMO_API
 
-def read_manual_mode(exchange, path=None, now=None):
+def read_manual_mode(exchange, path=None, now=None, *, allow_order_client=False):
     """A matched owner declaration NEVER authorizes trades or validates margin."""
     result = {"status":"not_configured","account":"main",
               "declared_mode":None,"broker_margin_verified":False,
               "trade_authorized":False,"safe_to_enable_fire":False}
     try:
-        if exchange.base_url != DEMO_API or exchange.allow_orders is not False:
+        if exchange.base_url != DEMO_API or (
+                exchange.allow_orders is not False and
+                not (allow_order_client is True and exchange.allow_orders is True)):
             return result
         p = Path(path) if path else Path.home()/".config/tradebot2/manual-account-mode.json"
         if p.is_symlink() or not p.is_file():

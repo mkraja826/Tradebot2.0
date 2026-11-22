@@ -61,3 +61,13 @@ class OperatorSettingsTests(unittest.TestCase):
         self.write()
         self.client.allow_orders=True
         self.assertEqual(self.check()["status"],"not_configured")
+        authorized_for_demo = read_manual_mode(
+            self.client,path=self.path,now=NOW,allow_order_client=True)
+        self.assertEqual(authorized_for_demo["status"],
+                         "owner_declared_not_broker_verified")
+        self.assertFalse(authorized_for_demo["broker_margin_verified"])
+        self.assertFalse(authorized_for_demo["trade_authorized"])
+        self.client.base_url = "https://api.india.delta.exchange"
+        self.assertEqual(read_manual_mode(
+            self.client,path=self.path,now=NOW,allow_order_client=True)["status"],
+            "not_configured")

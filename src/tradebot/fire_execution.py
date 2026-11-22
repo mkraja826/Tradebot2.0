@@ -406,6 +406,11 @@ class FireDemoController:
         """Normal six-period policy never claims supervised pilot history."""
         return {}
 
+    def _require_account_flat(self, exchange, product_id):
+        """Normal FIRE keeps signed isolated-margin and full exposure proofs."""
+        return require_flat_demo_account(
+            exchange, selected_symbol=self.symbol, selected_product_id=product_id)
+
     def _pre_model_market_screen(self, snapshot, context):
         """Normal FIRE is unchanged; optional strategy screen cannot authorize."""
         return None
@@ -456,9 +461,7 @@ class FireDemoController:
             if snapshot["position_contracts"] or active_position(exchange, product_id) or exchange.open_orders():
                 raise FireTradeError("Selected market already has a position or pending order")
             stage = "account_exposure_preflight"
-            require_flat_demo_account(
-                exchange, selected_symbol=self.symbol, selected_product_id=product_id
-            )
+            self._require_account_flat(exchange, product_id)
             stage = "margin_budget"
             price = max(_dec(snapshot["core"]["best_ask"]), _dec(snapshot["core"]["ticker"]["mark_price"]))
             budget = entry_budget(exchange, self.symbol, product_id, price)
@@ -540,9 +543,7 @@ class FireDemoController:
             self.store.update(press, "preflight", risk_assessment={
                 **risk_assessment, "equity_monitor": equity_recheck})
             stage = "account_exposure_recheck"
-            require_flat_demo_account(
-                exchange, selected_symbol=self.symbol, selected_product_id=product_id
-            )
+            self._require_account_flat(exchange, product_id)
             stage = "leverage_sync"
             synchronize_leverage(exchange, product_id, plan["leverage"])
             # Recompute the final broker-verified budget after a leverage change.
@@ -559,9 +560,7 @@ class FireDemoController:
             # Final signed account-wide exposure check immediately before the
             # durable order-intent path, even when leverage was unchanged.
             stage = "account_exposure_final"
-            require_flat_demo_account(
-                exchange, selected_symbol=self.symbol, selected_product_id=product_id
-            )
+            self._require_account_flat(exchange, product_id)
             units = _dec(final_budget["contract_value"]) * plan["contracts"]
             estimated_entry = exchange_quote["best_ask" if plan["direction"] == "LONG" else "best_bid"]
             self.store.update(press, "submitting", sizing_estimate={
