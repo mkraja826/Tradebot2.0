@@ -15,7 +15,7 @@ For a Monday weekly opening in India, that means `05:30:00` through
 `05:34:59.999999 IST`. At **05:35:00 IST**, a missing opening is already
 a missed checkpoint.
 
-Three source checks are updated together:
+Four source checks are updated together:
 1. `PortfolioEquityGuard._opening` cannot use a boundary reading to
    authorize its daily/weekly loss-budget baseline.
 2. `require_receipt_backed_history` cannot admit an entry at the boundary
@@ -23,6 +23,9 @@ Three source checks are updated together:
    the boundary as the opening).
 3. `checkpoint_health` reports `missed_window`, not `pending_window`,
    and refuses to verify a boundary-only observation as a valid opening.
+4. `commissioning_equity._require_signed_anchor_receipts` independently
+   rejects an authenticated 00:05-only ledger as missing an opening anchor,
+   even when the surrounding health result is assumed previously green.
 
 A valid authenticated wallet read at 00:05 can still be preserved in the
 original immutable ledger as an ordinary observation, but never
