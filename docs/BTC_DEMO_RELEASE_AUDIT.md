@@ -5,26 +5,62 @@ makes **no order mutations**, broker leverage edits, local ledger changes,
 AI requests, firewall changes, daemon restarts, or trading configuration
 changes to active services. It is NOT a release action.
 
-Run on the *already configured* VM, using the original trusted data directory,
-only after code review/merge and verifying local source is at the expected
-commit. Keep both FIRE controls disabled and the watchdog running.
+Run on the **original, already-authorized VM** using its existing trusted
+data directory and DEMO credentials, only after code review/merge and a
+**separately reviewed, position-safe VM source deployment**. Keep both FIRE
+controls disabled and an existing protective watchdog running. GitHub-hosted
+runners were confirmed rejected as `SOURCE_IP_NOT_WHITELISTED`; do not add
+ephemeral GitHub IPs to the trading key whitelist.
+
+Do **not** use `git pull`, `git switch`, or restart any service as part of
+the diagnostic. A working-tree update while an active protective watchdog is
+using the checkout can impair protection. Inspect the VM's current source
+version without changing it:
 
 ```bash
 cd ~/Tradebot2.0 || exit 1
-git switch main && git pull --ff-only
-export PYTHONPATH="$PWD/src"
+git rev-parse HEAD
+git status --porcelain --untracked-files=all -- src/tradebot ops
+```
+
+If the VM checkout is older than the approved source, stop: arrange a
+controlled deployment only after independently verified account flatness,
+SQLite/WAL backups, independent risk review, and protection continuity. Once
+the reviewed version is **already deployed**, execute the GET-only audit from
+the approved VM console (never paste its keys or complete credential file):
+
+```bash
+cd ~/Tradebot2.0 || exit 1
+umask 077
+set +x
 set -a
 source "$HOME/.config/tradebot2/keys.env"
 set +a
 bash ops/run_btc_demo_release_audit.sh b7f242b10c584d6eacc831f9f713eaf8 "$PWD/data"
+unset DELTA_DEMO_API_KEY DELTA_DEMO_API_SECRET
 ```
 
-The launcher sequentially checks (1) authenticated DEMO leverage and
-isolated margin compatibility for BTC and Gold; (2) existing immutable
-equity evidence and real daily/weekly UTC checkpoints; (3) selected
-BTC fill/wallet posting attribution; (4) combined current VM service,
-FIRE disabled, account-wide flatness and historical protective bracket
-observations.
+The launcher inspects its own Git ancestry and executable-source integrity
+without modifying the repository. It fails closed on an outdated checkout,
+modified source, missing original data, missing virtualenv or absent DEMO
+credentials. The 32-character FIRE ID is used internally but redacted from
+the script's initial progress message.
+
+The launcher sequentially checks (1) current DEMO signed identity
+authentication **from the VM's existing approved network**; (2) authenticated
+broker leverage, isolated margin, all-product positions and orders;
+(3) existing immutable equity observations, watchdog heartbeats and actual
+daily/weekly UTC opening checkpoints; (4) BTC/Gold original archive
+gaps/quarantines and independent BTC spot context; (5) the **exact selected
+BTC FIRE ID's** original signed fill/wallet postings with a bounded
+seven-day-from-origin API window; (6) combined VM services, current signed
+wallet loss-budget assessment, two broker flatness samples and historical
+bracket evidence.
+
+Passing the 401 auth probe from the approved VM does not prove the other
+checks pass. A selected historical FIRE may be eligible for diagnostic
+inspection for up to 60 days but cannot be treated as reconciled if its
+wallet postings lack independently verified ownership or funding evidence.
 
 Each check has its own sanitized output and `CHECK_STATUS`. Failures do
 not prevent the remaining read-only checks running. Even if all checks pass,
