@@ -104,6 +104,29 @@ class OffHostAlertTests(unittest.TestCase):
         self.assertFalse(again["healthy_ping_acked"])
         self.assertEqual(calls, [])
 
+    def test_emergency_closeout_is_relayed_even_after_watchdog_healthy(self):
+        self.healthy()
+        private_press = "d" * 32
+        self.events.record_watchdog_emergency(private_press, at=self.now)
+        self.events.publish([], at=self.now + timedelta(seconds=1))
+        payloads = []
+        result = deliver_once(
+            self.root, self.webhook, self.ping,
+            send=lambda url, data=None, event_id=None:
+                payloads.append(json.loads(data) if data else None),
+            now=self.now + timedelta(seconds=2))
+        self.assertEqual(result["events_acked"], 1)
+        payload = payloads[0]
+        self.assertEqual(payload["code"], "watchdog_emergency_flat_verified")
+        self.assertEqual(payload["severity"], "critical")
+        self.assertEqual(payload["transition"], "opened")
+        self.assertNotIn(private_press, json.dumps(payload))
+        self.assertEqual(self.fetch_cursor()[0], 1)
+        self.assertEqual(deliver_once(
+            self.root, self.webhook, self.ping,
+            send=lambda *args, **kwargs: self.fail("duplicate event replay"),
+            now=self.now + timedelta(seconds=5))["events_acked"], 0)
+
     def test_unacknowledged_webhook_retries_without_advancing_cursor(self):
         self.healthy()
         self.events.publish(["watchdog_restart_loop"], at=self.now)
