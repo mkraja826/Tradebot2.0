@@ -406,6 +406,10 @@ class FireDemoController:
         """Normal six-period policy never claims supervised pilot history."""
         return {}
 
+    def _pre_model_market_screen(self, snapshot, context):
+        """Normal FIRE is unchanged; optional strategy screen cannot authorize."""
+        return None
+
     def snapshot(self):
         result = self.store.latest()
         return {**result, "symbol": self.symbol,
@@ -475,6 +479,10 @@ class FireDemoController:
             stage = "historical_data_integrity"
             levels = self._historical_levels(collected, midpoint)
             context["historical_levels"] = levels
+            stage = "market_quality_pre_model"
+            screen = self._pre_model_market_screen(snapshot, context)
+            if screen is not None:
+                context["local_market_screen"] = screen
             self.store.update(press, "reasoning", indicators=context)
             model_snapshot = {**snapshot, "indicators": context, "fire_execution_scope": {
                 "environment": "delta-india-demo",

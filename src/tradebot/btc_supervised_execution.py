@@ -8,6 +8,7 @@ independent watchdog remain in force.
 """
 from tradebot.btc_supervised_equity_guard import SupervisedSessionEquityGuard
 from tradebot.btc_supervised_recent24h import load_recent24h_strategy_context
+from tradebot.btc_market_screen import screen_btc_market
 from tradebot.fire_execution import FireDemoController, FireTradeError
 
 STRATEGY_VERSION = "btc-demo-recent24h-v1"
@@ -49,6 +50,10 @@ class SupervisedBTCController(FireDemoController):
                 or levels.get("independent_price_validation") is not False):
             raise FireTradeError("Unverified supervised BTC 24h history")
         return levels
+
+    def _pre_model_market_screen(self, snapshot, context):
+        # Deterministic no-AI rejection before the GPT-6 request.
+        return screen_btc_market(snapshot, context)
 
     def _additional_fire_scope(self):
         return {"strategy_history_version": STRATEGY_VERSION,

@@ -139,13 +139,18 @@ class ControllerSafetyTests(unittest.TestCase):
                          STRATEGY_VERSION)
         payload = {
             "environment":"delta-india-demo",
-            "core":{"ticker":{"symbol":"BTCUSD"}},
+            "core":{"ticker":{"symbol":"BTCUSD",
+                               "mark_price":"100.01"},
+                    "best_bid":"100","best_ask":"100.02"},
             "fire_execution_scope":{
                 "strategy_history_version":STRATEGY_VERSION,
                 "max_contracts_per_entry":1,
                 "attached_stop_loss_and_take_profit_required":True,
             },
-            "indicators":{**ctx,"historical_levels":levels},
+            "indicators":{**ctx,"historical_levels":levels,
+                "local_market_screen":ctrl._pre_model_market_screen(
+                    {"core":{"ticker":{"symbol":"BTCUSD","mark_price":"100.01"},
+                             "best_bid":"100","best_ask":"100.02"}},ctx)},
         }
         prompt=instruction_for_snapshot(payload)
         self.assertNotEqual(prompt,INSTRUCTION)
