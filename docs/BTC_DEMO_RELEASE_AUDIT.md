@@ -24,6 +24,19 @@ git -C "$STAGE" status --porcelain --untracked-files=all -- src/tradebot ops
 )
 ```
 
+**Free off-host alert alternative (source-only audit correction):** the
+generic HTTPS incident/dead-man webhook adapter is optional. Its unconfigured
+state must not be conflated with the separate existing free Telegram incident
+relay and Healthchecks.io missing-ping monitor. The audit now checks both free
+channels' private 0600 owner-owned config, active local service/timer and
+respective `--check` preflight without sending anything. A successful local
+preflight reports `LOCAL_READY_REMOTE_DELIVERY_UNVERIFIED`, **not**
+commissioning or evidence that a phone was notified. The operator must
+independently verify real Telegram event acknowledgement and a genuine
+Healthchecks missed-ping notification, while keeping the watchdog running.
+If either required free channel is missing or unhealthy, the audit still
+reports a blocker. No credentials or private check-in URLs are printed.
+
 The combined audit now continues through **all** independent, read-only
 checks even when isolated margin, financial reconciliation or missing
 source records cause one stage to fail. It collects in one pass:
