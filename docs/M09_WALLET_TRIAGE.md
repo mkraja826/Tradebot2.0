@@ -23,6 +23,23 @@ export TRADEBOT_GOLD_FIRE_DEMO_EXECUTION=false
 .venv/bin/python -m tradebot.fire_reconciliation_phase_probe --data-dir "$PWD/data"
 ```
 
+For the original previously completed BTC request, use the exact ID from the
+local receipt instead of relying on a rolling seven-day selection:
+
+```bash
+.venv/bin/python -m tradebot.fire_reconciliation_phase_probe \
+  --data-dir "$PWD/data" \
+  --fire-id b7f242b10c584d6eacc831f9f713eaf8
+```
+
+The explicit ID path accepts only an existing locally verified, completed BTC
+receipt less than 60 days old. Even if invoked 30 days after the trade, the
+requested broker history is capped at **seven days from its original
+creation**. Late postings outside that cutoff remain unknown; no receipt
+is fabricated or reassigned. This CLI remains read-only and never authorizes
+trades. If the broker cannot provide complete pages within the requested
+window, the existing fail-closed reason still blocks reconciliation.
+
 Exit status 2 is the expected fail-closed result when financial evidence is still blocked.
 Do not post any API keys, full broker responses, signed headers, raw wallet history,
 transaction IDs, or account balances into chats or GitHub issues.
