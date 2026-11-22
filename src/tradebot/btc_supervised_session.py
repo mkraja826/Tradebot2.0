@@ -28,6 +28,10 @@ MAX_OBSERVED_PEAK_DRAWDOWN = Decimal("0.08")
 MAX_UNEXPLAINED_EQUITY_INCREASE = Decimal("0.02")
 ALLOWED_STANDARD_BLOCKERS = frozenset({"weekly_checkpoint_missed_window"})
 
+def _utc_now():
+    return datetime.now(timezone.utc)
+
+
 
 def assess_supervised_session(baseline, current, observed_peak,
                               baseline_receipt, current_receipt, *, now):
@@ -154,7 +158,7 @@ def inspect_btc_session_candidate(exchange, data_dir, *,
             getattr(exchange, "allow_orders", None) is not False):
         report["reason"] = "readonly_delta_demo_client_required"
         return report
-    instant = now or datetime.now(timezone.utc)
+    instant = now if now is not None else _utc_now()
     if (not isinstance(instant, datetime) or instant.tzinfo is None or
             instant.utcoffset() is None):
         report["reason"] = "trusted_utc_clock_required"
@@ -202,12 +206,22 @@ def inspect_btc_session_candidate(exchange, data_dir, *,
             raise ValueError("signed_wallet_schema_unverified")
         equity = amount(wallet["meta"]["net_equity"])
         receipt = wallet.get("equity_read_receipt")
-        validate_receipt(equity, receipt, now=instant)
+        # IMPORTANT: The initial health-check clock precedes a network GET.
+        # A fresh response therefore may legitimately be newer than that
+        # initial clock. Validate it against a fresh UTC clock read AFTER the
+        # signed wallet response instead of rejecting the valid receipt as
+        # a future clock jump.
+        observed_at = instant if now is not None else _utc_now()
+        age = (observed_at - instant).total_seconds()
+        if not 0 <= age <= 30:
+            report["reason"] = "wallet_probe_duration_or_clock_unverified"
+            return report
+        validate_receipt(equity, receipt, now=observed_at)
         if _identity(path) != identity:
             raise ValueError("original_equity_ledger_replaced")
         report["fresh_session_wallet_baseline_verified"] = True
         limits = assess_supervised_session(
-            equity, equity, peak, receipt, receipt, now=instant)
+            equity, equity, peak, receipt, receipt, now=observed_at)
         report["session_budget_within_limits"] = (
             limits["within_session_limits"] is True)
         if not report["session_budget_within_limits"]:
