@@ -83,9 +83,19 @@ def watchdog_tick(exchange, store, *, pause=None):
     position = active_position(exchange, product_id)
     orders = exchange.open_orders()
     if position is None and not orders:
+        # If the prior tick persisted a protection failure and the process
+        # crashed while trying reduce-only closeout, we cannot prove whether
+        # that closeout or an unrelated broker exit flattened the position.
+        # Do not convert the incident into an ordinary no-exposure receipt.
+        prior_protection_failure = (
+            status == "exposure_unknown"
+            and latest.get("reason_code") == "bracket_missing_or_position_changed"
+        )
+        reason = ("watchdog_protection_failure_flat_verified"
+                  if prior_protection_failure else "verified_no_position_or_orders")
         store.update(press, "flat_verified",
                      protection_verified=False,
-                     reason_code="verified_no_position_or_orders")
+                     reason_code=reason)
         return {"status": "flat_verified"}
 
     plan = receipt["plan"]
@@ -153,7 +163,8 @@ def _durable_emergency_receipts(store):
         db.execute("BEGIN")
         rows = db.execute(
             "SELECT press,result FROM fire_requests WHERE status='flat_verified' "
-            "AND result LIKE '%watchdog_emergency_flat_verified%' "
+            "AND (result LIKE '%watchdog_emergency_flat_verified%' "
+            "OR result LIKE '%watchdog_protection_failure_flat_verified%') "
             "ORDER BY created_at ASC LIMIT 1001"
         ).fetchall()
         if len(rows) > 1000:
@@ -163,8 +174,10 @@ def _durable_emergency_receipts(store):
             parsed = json.loads(raw)
             if type(parsed) is not dict:
                 raise ValueError("watchdog_emergency_receipt_unverified")
-            if parsed.get("reason_code") == "watchdog_emergency_flat_verified":
-                out.append(press)
+            reason = parsed.get("reason_code")
+            if reason in ("watchdog_emergency_flat_verified",
+                          "watchdog_protection_failure_flat_verified"):
+                out.append((press, reason))
         db.rollback()
     return out
 
@@ -228,8 +241,9 @@ def main(argv=None):
             # visible to both off-host and Telegram delivery after restart,
             # even if the monitor collector never polls during that 15s tick.
             for store, _ in markets:
-                for emergency_press in _durable_emergency_receipts(store):
-                    event = monitoring.record_watchdog_emergency(emergency_press)
+                for emergency_press, reason in _durable_emergency_receipts(store):
+                    event = monitoring.record_watchdog_emergency(
+                        emergency_press, reason_code=reason)
                     if event is not None:
                         print(json.dumps(event), flush=True)
             monitoring.heartbeat("watchdog", "healthy" if healthy else "watchdog_protection_unverified")
