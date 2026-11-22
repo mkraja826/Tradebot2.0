@@ -74,3 +74,20 @@ This lets one pre-approved VM GET-only diagnostic report both unresolved
 wallet rows without requiring a separate manual metadata inspection after
 every change. A lack of documented authoritative cashflow linkage requires
 broker confirmation, not a timing or amount-based assumption.
+
+## Operator-audit correction: count delayed commissions only
+
+The first one-pass M09 VM run counted **four** unmatched commission fill UUIDs
+because the diagnostic counted *every* commission across the bounded account
+history, including commissions before the selected trade's final fill. The
+actual strict reconciliation report identified **two** delayed unreferenced
+wallet transactions (one commission and one cashflow). These numbers should
+not be compared as if they described the same subset.
+
+The supplementary matching counters now apply only to same-product commission
+postings **strictly after the last selected signed fill**. Prior wallet
+commission UUIDs are neither attributed to the selected trade nor labeled
+unattributed by this after-last-fill diagnostic. Signed fill ownership remains
+an exact equality requirement; no P&L can be claimed from counts or amount
+comparisons. The broker/accounting release remains blocked until the delayed
+cashflow and full fee/funding ownership are authoritatively established.

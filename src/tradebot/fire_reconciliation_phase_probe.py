@@ -163,8 +163,15 @@ def _wallet_reference_linkage(raw_postings, normalized_postings, fills, owned_or
         meta = row.get("meta_data") or {}
         if not isinstance(meta, dict):
             raise ReconciliationError("invalid_posting_metadata")
-        if (p["type"] == "commission" and
-                (row.get("fill_uuid") is not None or meta.get("fill_uuid") is not None)):
+        # Only count commissions in the *original unresolved post-fill*
+        # period for this product. Earlier wallet commissions are not
+        # necessarily expected to belong to this one receipt. Counting all
+        # of them generated misleading 0/4 operator evidence in Nov 2026.
+        if (p["type"] == "commission"
+                and p["product_id"] == str(product_id)
+                and p["at_us"] > final_fill_time
+                and (row.get("fill_uuid") is not None
+                     or meta.get("fill_uuid") is not None)):
             if p["fill_id"] in owned_fill_ids:
                 report["commission_fill_uuid_matched_signed_owned_fill"] += 1
             else:
