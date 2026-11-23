@@ -185,6 +185,38 @@ class AutoTests(unittest.TestCase):
         self.assertTrue(scope["unattended_demo_mode"])
         self.assertEqual(scope["max_new_order_attempts_per_utc_day"],48)
 
+    def test_missing_broker_signed_margin_blocks_even_healthy_owner_attestation(self):
+        from tradebot.btc_autonomous_demo import (
+            check_candidate, AutoBTCController,
+        )
+        from tradebot.delta import DEMO_API
+        from unittest.mock import patch
+
+        class ReadOnly:
+            base_url = DEMO_API
+            allow_orders = False
+
+        ok = {
+            "status": "operator_review_candidate_only", "blockers": [],
+            "supervised_session_verified": True,
+            "recent_btc_history_local_quality_verified": True,
+            "signed_isolated_margin_verified": False,
+            "owner_declared_main_isolated_accepted": True,
+            "account_wide_flatness_verified": True,
+            "watchdog_and_collector_active": True,
+            "both_dashboard_fire_endpoints_disabled": True,
+            "trade_authorized": False,
+        }
+        self.assertFalse(check_candidate(
+            self.root, broker_factory=lambda **kw: ReadOnly(),
+            preflight=lambda b, p, **kwargs: ok,
+            margin_proof=lambda b: False))
+        bot = AutoBTCController(self.root / "fire-ops.sqlite")
+        with patch("tradebot.btc_autonomous_demo.is_armed", return_value=True):
+            with patch("tradebot.btc_autonomous_demo.signed_isolated_margin_proven", return_value=False):
+                with self.assertRaisesRegex(ValueError, "signed_demo_margin_mode_required_before_entry"):
+                    bot._require_account_flat(object(), 84)
+
     def test_client_preflight_rejects_missing_margin_owner_verification(self):
         from tradebot.btc_autonomous_demo import check_candidate
         from tradebot.delta import DEMO_API
@@ -204,12 +236,14 @@ class AutoTests(unittest.TestCase):
             "trade_authorized":False}
         self.assertTrue(check_candidate(self.root,
             broker_factory=lambda **kw:ReadOnly(),
-            preflight=lambda broker,root,**kwargs:approved))
+            preflight=lambda broker,root,**kwargs:approved,
+            margin_proof=lambda broker: True))
         denied=dict(approved)
         denied["owner_declared_main_isolated_accepted"]=False
         self.assertFalse(check_candidate(self.root,
             broker_factory=lambda **kw:ReadOnly(),
-            preflight=lambda broker,root,**kwargs:denied))
+            preflight=lambda broker,root,**kwargs:denied,
+            margin_proof=lambda broker: True))
 
     def test_autonomous_candidate_uses_signed_readonly_broker(self):
         from unittest.mock import patch
@@ -238,7 +272,8 @@ class AutoTests(unittest.TestCase):
                 "DELTA_DEMO_API_SECRET": "fake-signature"}):
             result = check_candidate(
                 self.root, broker_factory=broker_factory,
-                preflight=lambda b, p, **kwargs: candidate)
+                preflight=lambda b, p, **kwargs: candidate,
+                margin_proof=lambda b: True)
         self.assertTrue(result)
         self.assertEqual(len(seen), 1)
         self.assertEqual(seen[0]["api_key"], "fake-id")
