@@ -331,6 +331,37 @@ def collect_account_performance(broker, root, symbol, *, now=None):
     }
 
 
+def _local_attempt_activity(root):
+    """Fresh read-only activity counters, separate from broker P&L evidence."""
+    result = {"status": "unavailable", "recorded_attempts": None,
+              "rejected_attempts": None, "verified_flat_attempts": None,
+              "active_or_unresolved_attempts": None,
+              "latest_at": None, "latest_status": None,
+              "is_verified_trade_pnl": False}
+    if root.is_symlink() or root.name not in ("btc-isolated", "gold-isolated"):
+        return result
+    filename = "fire-ops.sqlite" if root.name == "btc-isolated" else "fire-xaut.sqlite"
+    try:
+        with _sqlite(root / filename) as db:
+            counts = dict(db.execute(
+                "SELECT status,COUNT(*) FROM fire_requests GROUP BY status").fetchall())
+            latest = db.execute(
+                "SELECT created_at,status FROM fire_requests "
+                "ORDER BY created_at DESC,rowid DESC LIMIT 1").fetchone()
+        total = sum(counts.values())
+        closed = counts.get("flat_verified", 0)
+        rejected = counts.get("rejected_no_order", 0)
+        return {"status": "available", "recorded_attempts": total,
+                "rejected_attempts": rejected,
+                "verified_flat_attempts": closed,
+                "active_or_unresolved_attempts": total-rejected-closed,
+                "latest_at": str(latest[0]) if latest else None,
+                "latest_status": str(latest[1])[:45] if latest else None,
+                "is_verified_trade_pnl": False}
+    except (OSError, sqlite3.Error, ValueError, TypeError):
+        return result
+
+
 class IsolatedPerformanceDashboard:
     """Independently refreshes expensive signed broker histories every 5min."""
 
@@ -395,4 +426,24 @@ class IsolatedPerformanceDashboard:
                 self._checked=time.monotonic()
                 self._updating=True
                 Thread(target=self.refresh,daemon=True).start()
-            return dict(self._report)
+            report = dict(self._report)
+            updating = self._updating
+        checked = report.get("checked_at")
+        try:
+            age = max(0, int((datetime.now(timezone.utc) -
+                              datetime.fromisoformat(checked)).total_seconds()))
+        except (ValueError, TypeError):
+            age = None
+        stale = age is None or age > max(self.refresh_seconds*2, 600)
+        report["age_seconds"] = age
+        report["stale"] = stale
+        report["refreshing"] = updating
+        report["refresh_status"] = ("refreshing" if updating else
+                                    "loading" if checked is None else
+                                    "stale" if stale else "fresh")
+        # Local receipt counters can be newer than an expensive signed broker
+        # report. Their counts never represent wins, P&L, or broker fills.
+        report["attempt_activity"] = {
+            label: _local_attempt_activity(self.accounts.root / ACCOUNTS[label][0])
+            for label in ACCOUNTS}
+        return report
