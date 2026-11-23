@@ -25,7 +25,7 @@ from tradebot.fire_budget import entry_budget
 from tradebot.fire_leverage import synchronize_leverage, verify_liquidation_clearance, LeverageRejected, LiquidationUnsafe
 from tradebot.fire_account_guard import require_flat_demo_account
 from tradebot.fire_portfolio_reservation import FirePortfolioReservation
-from tradebot.fire_risk import assess_fire_plan
+from tradebot.fire_risk import assess_fire_plan, FireRiskLimits
 from tradebot.portfolio_equity_guard import RuntimeEquityGuard
 from tradebot.fire_indicators import decision_context
 from tradebot.fire_entry import FireEntries
@@ -410,6 +410,27 @@ class FireDemoController:
         """Normal FIRE retains the broker's existing checked risk limit."""
         return budget["max_contracts_per_entry"]
 
+    def _hard_contract_cap(self):
+        """All legacy FIRE paths retain the independent one-contract cap."""
+        return 1
+
+    def _entry_budget(self, exchange, product_id, price, *, planned_leverage=None):
+        return entry_budget(exchange, self.symbol, product_id, price,
+                            planned_leverage=planned_leverage,
+                            max_contracts_limit=self._hard_contract_cap())
+
+    def _assess_risk(self, plan, budget, quote):
+        return assess_fire_plan(plan, budget, quote,
+                                limits=FireRiskLimits(max_contracts=self._hard_contract_cap()))
+
+    def _normalize_plan(self, plan, context):
+        """Default FIRE never adjusts an independently validated model plan."""
+        return plan
+
+    def _entry_sizing_record(self):
+        """Normal/supervised FIRE receipts have no experimental sizing tier."""
+        return {}
+
     def _require_account_flat(self, exchange, product_id):
         """Normal FIRE keeps signed isolated-margin and full exposure proofs."""
         return require_flat_demo_account(
@@ -468,7 +489,7 @@ class FireDemoController:
             self._require_account_flat(exchange, product_id)
             stage = "margin_budget"
             price = max(_dec(snapshot["core"]["best_ask"]), _dec(snapshot["core"]["ticker"]["mark_price"]))
-            budget = entry_budget(exchange, self.symbol, product_id, price)
+            budget = self._entry_budget(exchange, product_id, price)
             self.store.update(press, "reasoning", budget=budget)
             if budget["max_contracts_per_entry"] < 1:
                 raise FireTradeError("Insufficient margin budget for one contract")
@@ -500,6 +521,8 @@ class FireDemoController:
                 "min_leverage": 1, "max_leverage": 20,
                 "separate_learning_model_has_no_trade_authority": True,
                 **self._additional_fire_scope(),
+                # Broker-backed affordability always wins over policy/AI cap.
+                "max_contracts_per_entry": self._max_contracts_for_entry(budget),
             }}
             stage = "save_model_input"
             self.store.record_model_input(press, model_snapshot)
@@ -531,13 +554,15 @@ class FireDemoController:
                     thesis=str(raw.get("thesis") or raw["decision"].get("thesis") or "")[:350],
                     orders_submitted=False, protection_verified=False)
                 return
+            plan = self._normalize_plan(plan, context)
             self.store.update(
                 press, "preflight", direction=plan["direction"], selected_leverage=plan["leverage"], model_latency_ms=raw.get("latency_ms"),
                 contracts=plan["contracts"], stop_loss=plan["stop_loss"],
                 take_profit=plan["take_profit"],
                 snapshot_at=snapshot["collected_at"], decision_at=_now().isoformat(),
                 decision_quote={k: snapshot["core"].get(k) for k in ("best_bid","best_ask")},
-                thesis=str(raw.get("thesis") or "")[:350])
+                thesis=str(raw.get("thesis") or "")[:350],
+                **self._entry_sizing_record())
             stage = "contract_size"
             if not 1 <= plan["contracts"] <= self._max_contracts_for_entry(budget):
                 raise FireTradeError("Order exceeds market budget")
@@ -545,8 +570,8 @@ class FireDemoController:
             exchange_quote = _live_preflight(exchange, snapshot, plan)
             price = max(exchange_quote["mark"], exchange_quote["best_ask"])
             stage = "margin_budget_recheck"
-            current_budget = entry_budget(exchange, self.symbol, product_id, price,
-                                          planned_leverage=plan["leverage"])
+            current_budget = self._entry_budget(exchange, product_id, price,
+                                                planned_leverage=plan["leverage"])
             self.store.update(press, "preflight", budget=current_budget)
             if plan["contracts"] > current_budget["max_contracts_per_entry"]:
                 raise FireTradeError("Live margin budget changed")
@@ -554,7 +579,7 @@ class FireDemoController:
             equity_recheck = self.equity_guard.require_verified_read(
                 current_budget["equity_usd"], current_budget.get("equity_read_receipt"))
             stage = "risk_governor"
-            risk_assessment = assess_fire_plan(plan, current_budget, exchange_quote)
+            risk_assessment = self._assess_risk(plan, current_budget, exchange_quote)
             self.store.update(press, "preflight", risk_assessment={
                 **risk_assessment, "equity_monitor": equity_recheck})
             stage = "account_exposure_recheck"
@@ -563,13 +588,13 @@ class FireDemoController:
             synchronize_leverage(exchange, product_id, plan["leverage"])
             # Recompute the final broker-verified budget after a leverage change.
             stage = "leverage_budget_recheck"
-            final_budget = entry_budget(exchange, self.symbol, product_id, price)
+            final_budget = self._entry_budget(exchange, product_id, price)
             if final_budget["leverage"] != str(plan["leverage"]) or plan["contracts"] > final_budget["max_contracts_per_entry"]:
                 raise FireTradeError("Verified leverage or margin budget changed")
             stage = "portfolio_equity_limits_final"
             equity_recheck = self.equity_guard.require_verified_read(
                 final_budget["equity_usd"], final_budget.get("equity_read_receipt"))
-            final_assessment = assess_fire_plan(plan, final_budget, exchange_quote)
+            final_assessment = self._assess_risk(plan, final_budget, exchange_quote)
             self.store.update(press, "preflight", budget=final_budget, risk_assessment={
                 **final_assessment, "equity_monitor": equity_recheck})
             # Final signed account-wide exposure check immediately before the

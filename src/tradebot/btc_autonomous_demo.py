@@ -1,7 +1,7 @@
 """Bounded BTCUSD Delta India DEMO-only unattended pilot.
 
 Runs read-only eligibility checks every five minutes and may reserve at most
-two GPT-6 FIRE attempts per UTC day, four hours apart. Broker risk/protection
+48 GPT-6 FIRE attempts per UTC day, at least 30 minutes apart. Broker risk/protection
 checks remain inside SupervisedBTCController. No production host is supported.
 """
 from datetime import datetime, timezone
@@ -20,10 +20,15 @@ from tradebot.btc_supervised_execution import SupervisedBTCController
 from tradebot.btc_supervised_equity_guard import SupervisedSessionEquityGuard
 from tradebot.portfolio_equity_guard import EquityRiskError, amount
 from tradebot.fire_btc_supervised_commission import readonly_btc_commission_preflight
+from tradebot.fire_account_guard import (
+    AccountExposureRejected, require_flat_demo_account_for_configuration,
+)
+from tradebot.btc_demo_size import evidence_contract_ceiling
+from tradebot.fire_risk import FireRiskLimits, assess_fire_plan
 
-ARM_CONTENT = "DELTA-INDIA-DEMO:BTCUSD:UNATTENDED:MAX2-UTC-DAY"
-MAX_DAILY_ATTEMPTS = 2
-MIN_INTERVAL = 4 * 3600
+ARM_CONTENT = "DELTA-INDIA-DEMO:BTCUSD:UNATTENDED:30MIN-MAX48-UTC-DAY"
+MAX_DAILY_ATTEMPTS = 48
+MIN_INTERVAL = 30 * 60
 POLL_SECONDS = 300
 TERMINAL_SAFE = {"rejected_no_order", "flat_verified"}
 
@@ -104,14 +109,61 @@ class AutoBTCController(SupervisedBTCController):
             raise ValueError("autonomous_demo_disarmed")
         return super()._require_account_flat(exchange, product_id)
 
+    def _hard_contract_cap(self):
+        """Up to three DEMO contracts, never for dashboard/supervised FIRE."""
+        return 3
+
     def _max_contracts_for_entry(self, budget):
-        return min(1,super()._max_contracts_for_entry(budget))
+        return min(3, super()._max_contracts_for_entry(budget))
+
+    def _normalize_plan(self, plan, context):
+        """Downgrade model size to independently proven tier, never create an entry."""
+        self._sizing_record = {}
+        cap = evidence_contract_ceiling(context, plan.get("direction"))
+        if cap == 0:
+            return plan
+        # A malformed, oversized model proposal is rejected by the existing
+        # contract-size gate; do not silently transform it into a valid order.
+        proposed = plan["contracts"]
+        if type(proposed) is not int or not 1 <= proposed <= self._hard_contract_cap():
+            return plan
+        selected = min(proposed, cap)
+        self._sizing_record = {
+            "tier": ("strong_three" if selected == 3 else
+                     "medium_two" if selected == 2 else "exploratory_one"),
+            "policy": "btc-demo-evidence-size-v2",
+            "evidence_contract_ceiling": cap,
+            "model_proposed_contracts": proposed,
+            "selected_contracts": selected,
+        }
+        return {**plan, "contracts": selected}
+
+    def _entry_sizing_record(self):
+        return {"sizing_evidence": self._sizing_record} if getattr(
+            self, "_sizing_record", None) else {}
+
+    def _assess_risk(self, plan, budget, quote):
+        """Confidence tier also limits maximum DEMO dollar loss per trade.
+
+        Strong entries can risk up to the existing daily 0.5% equity limit;
+        every tier still fails closed on broker margin, liquidation and SL/TP.
+        """
+        fractions = {1: Decimal("0.0025"), 2: Decimal("0.0035"),
+                     3: MAX_DAILY_EQUITY_DECLINE}
+        size = plan.get("contracts")
+        if type(size) is not int or size not in fractions:
+            from tradebot.fire_risk import RiskRejected
+            raise RiskRejected("Unsupported autonomous BTC demo size")
+        return assess_fire_plan(
+            plan, budget, quote, limits=FireRiskLimits(
+                max_contracts=3, equity_risk_fraction=fractions[size],
+                version="btc-demo-evidence-size-v2"))
 
     def _additional_fire_scope(self):
         return {
             "strategy_history_version": "btc-demo-recent24h-v1",
             "unattended_demo_mode": True,
-            "max_contracts_per_entry": 1,
+            "max_contracts_per_entry": 3,
             "one_attempt_operator_supervision_required": False,
             "max_new_order_attempts_per_utc_day": MAX_DAILY_ATTEMPTS,
         }
@@ -181,6 +233,33 @@ def check_candidate(data_dir, *, broker_factory=DeltaDemo,
     )
 
 
+def signed_active_trade_skip(root, *, broker_factory=DeltaDemo,
+                             exposure_check=require_flat_demo_account_for_configuration):
+    """Return True only for a confirmed signed non-flat account, not a read error.
+
+    A broker outage, malformed pagination or missing credential is UNKNOWN and
+    must not be reported as an open trade. No broker mutation is permitted.
+    """
+    try:
+        broker = broker_factory(
+            api_key=os.getenv("DELTA_DEMO_API_KEY", ""),
+            api_secret=os.getenv("DELTA_DEMO_API_SECRET", ""),
+            allow_orders=False)
+        if (getattr(broker, "base_url", None) != DEMO_API
+                or getattr(broker, "allow_orders", None) is not False):
+            return None
+        exposure_check(broker)
+        return False
+    except AccountExposureRejected as exc:
+        return True if str(exc) in {
+            "Account has open exposure",
+            "Account has pending orders",
+            "FIRE market has open exposure",
+        } else None
+    except Exception:
+        return None
+
+
 def prior_fire_receipts_safe(root):
     """Never auto-retry an unresolved/error FIRE after a process restart."""
     path=Path(root)/"fire-ops.sqlite"
@@ -222,7 +301,8 @@ def prior_fire_receipts_safe(root):
 
 def run_once(data_dir, *, instant=None, armed=is_armed,
              candidate=check_candidate, controller_factory=AutoBTCController,
-             receipts_safe=prior_fire_receipts_safe, do_execute=False):
+             receipts_safe=prior_fire_receipts_safe,
+             active_trade_probe=signed_active_trade_skip, do_execute=False):
     """The default is read-only. The service requires its private arm file."""
     now = instant or datetime.now(timezone.utc)
     root = Path(data_dir)
@@ -237,6 +317,14 @@ def run_once(data_dir, *, instant=None, armed=is_armed,
     except Exception:
         eligible = False
     if not eligible:
+        # Do not spend GPT tokens or reserve an attempt when signed broker
+        # evidence specifically identifies a running position/order.
+        try:
+            active = active_trade_probe(root)
+        except Exception:
+            active = None
+        if active is True:
+            return {"status":"skipped_active_trade"}
         return {"status":"read_only_preflight_unavailable"}
     if not receipts_safe(root):
         return {"status":"previous_fire_decision_or_execution_unresolved"}

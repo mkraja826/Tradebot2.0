@@ -65,3 +65,50 @@ authorization.** It does not create the separate autonomous arm file, touch
 broker settings, restart services, or call GPT. A new failure is not
 automatically reviewed. The worker continues to impose its normal halt latch,
 daily and per-trade risk limits, and broker protection checks at execution time.
+
+## 30-minute DEMO exploration and confidence-tier sizing
+
+The opt-in autonomous DEMO worker polls every five minutes, but may spend GPT-6
+tokens or reserve another FIRE attempt only when at least **30 minutes**
+have elapsed since the preceding durable attempted decision. The UTC-day cap
+is **48 model attempts**, not a requirement to open 48 positions. It may
+run fewer: model WAIT, stale broker data, active orders/positions, unresolved
+reconciliation, daily loss limits or a revoked owner arm all block new orders.
+
+When signed broker evidence proves a position or pending order is already
+open, the worker emits `skipped_active_trade` **without reserving an
+attempt**, and checks again later. An API timeout or incomplete broker
+evidence is **not** classified as a known open position and never grants
+permission to trade. The independent FIRE watchdog must reconcile a
+protected position into a genuinely flat broker status before re-entry.
+
+Only this BTCUSD **Delta India DEMO** worker can use three sizes:
+
+| Experimental tier | Contracts | Independent maximum estimated loss |
+|---|---:|---:|
+| Small exploratory | 1 | 0.25% of verified equity |
+| Medium | 2 | 0.35% of verified equity |
+| Strong | 3 | 0.50% of verified equity |
+
+The independent capacity screen requires aligned 15-minute and 1-hour EMA
+direction and ADX/DI trend before approving medium; strong also requires
+ADX at least 25 and at least three confirming MACD/RSI/VWAP/RVOL signals.
+GPT-6 must still propose a legitimate LONG/SHORT with executable stop and
+target. The deterministic model-size ceiling can **reduce** its quantity,
+but never upgrade what the model requested, turn a WAIT into an order, or
+change the direction/exit levels. Broker wallet equity, affordability,
+fees, liquidation, account-wide exposure, stop-loss and take-profit are
+rechecked before any order. Normal dashboard and supervised FIRE remain
+one-contract, disabled unless separately authorized.
+
+The fixed **0.5% daily equity-decline halt** remains. A large stopped-out
+trade can exhaust the whole daily budget; this is expected and should not be
+manually bypassed. Slippage can exceed modeled risk. A 48/day schedule may
+increase paid API use substantially, even when GPT-6 returns WAIT. DEMO
+performance never predicts real-money profitability.
+
+After a release, the exact private owner arm marker must match the versioned
+policy string `DELTA-INDIA-DEMO:BTCUSD:UNATTENDED:30MIN-MAX48-UTC-DAY`.
+Replacing the old 2/day arm requires an archived, mode-0600 prior file and a
+fresh signed read-only preflight. Never delete attempt history or change
+broker settings to force eligibility.
