@@ -3,6 +3,8 @@ from datetime import datetime,timezone,timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+import sqlite3
+import json
 from tradebot.btc_autonomous_demo import is_armed,ARM_CONTENT,run_once,claim_attempt
 
 NOW=datetime(2026,11,23,1,tzinfo=timezone.utc)
@@ -67,6 +69,60 @@ class AutoTests(unittest.TestCase):
                        controller_factory=self.fake())
         self.assertEqual(value["status"],"read_only_preflight_unavailable")
         self.assertIsNotNone(claim_attempt(self.root,NOW))
+
+    def test_verified_pre_order_low_reward_risk_retries_next_slot(self):
+        runner = self.fake("btc_demo_net_reward_risk_below_minimum")
+        for instant in (NOW, NOW + timedelta(minutes=30)):
+            result = run_once(
+                self.root, instant=instant, armed=lambda: True,
+                candidate=lambda root: True, receipts_safe=lambda root: True,
+                controller_factory=runner, do_execute=True)
+            self.assertEqual(result["result"], "rejected_no_order")
+            self.assertFalse((self.root / "btc-auto-demo-halt").exists())
+        self.assertEqual(runner.starts, 2)
+
+    def test_generic_risk_error_still_halts_and_has_no_auto_retry(self):
+        runner = self.fake("risk_governor_failed")
+        result = run_once(
+            self.root, instant=NOW, armed=lambda: True,
+            candidate=lambda root: True, receipts_safe=lambda root: True,
+            controller_factory=runner, do_execute=True)
+        self.assertEqual(result["result"], "rejected_no_order")
+        self.assertTrue((self.root / "btc-auto-demo-halt").exists())
+
+    def test_clean_reward_risk_receipt_requires_no_durable_order_intent(self):
+        from tradebot.btc_autonomous_demo import prior_fire_receipts_safe
+        dbpath = self.root / "fire-ops.sqlite"
+        press = "a" * 32
+        with sqlite3.connect(dbpath) as db:
+            db.executescript("""
+                CREATE TABLE fire_requests(
+                    press TEXT PRIMARY KEY, created_at TEXT, updated_at TEXT,
+                    status TEXT, result TEXT);
+                CREATE TABLE fire_entries(press TEXT PRIMARY KEY);
+            """)
+            receipt = {
+                "reason_code": "btc_demo_net_reward_risk_below_minimum",
+                "orders_submitted": False,
+                "protection_verified": False,
+            }
+            db.execute("INSERT INTO fire_requests VALUES (?,?,?,?,?)", (
+                press, "2026-11-23T01:00:00+00:00",
+                "2026-11-23T01:00:05+00:00",
+                "rejected_no_order", json.dumps(receipt)))
+        self.assertTrue(prior_fire_receipts_safe(self.root))
+        with sqlite3.connect(dbpath) as db:
+            db.execute("INSERT INTO fire_entries VALUES (?)", (press,))
+        self.assertFalse(prior_fire_receipts_safe(self.root))
+        with sqlite3.connect(dbpath) as db:
+            db.execute("DELETE FROM fire_entries WHERE press=?", (press,))
+            db.execute("UPDATE fire_requests SET result=? WHERE press=?", (
+                json.dumps({**receipt, "orders_submitted": True}), press))
+        self.assertFalse(prior_fire_receipts_safe(self.root))
+        with sqlite3.connect(dbpath) as db:
+            db.execute("UPDATE fire_requests SET result=? WHERE press=?", (
+                json.dumps({**receipt, "protection_verified": True}), press))
+        self.assertFalse(prior_fire_receipts_safe(self.root))
 
     def test_model_failure_halts_automatic_retries(self):
         runner=self.fake("model_decision_failed")
