@@ -1,7 +1,7 @@
 """Bounded BTCUSD Delta India DEMO-only unattended pilot.
 
 Runs read-only eligibility checks every five minutes and may reserve at most
-two GPT-6 FIRE attempts per UTC day, four hours apart. Broker risk/protection
+48 GPT-6 FIRE attempts per UTC day, at least 30 minutes apart. Broker risk/protection
 checks remain inside SupervisedBTCController. No production host is supported.
 """
 from datetime import datetime, timezone
@@ -22,9 +22,9 @@ from tradebot.portfolio_equity_guard import EquityRiskError, amount
 from tradebot.fire_btc_supervised_commission import readonly_btc_commission_preflight
 from tradebot.btc_demo_size import evidence_contract_ceiling
 
-ARM_CONTENT = "DELTA-INDIA-DEMO:BTCUSD:UNATTENDED:MAX2-UTC-DAY"
-MAX_DAILY_ATTEMPTS = 2
-MIN_INTERVAL = 4 * 3600
+ARM_CONTENT = "DELTA-INDIA-DEMO:BTCUSD:UNATTENDED:30MIN-MAX48-UTC-DAY"
+MAX_DAILY_ATTEMPTS = 48
+MIN_INTERVAL = 30 * 60
 POLL_SECONDS = 300
 TERMINAL_SAFE = {"rejected_no_order", "flat_verified"}
 
@@ -106,14 +106,14 @@ class AutoBTCController(SupervisedBTCController):
         return super()._require_account_flat(exchange, product_id)
 
     def _hard_contract_cap(self):
-        """Up to two DEMO contracts, never for the dashboard/supervised path."""
-        return 2
+        """Up to three DEMO contracts, never for dashboard/supervised FIRE."""
+        return 3
 
     def _max_contracts_for_entry(self, budget):
-        return min(2, super()._max_contracts_for_entry(budget))
+        return min(3, super()._max_contracts_for_entry(budget))
 
     def _normalize_plan(self, plan, context):
-        """Downgrade two to one on weaker evidence; never invent an entry."""
+        """Downgrade model size to independently proven tier, never create an entry."""
         self._sizing_record = {}
         cap = evidence_contract_ceiling(context, plan.get("direction"))
         if cap == 0:
@@ -125,8 +125,9 @@ class AutoBTCController(SupervisedBTCController):
             return plan
         selected = min(proposed, cap)
         self._sizing_record = {
-            "tier": "strong_two" if selected == 2 else "exploratory_one",
-            "policy": "btc-demo-evidence-size-v1",
+            "tier": ("strong_three" if selected == 3 else
+                     "medium_two" if selected == 2 else "exploratory_one"),
+            "policy": "btc-demo-evidence-size-v2",
             "evidence_contract_ceiling": cap,
             "model_proposed_contracts": proposed,
             "selected_contracts": selected,
@@ -141,7 +142,7 @@ class AutoBTCController(SupervisedBTCController):
         return {
             "strategy_history_version": "btc-demo-recent24h-v1",
             "unattended_demo_mode": True,
-            "max_contracts_per_entry": 2,
+            "max_contracts_per_entry": 3,
             "one_attempt_operator_supervision_required": False,
             "max_new_order_attempts_per_utc_day": MAX_DAILY_ATTEMPTS,
         }
