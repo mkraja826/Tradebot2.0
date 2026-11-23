@@ -14,7 +14,11 @@ def number(value):
     return result
 
 
-def entry_budget(exchange, symbol, product_id, price, *, planned_leverage=None):
+def entry_budget(exchange, symbol, product_id, price, *, planned_leverage=None, max_contracts_limit=1):
+    # Scope remains one contract for every legacy/supervised FIRE caller.
+    # Only a separately bounded autonomous DEMO controller may request two.
+    if type(max_contracts_limit) is not int or not 1 <= max_contracts_limit <= 2:
+        raise ValueError("Unsupported BTC demo contract limit")
     product = exchange._request("GET", "/v2/products/" + symbol)["result"]
     if (product["symbol"] != symbol or product["id"] != product_id
             or product["contract_type"] != "perpetual_futures"
@@ -56,8 +60,8 @@ def entry_budget(exchange, symbol, product_id, price, *, planned_leverage=None):
     if product.get("position_notional_limit"):
         high = min(high, int(number(product["position_notional_limit"]) / per_contract))
     high = min(high, int(equity * MAX_EFFECTIVE_LEVERAGE / per_contract))
-    # One-contract supervised FIRE pilot; backend hard limit, not just UI.
-    high = min(high, 1)
+    # Backend cap; the caller cannot exceed its isolated DEMO policy.
+    high = min(high, max_contracts_limit)
     low = 0
     while low < high:
         mid = (low + high + 1) // 2
