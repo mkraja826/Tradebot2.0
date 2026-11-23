@@ -53,7 +53,7 @@ def _tier(metadata):
     if not isinstance(data, dict):
         return "unrecorded"
     tier = data.get("tier")
-    return tier if tier in ("exploratory_one", "medium_two", "strong_three") else "unknown"
+    return tier if tier in ("exploratory_one", "medium_two", "strong_three", "strong_dynamic") else "unknown"
 
 
 def _summary(entries):
