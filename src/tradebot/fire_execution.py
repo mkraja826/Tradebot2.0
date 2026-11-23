@@ -427,6 +427,10 @@ class FireDemoController:
         """Default FIRE never adjusts an independently validated model plan."""
         return plan
 
+    def _entry_sizing_record(self):
+        """Normal/supervised FIRE receipts have no experimental sizing tier."""
+        return {}
+
     def _require_account_flat(self, exchange, product_id):
         """Normal FIRE keeps signed isolated-margin and full exposure proofs."""
         return require_flat_demo_account(
@@ -557,7 +561,8 @@ class FireDemoController:
                 take_profit=plan["take_profit"],
                 snapshot_at=snapshot["collected_at"], decision_at=_now().isoformat(),
                 decision_quote={k: snapshot["core"].get(k) for k in ("best_bid","best_ask")},
-                thesis=str(raw.get("thesis") or "")[:350])
+                thesis=str(raw.get("thesis") or "")[:350],
+                **self._entry_sizing_record())
             stage = "contract_size"
             if not 1 <= plan["contracts"] <= self._max_contracts_for_entry(budget):
                 raise FireTradeError("Order exceeds market budget")
