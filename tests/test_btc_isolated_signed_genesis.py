@@ -80,6 +80,8 @@ class SignedGenesisTests(unittest.TestCase):
         self.assertFalse(self.proof())
         self.health["blocking_conditions"].pop()
         with sqlite3.connect(self.path) as db:
+            # Simulate a tampered database that broke the immutable trigger.
+            db.execute("DROP TRIGGER reject_equity_receipt_delete")
             db.execute("DELETE FROM equity_read_receipts")
         self.assertFalse(self.proof())
 
