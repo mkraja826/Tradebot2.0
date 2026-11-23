@@ -86,6 +86,33 @@ class GoldAutonomousTests(unittest.TestCase):
                          {"status":"halted_pending_operator_review"})
         self.assertFalse((self.root/"gold-auto-demo.sqlite").exists())
 
+    def test_post_close_cooldown_is_checked_before_paid_or_signed_preflight(self):
+        from tradebot.gold_autonomous_demo import POLL_SECONDS, MIN_INTERVAL
+        self.assertEqual(POLL_SECONDS, 60)
+        self.assertEqual(MIN_INTERVAL, 300)
+        broker_preflight = Mock()
+        receipt_check = Mock()
+        result = run_once(
+            self.root, instant=NOW, armed=lambda: True,
+            candidate=broker_preflight, receipt_check=receipt_check,
+            cooldown_check=lambda *a, **k: ("cooling_down", 181),
+            do_execute=True)
+        self.assertEqual(result, {
+            "status": "post_trade_cooldown", "remaining_seconds": 181})
+        broker_preflight.assert_not_called()
+        receipt_check.assert_not_called()
+        self.assertFalse((self.root / "gold-auto-demo.sqlite").exists())
+
+    def test_missing_cooldown_evidence_blocks_without_broker_preflight(self):
+        broker_preflight = Mock()
+        result = run_once(
+            self.root, instant=NOW, armed=lambda: True,
+            candidate=broker_preflight,
+            cooldown_check=lambda *a, **k: ("unavailable", None),
+            do_execute=True)
+        self.assertEqual(result["status"], "verified_trade_close_time_unavailable")
+        broker_preflight.assert_not_called()
+
     def test_nonflat_broker_account_skips_not_fires(self):
         state=run_once(self.root,armed=lambda:True,candidate=lambda x:False,
             active_trade_probe=lambda x:True,do_execute=True,cooldown_check=lambda *args,**kwargs:("ready",0))
