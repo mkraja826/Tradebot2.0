@@ -20,6 +20,7 @@ from tradebot.btc_supervised_execution import SupervisedBTCController
 from tradebot.btc_supervised_equity_guard import SupervisedSessionEquityGuard
 from tradebot.portfolio_equity_guard import EquityRiskError, amount
 from tradebot.fire_btc_supervised_commission import readonly_btc_commission_preflight
+from tradebot.btc_demo_size import evidence_contract_ceiling
 
 ARM_CONTENT = "DELTA-INDIA-DEMO:BTCUSD:UNATTENDED:MAX2-UTC-DAY"
 MAX_DAILY_ATTEMPTS = 2
@@ -104,14 +105,25 @@ class AutoBTCController(SupervisedBTCController):
             raise ValueError("autonomous_demo_disarmed")
         return super()._require_account_flat(exchange, product_id)
 
+    def _hard_contract_cap(self):
+        """Up to two DEMO contracts, never for the dashboard/supervised path."""
+        return 2
+
     def _max_contracts_for_entry(self, budget):
-        return min(1,super()._max_contracts_for_entry(budget))
+        return min(2, super()._max_contracts_for_entry(budget))
+
+    def _normalize_plan(self, plan, context):
+        """Downgrade oversized proposals; never turn GPT-6 WAIT into a trade."""
+        cap = evidence_contract_ceiling(context, plan.get("direction"))
+        if cap == 0:
+            return plan
+        return {**plan, "contracts": min(plan["contracts"], cap)}
 
     def _additional_fire_scope(self):
         return {
             "strategy_history_version": "btc-demo-recent24h-v1",
             "unattended_demo_mode": True,
-            "max_contracts_per_entry": 1,
+            "max_contracts_per_entry": 2,
             "one_attempt_operator_supervision_required": False,
             "max_new_order_attempts_per_utc_day": MAX_DAILY_ATTEMPTS,
         }
