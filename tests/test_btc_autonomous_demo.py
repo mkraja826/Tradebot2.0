@@ -134,18 +134,30 @@ class AutoTests(unittest.TestCase):
         self.assertEqual(result["status"],"halted_pending_operator_review")
         self.assertTrue((self.root/"btc-auto-demo-halt").exists())
 
-    def test_daily_equity_baseline_survives_new_session(self):
-        from tradebot.btc_autonomous_demo import check_daily_equity_limit
-        from tradebot.portfolio_equity_guard import EquityRiskError
-        check_daily_equity_limit(self.root,NOW,"100")
-        check_daily_equity_limit(self.root,NOW+timedelta(hours=4),"99.75")
-        with self.assertRaisesRegex(EquityRiskError,"btc_auto_daily_loss_limit"):
-            check_daily_equity_limit(self.root,NOW+timedelta(hours=8),"99.50")
+    def test_autonomous_does_not_install_daily_loss_limit(self):
+        from tradebot.btc_autonomous_demo import AutoBTCController
+        from tradebot.btc_supervised_equity_guard import SupervisedSessionEquityGuard
+        bot = AutoBTCController(self.root / "fire-ops.sqlite")
+        self.assertIs(type(bot.equity_guard), SupervisedSessionEquityGuard)
+        self.assertTrue(bot.equity_guard.allow_daily_loss_warning)
+        self.assertFalse((self.root / "btc-auto-demo.sqlite").exists())
 
-    def test_daily_equity_baseline_rolls_only_at_new_utc_day(self):
-        from tradebot.btc_autonomous_demo import check_daily_equity_limit
-        check_daily_equity_limit(self.root,NOW,"100")
-        check_daily_equity_limit(self.root,NOW+timedelta(days=1),"99.5")
+    def test_daily_only_collector_warning_does_not_hide_broker_failure(self):
+        from tradebot.equity_monitor import (
+            DAILY_ONLY_WARNING, demo_monitoring_operational,
+        )
+        healthy = {
+            "watchdog": "healthy", "equity_collector": DAILY_ONLY_WARNING,
+            "watchdog_age_seconds": 1, "equity_collector_age_seconds": 1,
+            "alert_codes": [DAILY_ONLY_WARNING],
+        }
+        self.assertTrue(demo_monitoring_operational(
+            healthy, allow_daily_loss_warning=True))
+        self.assertFalse(demo_monitoring_operational(healthy))
+        for extra in ("equity_loss_limit_breached", "watchdog_heartbeat_stale"):
+            report = {**healthy, "alert_codes": [DAILY_ONLY_WARNING, extra]}
+            self.assertFalse(demo_monitoring_operational(
+                report, allow_daily_loss_warning=True))
 
     def test_disarm_file_symlink_never_arms(self):
         p=self.root/"arm"
@@ -191,12 +203,12 @@ class AutoTests(unittest.TestCase):
             "trade_authorized":False}
         self.assertTrue(check_candidate(self.root,
             broker_factory=lambda **kw:ReadOnly(),
-            preflight=lambda broker,root:approved))
+            preflight=lambda broker,root,**kwargs:approved))
         denied=dict(approved)
         denied["owner_declared_main_isolated_accepted"]=False
         self.assertFalse(check_candidate(self.root,
             broker_factory=lambda **kw:ReadOnly(),
-            preflight=lambda broker,root:denied))
+            preflight=lambda broker,root,**kwargs:denied))
 
     def test_autonomous_candidate_uses_signed_readonly_broker(self):
         from unittest.mock import patch
@@ -225,7 +237,7 @@ class AutoTests(unittest.TestCase):
                 "DELTA_DEMO_API_SECRET": "fake-signature"}):
             result = check_candidate(
                 self.root, broker_factory=broker_factory,
-                preflight=lambda b, p: candidate)
+                preflight=lambda b, p, **kwargs: candidate)
         self.assertTrue(result)
         self.assertEqual(len(seen), 1)
         self.assertEqual(seen[0]["api_key"], "fake-id")
