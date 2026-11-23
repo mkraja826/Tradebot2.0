@@ -41,6 +41,7 @@ ASSET_TYPES = {
     "/styles.css": ("styles.css", "text/css; charset=utf-8"),
     "/charts.js": ("charts.js", "text/javascript; charset=utf-8"),
     "/app.js": ("app.js", "text/javascript; charset=utf-8"),
+    "/isolated.js": ("isolated.js", "text/javascript; charset=utf-8"),
 }
 
 
