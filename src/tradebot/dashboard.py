@@ -415,6 +415,39 @@ def create_handler(state, *, allowed_hosts=None):
                     return
                 data = json.dumps(overview.snapshot(), separators=(",", ":")).encode()
                 mime = "application/json; charset=utf-8"
+            elif path == "/api/isolated/fire/XAUTUSD":
+                from tradebot.isolated_dashboard import isolated_gold_fire_history
+                try:
+                    values = parse_qs(urlsplit(self.path).query).get("page", ["0"])
+                    if len(values) != 1:
+                        raise ValueError("Invalid page")
+                    page = int(values[0])
+                    report = isolated_gold_fire_history(state.root, page=page)
+                    data = json.dumps(report, allow_nan=False).encode()
+                except ValueError:
+                    self._headers(0, "application/json", 400)
+                    return
+                except Exception:
+                    self._headers(0, "application/json", 503)
+                    return
+                mime = "application/json"
+            elif match := re.fullmatch(r"/api/isolated/review/XAUTUSD/([a-f0-9]{32})", path):
+                from tradebot.isolated_dashboard import isolated_gold_fire_history
+                try:
+                    report = isolated_gold_fire_history(state.root, press=match.group(1))
+                    if not report["receipts"]:
+                        self._headers(0, "application/json", 404)
+                        return
+                    data = json.dumps({
+                        **report, "receipt": report["receipts"][0],
+                    }, allow_nan=False).encode()
+                except ValueError:
+                    self._headers(0, "application/json", 400)
+                    return
+                except Exception:
+                    self._headers(0, "application/json", 503)
+                    return
+                mime = "application/json"
             elif path == "/api/isolated/performance":
                 overview = getattr(state, "isolated_accounts", None)
                 perf = getattr(overview, "performance", None)
