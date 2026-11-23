@@ -346,7 +346,8 @@ def prior_fire_receipts_safe(root):
 def run_once(data_dir, *, instant=None, armed=is_armed,
              candidate=check_candidate, controller_factory=AutoBTCController,
              receipts_safe=prior_fire_receipts_safe,
-             active_trade_probe=signed_active_trade_skip, do_execute=False):
+             active_trade_probe=signed_active_trade_skip,
+             cooldown_check=post_close_cooldown, do_execute=False):
     """The default is read-only. The service requires its private arm file."""
     now = instant or datetime.now(timezone.utc)
     root = Path(data_dir)
@@ -374,7 +375,7 @@ def run_once(data_dir, *, instant=None, armed=is_armed,
         return {"status":"previous_fire_decision_or_execution_unresolved"}
     if not do_execute:
         return {"status":"eligible_read_only_no_order"}
-    cooldown, remaining = post_close_cooldown(
+    cooldown, remaining = cooldown_check(
         root, fire_filename="fire-ops.sqlite", now=now)
     if cooldown == "unavailable":
         return {"status":"verified_trade_close_time_unavailable"}
