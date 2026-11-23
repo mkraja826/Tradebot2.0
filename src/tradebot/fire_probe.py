@@ -69,6 +69,44 @@ RESTRICTED_BTC_INSTRUCTION = (
 )
 
 
+AUTONOMOUS_BTC_DIRECTION_INSTRUCTION = (
+    "Delta India DEMO BTCUSD autonomous experimental execution only. "
+    "The broker/account preflight, verified 24-hour original local history, "
+    "market-quality screen and independent guards are mandatory prerequisites "
+    "and are checked by the execution engine, not by this model. "
+    "Once a verified eligible snapshot reaches you, select one directional "
+    "candidate: LONG or SHORT. A neutral/WAIT/skip decision is not an allowed "
+    "model action in this autonomous DEMO mode. "
+    "Evaluate relative directional evidence from the completed five-minute "
+    "market candles, 15-minute and one-hour EMA20 level/slope, ADX14 and "
+    "directional indicators, RSI14, MACD histogram, completed-candle VWAP, "
+    "ATR5m, Bollinger bands, volume if available and the true local last-24h "
+    "high/low. Missing or conflicting readings must be described accurately, "
+    "not guessed or presented as strong evidence. "
+    "On uncertain but eligible conditions choose the comparatively better "
+    "supported side and propose ONE exploratory contract; medium confidence "
+    "may propose TWO, strong corroborated confidence at most THREE, all "
+    "subject to fire_execution_scope.max_contracts_per_entry, available "
+    "broker margin, estimated stop-loss risk and independent policy limits. "
+    "Use a valid integer leverage 1..20, never targeting maximum leverage. "
+    "Design tick_size-aligned entry-protective stop_loss and take_profit with "
+    "a positive net reward-to-risk expectation after fees and reserve, based "
+    "only on actual market evidence, without fabricating a price. "
+    "LONG requires stop_loss below best_bid and take_profit above best_ask; "
+    "SHORT requires stop_loss above best_ask and take_profit below best_bid. "
+    "Return exactly one JSON object with keys direction, leverage, contracts, "
+    "stop_loss, take_profit, thesis. Direction must be LONG or SHORT; contracts "
+    "must be a positive integer no greater than the supplied broker capacity. "
+    "A concise thesis must state the evidence, directional trade-off, "
+    "conviction tier, and principal risk. No markdown, commentary or extra "
+    "keys. This model is not an order authorization: invalid market evidence, "
+    "insufficient risk headroom, stale quotes, an existing order or position, "
+    "unsafe liquidation, or unverified attached SL/TP will BLOCK execution "
+    "independently. The declaration of isolated margin by the owner is not "
+    "independent broker evidence and may not override these checks."
+)
+
+
 def instruction_for_snapshot(snapshot):
     """Prevent an old six-period prompt from hallucinating withheld months."""
     if not isinstance(snapshot, dict):
@@ -119,18 +157,10 @@ def instruction_for_snapshot(snapshot):
                 or scope.get("max_new_order_attempts_per_utc_day") != 48):
             raise PlanError("Unsupported autonomous demo FIRE scope")
         return (
-            "BTCUSD Delta India DEMO unattended candidate, at most 48 "
-            "attempts per UTC day, at least 30 minutes apart, and at most "
-            "three contracts per attempt. "
-            "Prefer one small exploratory entry when market structure and "
-            "risk are acceptable even if conviction is modest; two for "
-            "medium confidence and three only for strong independently " "corroborated evidence. "
-            "Genuinely unsafe conditions still require WAIT. Account isolated margin "
-            "is OPERATOR DECLARED, not independently broker-verified. "
-            "Do not interpret this declaration as proof of broker leverage "
-            "or risk protection. The exchange equity, position, live margin, "
-            "SL/TP, liquidation and watchdog controls are separate mandatory "
-            "checks. " + RESTRICTED_BTC_INSTRUCTION
+            "This is one BTCUSD Delta India DEMO autonomous candidate, "
+            "bounded to at most 48 attempts per UTC day and no less than "
+            "30 minutes between attempted decisions. " +
+            AUTONOMOUS_BTC_DIRECTION_INSTRUCTION
         )
     if scope.get("unattended_demo_mode") is not None:
         raise PlanError("Unsupported autonomous demo FIRE scope")
@@ -197,6 +227,7 @@ def decision_failure_code(error, *, stage=None):
         "Expected an object": "model_invalid_object",
         "Invalid direction or contract count": "model_invalid_direction_or_quantity",
         "Malformed WAIT decision": "model_invalid_wait",
+        "Autonomous demo WAIT prohibited": "autonomous_invalid_wait",
         "Invalid proposed leverage (must be integer 1..20)": "model_invalid_leverage",
         "Missing or malformed price": "model_invalid_price",
         "Invalid price": "model_invalid_price",
@@ -253,6 +284,12 @@ def run_probe(routes, snapshot_loader, client_factory=TopBillingClient):
                 raise PlanError("Malformed Top Billing response")
             parsed = decision_payload(choice)
             stage = "validation"
+            # Autonomous DEMO requires a directional recommendation; all
+            # other FIRE modes retain their original WAIT semantics.
+            if (snapshot.get("fire_execution_scope", {}).get("unattended_demo_mode") is True
+                    and isinstance(parsed, dict)
+                    and parsed.get("direction") == "WAIT"):
+                raise PlanError("Autonomous demo WAIT prohibited")
             decision = validate(parsed, snapshot["core"],
                                 require_leverage=bool(snapshot.get("fire_execution_scope", {}).get("dynamic_leverage_enabled")))
             result = {"decision": decision, "usage": reply.get("usage"), "request_id": client.last_request_id}
