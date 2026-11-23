@@ -5,6 +5,7 @@ This is advisory evidence only; execution rechecks all broker/risk gates.
 """
 import argparse
 import json
+import os
 from pathlib import Path
 
 from tradebot.btc_autonomous_demo import is_armed, prior_fire_receipts_safe
@@ -49,7 +50,10 @@ def inspect(data_dir, *, broker_factory=DeltaDemo,
     if not result["previous_fire_receipts_safe"]:
         blockers.append("previous_fire_requires_operator_review")
     try:
-        broker = broker_factory(allow_orders=False)
+        broker = broker_factory(
+            api_key=os.getenv("DELTA_DEMO_API_KEY", ""),
+            api_secret=os.getenv("DELTA_DEMO_API_SECRET", ""),
+            allow_orders=False)
         if (getattr(broker, "base_url", None) != DEMO_API
                 or getattr(broker, "allow_orders", None) is not False):
             blockers.append("readonly_delta_demo_client_required")
