@@ -269,8 +269,9 @@ class AutoTests(unittest.TestCase):
         bot = AutoBTCController(self.root / "fire-ops.sqlite")
         with patch("tradebot.btc_autonomous_demo.is_armed", return_value=True):
             with patch("tradebot.btc_autonomous_demo.signed_isolated_margin_proven", return_value=False):
-                with self.assertRaisesRegex(ValueError, "signed_demo_margin_mode_required_before_entry"):
-                    bot._require_account_flat(object(), 84)
+                with patch.dict("os.environ", {"TRADEBOT_EXPECTED_DEMO_SUBACCOUNT": "BTC"}):
+                    with self.assertRaisesRegex(ValueError, "signed_demo_margin_mode_required_before_entry"):
+                        bot._require_account_flat(object(), 84)
 
     def test_client_preflight_rejects_missing_margin_owner_verification(self):
         from tradebot.btc_autonomous_demo import check_candidate
