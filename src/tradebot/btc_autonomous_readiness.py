@@ -80,6 +80,7 @@ def inspect(data_dir, *, broker_factory=DeltaDemo,
                     "historical_high_watermark_drawdown_limit",
                     "equity_daily_loss_limit_breached",
                     "equity_loss_limit_breached",
+                    "provisional_first_day_signed_genesis",
                 }
                 warnings = check.get("equity_quality_warnings", [])
                 if type(warnings) is list:
