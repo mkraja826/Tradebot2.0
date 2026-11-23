@@ -159,7 +159,8 @@ def instruction_for_snapshot(snapshot):
         return (
             "This is one BTCUSD Delta India DEMO autonomous candidate, "
             "bounded to at most 48 attempts per UTC day and no less than "
-            "30 minutes between attempted decisions. " +
+            "30 minutes between attempted decisions, with at most three "
+            "contracts per attempt. " +
             AUTONOMOUS_BTC_DIRECTION_INSTRUCTION
         )
     if scope.get("unattended_demo_mode") is not None:
