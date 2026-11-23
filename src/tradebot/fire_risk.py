@@ -31,14 +31,19 @@ class FireRiskLimits:
         # position/price validity and exact protective orders still gate.
         warning_only_versions = frozenset((
             "btc-demo-chart-stop-v4", "gold-demo-chart-stop-v1"))
-        uncapped_demo = (self.equity_risk_fraction is None
-                         and self.version in warning_only_versions
-                         and self.max_contracts == 6)
+        gold_tiered_demo = (self.equity_risk_fraction is None
+                            and self.version == "gold-demo-tiered-fixed20-v2"
+                            and self.max_contracts == 64)
+        uncapped_demo = (gold_tiered_demo or (
+            self.equity_risk_fraction is None
+            and self.version in warning_only_versions
+            and self.max_contracts == 6))
         valid_risk_fraction = (
             uncapped_demo or (
                 isinstance(self.equity_risk_fraction, Decimal)
                 and Decimal("0") < self.equity_risk_fraction <= Decimal("0.01")))
-        if (type(self.max_contracts) is not int or not 1 <= self.max_contracts <= 6
+        if (type(self.max_contracts) is not int or not 1 <= self.max_contracts <= (
+                64 if gold_tiered_demo else 6)
                 or not valid_risk_fraction
                 or not 0 < self.max_effective_leverage <= Decimal("20")
                 or not ((self.minimum_net_reward_risk is None and uncapped_demo)
@@ -113,9 +118,11 @@ def assess_fire_plan(plan, budget, quote, *, limits=None):
     soft_quality_demo = (
         limits.equity_risk_fraction is None
         and limits.minimum_net_reward_risk is None
-        and limits.version in (
+        and ((limits.version in (
             "btc-demo-chart-stop-v4", "gold-demo-chart-stop-v1")
-        and limits.max_contracts == 6)
+            and limits.max_contracts == 6) or (
+            limits.version == "gold-demo-tiered-fixed20-v2"
+            and limits.max_contracts == 64)))
     if loss <= 0 or (reward <= 0 and not soft_quality_demo):
         raise RiskRejected("Non-positive net reward or invalid risk")
     maximum_loss = (equity * limits.equity_risk_fraction
