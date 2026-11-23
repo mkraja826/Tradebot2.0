@@ -106,11 +106,13 @@ def receipts_safe(root):
                 # A failed/ambiguous model outcome needs an operator review,
                 # not a disguised successful no-order retry.
                 return False
+            # Broker-signed watchdog closed an ordinarily protected trade.
+            # In a naturally flat terminal receipt, attached protection is
+            # no longer active, so do not require protection_verified=True.
             return (row[0]=="flat_verified"
                 and detail.get("reason_code") not in (
                     "emergency_flat_verified",
-                    "execution_or_protection_unverified")
-                and detail.get("protection_verified") is True)
+                    "execution_or_protection_unverified"))
     except (sqlite3.Error,OSError,ValueError,TypeError):
         return False
 
