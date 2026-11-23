@@ -20,7 +20,7 @@ FIELDS = ("symbol account_scope fire_id created_at_utc updated_at_utc status "
           "entry_fill_time_utc best_bid best_ask stop_loss take_profit "
           "broker_order_id orders_submitted protection_verified "
           "liquidation_verified estimated_net_rr thesis market_indicators_json "
-          "quality_warnings_json broker_verified_net_pnl_usd "
+          "quality_warnings_json risk_quote_diagnostics_json broker_verified_net_pnl_usd "
           "manual_review_label manual_notes").split()
 
 
@@ -81,6 +81,10 @@ def read_account(data_root, symbol):
                    market_indicators_json=json.dumps(signals, sort_keys=True),
                    quality_warnings_json=json.dumps(
                        warnings if isinstance(warnings, list) else []))
+        quote_evidence = d.get("risk_quote_diagnostics")
+        row["risk_quote_diagnostics_json"] = json.dumps(
+            quote_evidence if isinstance(quote_evidence, dict) else {},
+            sort_keys=True)
         # P&L and operator classifications are intentionally blank.
         rows.append(row)
     return rows
@@ -117,7 +121,7 @@ def main(argv=None):
         for row in rows:
             # Prevent AI-generated prose from becoming executable spreadsheet formulae.
             for key in ("thesis", "model", "market_indicators_json",
-                        "quality_warnings_json"):
+                        "quality_warnings_json", "risk_quote_diagnostics_json"):
                 if row[key].startswith(("=", "+", "-", "@", "\t", "\r")):
                     row[key] = "'" + row[key]
             writer.writerow(row)
