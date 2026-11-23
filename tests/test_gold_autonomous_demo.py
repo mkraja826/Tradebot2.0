@@ -1,4 +1,4 @@
-"""Gold unattended worker: BTC-equivalent cadence, independent account, guarded order authority."""
+"""Gold unattended worker: 5-minute post-close cooldown, independent account, guarded order authority."""
 from datetime import datetime,timedelta,timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -50,11 +50,11 @@ class GoldAutonomousTests(unittest.TestCase):
         arm.chmod(0o644)
         self.assertFalse(is_gold_armed(arm))
 
-    def test_same_30_minute_spacing_as_btc_with_48_daily_ceiling(self):
+    def test_same_5_minute_spacing_as_btc_with_48_daily_ceiling(self):
         t=NOW
         self.assertIsNotNone(claim_attempt(self.root,t))
-        self.assertIsNone(claim_attempt(self.root,t+timedelta(minutes=29)))
-        self.assertIsNotNone(claim_attempt(self.root,t+timedelta(minutes=30)))
+        self.assertIsNone(claim_attempt(self.root,t+timedelta(minutes=4)))
+        self.assertIsNotNone(claim_attempt(self.root,t+timedelta(minutes=5)))
         with sqlite3.connect(self.root/"gold-auto-demo.sqlite") as db:
             self.assertEqual(db.execute(
                 "select count(*) from gold_auto_attempts").fetchone()[0],2)
@@ -73,25 +73,25 @@ class GoldAutonomousTests(unittest.TestCase):
             gold_deepseek_adapter(GOLD_ROLES,lambda:None)
 
     def test_no_order_without_isolated_gold_arm(self):
-        self.assertEqual(run_once(self.root,armed=lambda:False,do_execute=True),
+        self.assertEqual(run_once(self.root,armed=lambda:False,do_execute=True,cooldown_check=lambda *args,**kwargs:("ready",0)),
                          {"status":"disarmed"})
         self.assertFalse((self.root/"gold-auto-demo.sqlite").exists())
 
     def test_migration_halt_blocks_every_attempt(self):
         (self.root/"gold-auto-demo-halt").touch()
-        self.assertEqual(run_once(self.root,armed=lambda:True,do_execute=True),
+        self.assertEqual(run_once(self.root,armed=lambda:True,do_execute=True,cooldown_check=lambda *args,**kwargs:("ready",0)),
                          {"status":"halted_pending_operator_review"})
         self.assertFalse((self.root/"gold-auto-demo.sqlite").exists())
 
     def test_nonflat_broker_account_skips_not_fires(self):
         state=run_once(self.root,armed=lambda:True,candidate=lambda x:False,
-            active_trade_probe=lambda x:True,do_execute=True)
+            active_trade_probe=lambda x:True,do_execute=True,cooldown_check=lambda *args,**kwargs:("ready",0))
         self.assertEqual(state["status"],"skipped_active_trade")
         self.assertFalse((self.root/"gold-auto-demo.sqlite").exists())
 
     def test_unverified_broker_cannot_force_trade(self):
         state=run_once(self.root,armed=lambda:True,candidate=lambda x:False,
-            active_trade_probe=lambda x:None,do_execute=True)
+            active_trade_probe=lambda x:None,do_execute=True,cooldown_check=lambda *args,**kwargs:("ready",0))
         self.assertEqual(state["status"],"read_only_preflight_unavailable")
         self.assertFalse((self.root/"gold-auto-demo.sqlite").exists())
 
@@ -109,7 +109,7 @@ class GoldAutonomousTests(unittest.TestCase):
             "protection_verified":True,"liquidation_verified":True}
         run=run_once(self.root,instant=NOW,armed=lambda:True,
             candidate=lambda x:True,receipt_check=lambda x:True,
-            controller_factory=lambda *a,**k:fake,do_execute=True)
+            controller_factory=lambda *a,**k:fake,do_execute=True,cooldown_check=lambda *args,**kwargs:("ready",0))
         self.assertTrue(run["protected"])
         self.assertEqual(run["status"],"attempt_finished")
         self.assertEqual(run["result"],"protected_active")
@@ -126,7 +126,7 @@ class GoldAutonomousTests(unittest.TestCase):
             "protection_verified":False}
         result=run_once(self.root,instant=NOW,armed=lambda:True,
             candidate=lambda x:True,receipt_check=lambda x:True,
-            controller_factory=lambda *a,**k:fake,do_execute=True)
+            controller_factory=lambda *a,**k:fake,do_execute=True,cooldown_check=lambda *args,**kwargs:("ready",0))
         self.assertEqual(result["result"],"exposure_unknown")
         self.assertTrue((self.root/"gold-auto-demo-halt").is_file())
         self.assertFalse((self.root/"btc-auto-demo-halt").exists())
@@ -140,12 +140,12 @@ class GoldAutonomousTests(unittest.TestCase):
             "protection_verified":False}
         response=run_once(self.root,instant=NOW,armed=lambda:True,
             candidate=lambda x:True,receipt_check=lambda x:True,
-            controller_factory=lambda *a,**k:fake,do_execute=True)
+            controller_factory=lambda *a,**k:fake,do_execute=True,cooldown_check=lambda *args,**kwargs:("ready",0))
         self.assertEqual(response["result"],"rejected_no_order")
         self.assertFalse(response["orders_submitted"])
         self.assertFalse((self.root/"gold-auto-demo-halt").exists())
 
-    def test_gold_prior_safe_no_order_receipt_may_retry_after_interval(self):
+    def test_gold_prior_safe_no_order_receipt_may_retry_after_five_minutes(self):
         db=self.root/"fire-xaut.sqlite"
         with sqlite3.connect(db) as conn:
             conn.execute("CREATE TABLE fire_requests("
