@@ -23,7 +23,8 @@ protecting manual annotations.
 
 The dataset contains identifiers, saved market context and indicator values,
 model thesis, proposed quantity/SL/TP, entry fill when known, signed receipt
-status, and rejection reason. **A `flat_verified` receipt is not proof of
+status, rejection reason, and (when present) the difference between model-time
+and signed broker-time entry prices and stop/target reward-to-risk. **A `flat_verified` receipt is not proof of
 profitability.** Net P&L and manual review fields are deliberately blank
 until reliable reconciliation and the owner's own labels are available.
 
