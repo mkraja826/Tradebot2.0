@@ -120,16 +120,20 @@ class AutoTests(unittest.TestCase):
         p.symlink_to(other)
         self.assertFalse(is_armed(p))
 
-    def test_execution_contract_size_clamped_to_one(self):
+    def test_bounded_autonomous_two_contract_ceiling_preserves_supervised_one(self):
         from tradebot.btc_autonomous_demo import AutoBTCController
+        from tradebot.btc_supervised_execution import SupervisedBTCController
         bot=AutoBTCController(self.root/"fire-ops.sqlite")
+        supervised=SupervisedBTCController(self.root/"supervised.sqlite")
         self.assertFalse(bot.enabled)
+        self.assertEqual(bot._hard_contract_cap(),2)
+        self.assertEqual(supervised._hard_contract_cap(),1)
         self.assertEqual(bot._max_contracts_for_entry(
-            {"max_contracts_per_entry":40}),1)
+            {"max_contracts_per_entry":40}),2)
         self.assertEqual(bot._max_contracts_for_entry(
             {"max_contracts_per_entry":0}),0)
         scope=bot._additional_fire_scope()
-        self.assertEqual(scope["max_contracts_per_entry"],1)
+        self.assertEqual(scope["max_contracts_per_entry"],2)
         self.assertTrue(scope["unattended_demo_mode"])
         self.assertEqual(scope["max_new_order_attempts_per_utc_day"],2)
 
