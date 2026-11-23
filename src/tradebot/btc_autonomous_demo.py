@@ -100,10 +100,6 @@ class AutoBTCController(SupervisedBTCController):
             "chosen_leverage_requires_live_broker_recheck": True,
         }
 
-    def _allow_clean_reward_risk_rejection(self):
-        """Only BTC autonomous DEMO can continue after known pre-intent poor R:R."""
-        return True
-
     def _normalize_plan(self, plan, context):
         """Downgrade model size to independently proven tier, never create an entry."""
         self._sizing_record = {}
@@ -147,6 +143,7 @@ class AutoBTCController(SupervisedBTCController):
             plan, budget, quote, limits=FireRiskLimits(
                 max_contracts=self._hard_contract_cap(),
                 equity_risk_fraction=None,
+                minimum_net_reward_risk=None,
                 version="btc-demo-chart-stop-v4"))
 
     def _additional_fire_scope(self):
@@ -264,29 +261,16 @@ def prior_fire_receipts_safe(root):
             if any(row[0] not in TERMINAL_SAFE for row in all_statuses):
                 return False
             last=db.execute(
-                "SELECT press,status,result FROM fire_requests "
+                "SELECT status,result FROM fire_requests "
                 "ORDER BY created_at DESC, rowid DESC LIMIT 1").fetchone()
             if last is None:
                 return True
-            detail=json.loads(last[2])
+            detail=json.loads(last[1])
             if type(detail) is not dict:
                 return False
-            if last[1]=="rejected_no_order":
+            if last[0]=="rejected_no_order":
                 if detail.get("reason_code")=="gpt6_wait_no_trade":
                     return True
-                if (detail.get("reason_code")=="btc_demo_net_reward_risk_below_minimum"
-                        and detail.get("orders_submitted") is False
-                        and detail.get("protection_verified") is False):
-                    # Verify no durable order intent for this exact attempt.
-                    # A forged receipt or missing intent table fails closed.
-                    exists = db.execute(
-                        "SELECT 1 FROM sqlite_master WHERE type='table' "
-                        "AND name='fire_entries'").fetchone()
-                    if not exists:
-                        return False
-                    return not bool(db.execute(
-                        "SELECT 1 FROM fire_entries WHERE press=? LIMIT 1",
-                        (last[0],)).fetchone())
                 # One precisely reviewed historical MODEL failure may be
                 # released only after fresh signed DEMO flatness and a durable
                 # no-order acknowledgement. Never rewrite FIRE history.
@@ -295,7 +279,7 @@ def prior_fire_receipts_safe(root):
                     from tradebot.btc_auto_review import reviewed_receipt_matches
                     return reviewed_receipt_matches(root)
                 return False
-            return (last[1]=="flat_verified"
+            return (last[0]=="flat_verified"
                     and detail.get("reason_code") not in (
                         "emergency_flat_verified","execution_or_protection_unverified"))
     except (sqlite3.Error,OSError,ValueError,TypeError):
@@ -343,19 +327,11 @@ def run_once(data_dir, *, instant=None, armed=is_armed,
         receipt = bot.snapshot()
         status = receipt.get("status") if accepted else "start_rejected"
         set_attempt_status(root,attempt_id,status)
-        # Only an exact, independently audited, pre-intent low net R:R
-        # rejection may retry at the next scheduled slot. All ambiguous
-        # rejections (including generic risk_governor_failed) still halt.
-        clean_quality_rejection = (
-            status == "rejected_no_order"
-            and receipt.get("reason_code") == "btc_demo_net_reward_risk_below_minimum"
-            and receipt.get("orders_submitted") is False
-            and receipt.get("protection_verified") is False
-            and receipts_safe(root))
+        # Every rejection except an explicit GPT-6 WAIT is investigated
+        # before another unattended attempt; no fail-open retry loops.
         unexpected_rejection = (
             status == "rejected_no_order"
-            and receipt.get("reason_code") != "gpt6_wait_no_trade"
-            and not clean_quality_rejection)
+            and receipt.get("reason_code") != "gpt6_wait_no_trade")
         emergency_closeout = (
             status == "flat_verified"
             and receipt.get("reason_code") in (
