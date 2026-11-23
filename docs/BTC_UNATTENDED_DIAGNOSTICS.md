@@ -88,13 +88,17 @@ Only this BTCUSD **Delta India DEMO** worker can use three sizes:
 |---|---:|---:|
 | Small exploratory | 1 | 0.25% of verified equity |
 | Medium | 2 | 0.35% of verified equity |
-| Strong | 3 | 0.50% of verified equity |
+| Strong — GPT-6 selected | 3–6 | 0.50% of verified equity |
 
 The independent capacity screen requires aligned 15-minute and 1-hour EMA
 direction and ADX/DI trend before approving medium; strong also requires
 ADX at least 25 and at least three confirming MACD/RSI/VWAP/RVOL signals.
-GPT-6 must still propose a legitimate LONG/SHORT with executable stop and
-target. The deterministic model-size ceiling can **reduce** its quantity,
+GPT-6 chooses the large quantity (3–6) and leverage (1×–20×) for strong
+setups, with executable stop and target. It does NOT choose arbitrary margin
+balances or account margin mode: margin is independently computed and verified
+from its proposed quantity, leverage, exchange contract rules and signed wallet.
+The initial capacity preview assumes up to 20× for affordability only; actual
+order capacity is recalculated at GPT-6's selected leverage before any POST. The deterministic model-size ceiling can **reduce** its quantity,
 but never upgrade what the model requested, turn a WAIT into an order, or
 change the direction/exit levels. Broker wallet equity, affordability,
 fees, liquidation, account-wide exposure, stop-loss and take-profit are
@@ -108,7 +112,7 @@ increase paid API use substantially, even when GPT-6 returns WAIT. DEMO
 performance never predicts real-money profitability.
 
 After a release, the exact private owner arm marker must match the versioned
-policy string `DELTA-INDIA-DEMO:BTCUSD:UNATTENDED:30MIN-MAX48-UTC-DAY`.
+policy string `DELTA-INDIA-DEMO:BTCUSD:UNATTENDED:30MIN-MAX48-DYNAMIC6`.
 Replacing the old 2/day arm requires an archived, mode-0600 prior file and a
 fresh signed read-only preflight. Never delete attempt history or change
 broker settings to force eligibility.
@@ -118,7 +122,7 @@ broker settings to force eligibility.
 
 For the BTCUSD Delta India DEMO 30-minute autonomous worker, GPT-6 must
 return a LONG or SHORT directional candidate and choose a confidence tier
-(1, 2, or 3 contracts). On mixed evidence it is asked to choose the
+(1, 2, or 3–6 contracts). On mixed evidence it is asked to choose the
 comparatively better-supported side with one exploratory contract; it
 must not invent missing market readings or executable exit prices.
 The original model WAIT action remains supported in supervised FIRE.
@@ -180,3 +184,33 @@ More DEMO trades are useful for testing, but do not imply that more
 losses are desirable or that the strategy has learned. Avoid changing
 strategy thresholds after each isolated loss, and validate any proposed
 rule on an untouched out-of-sample period.
+
+
+## GPT-6-selected large quantity and leverage (v3)
+
+- Small remains exactly 1 contract; medium remains exactly 2 contracts.
+- Only a strong independently corroborated directional signal admits a GPT-6
+  large proposal in the inclusive range 3 through 6 contracts. GPT-6 selects
+  the exact quantity and integer leverage from 1 through 20; the independent
+  evidence screen can only reduce quantity, not increase it.
+- A read-only broker wallet/product budget first shows GPT-6 a hypothetical
+  maximum-contract capacity at 20x. That is NOT permission or proof that a
+  lower chosen leverage can fund the same contracts.
+- After GPT-6's recommendation, fresh signed wallet, tiered broker margin,
+  account flatness, model stop distance, estimated fees, slippage and
+  notional exposure independently check the selected leverage and size.
+  Synchronizing broker leverage can happen only while verified flat, with
+  authenticated readback before an actual order, never a silent margin-mode
+  change. The position must remain isolated and the broker-proven
+  liquidation buffer must protect the attached SL/TP pair.
+- A strong trade's maximum modeled stop-loss exposure remains 0.5% of
+  verified equity; this is also the full daily drawdown halt. It is a model
+  estimate and cannot prevent slippage, gaps or realized loss beyond it.
+- Each submitted FIRE records GPT-6's selected quantity and leverage,
+  an explicitly *nominal* initial margin estimate, and a bounded
+  strong_dynamic sizing tier for the post-trade learning report.
+- The previous owner arm policy is intentionally invalid for this stronger
+  experimental size; transition to the new exact private owner arm requires
+  retaining the archived earlier policy and preserving all durable attempts.
+  A preexisting model-error HALT must remain in place until independently
+  reviewed; a code deployment must never silently clear it.
