@@ -1,7 +1,8 @@
 """Independent DeepSeek XAUTUSD unattended Delta India DEMO worker.
 
-Checks eligibility every 5m, reserves <=48 independent 30-minute attempts
-daily, skips signed live exposure, never replays unresolved broker orders.
+Checks eligibility every 5m, reserves <=48 independent attempts daily,
+and waits at least five minutes after verified trade close before a new entry.
+Skips signed live exposure; never replays unresolved broker orders.
 Order authority belongs solely to the protected Gold FIRE controller.
 """
 from contextlib import closing
@@ -15,13 +16,16 @@ import stat
 import time
 
 from tradebot.gold_autonomous_controller import AutoGoldController
+from tradebot.autonomous_cooldown import post_close_cooldown
 from tradebot.fire_account_guard import AccountExposureRejected
 from tradebot.btc_autonomous_demo import signed_active_trade_skip
 from tradebot.gold_autonomous_readiness import gold_preflight
 
+# Historical arm token deliberately stays unchanged: rotating this secret
+# would unexpectedly disarm an already-approved isolated DEMO worker.
 ARM_CONTENT = "DELTA-INDIA-DEMO:XAUTUSD:DEEPSEEK:UNATTENDED:30MIN-MAX48-DYNAMIC6"
 MAX_DAILY_ATTEMPTS=48
-MIN_INTERVAL=1800
+MIN_INTERVAL=5*60
 POLL_SECONDS=300
 TERMINAL_SAFE={"rejected_no_order","flat_verified"}
 
@@ -177,6 +181,13 @@ def run_once(data_dir,*,instant=None,armed=is_gold_armed,candidate=check_candida
         return {"status":"previous_gold_fire_unresolved"}
     if not do_execute:
         return {"status":"eligible_read_only_no_order"}
+    cooldown, remaining = post_close_cooldown(
+        root, fire_filename="fire-xaut.sqlite", now=now)
+    if cooldown == "unavailable":
+        return {"status":"verified_trade_close_time_unavailable"}
+    if cooldown == "cooling_down":
+        return {"status":"post_trade_cooldown",
+                "remaining_seconds":remaining}
     attempt=claim_attempt(root,now)
     if attempt is None:
         return {"status":"daily_or_interval_budget_exhausted"}
