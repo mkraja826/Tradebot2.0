@@ -56,18 +56,34 @@
       second.append(elem("small","", "AI proposal did not execute"));
     } else {
       second.append(elem("strong","perf-unverified","NOT VERIFIED"));
-      second.append(elem("small","",String(data.reason||"Pending broker evidence")
-        .replace(/_/g," ").slice(0,96)));
+      const explanation=data.reason==="overlapping_external_postings"?
+        "Overlapping broker postings; individual net P&L not verified":
+        String(data.reason||"Pending broker evidence").replace(/_/g," ");
+      second.append(elem("small","",explanation.slice(0,96)));
     }
     r.append(first,second);
     return r;
   };
-  const card=(name,data)=>{
+  const card=(name,data,stale=false,activity=null)=>{
     const box=elem("article","performance-card "+(name==="GOLD"?"perf-gold":"perf-btc"));
     const header=elem("div","perf-card-heading");
     header.append(elem("h3","",name==="BTC"?"BTCUSD · GPT-6":"XAUTUSD · DeepSeek"),
       elem("span","perf-label",name+" isolated DEMO"));
     box.append(header);
+    if(activity?.status==="available"){
+      box.append(elem("div","perf-footer",
+        "Recorded attempts: "+activity.recorded_attempts+
+        " · rejected: "+activity.rejected_attempts+
+        " · broker-verified flat: "+activity.verified_flat_attempts+
+        " · latest: "+timeLabel(activity.latest_at)+
+        " (receipt status only; not trade P&L)"));
+    }
+    if(stale){
+      box.append(elem("div","perf-unavailable",
+        "Signed broker performance is older than the freshness window. "+
+        "Financial figures are withheld while refreshed evidence is requested."));
+      return box;
+    }
     if(!data || data.status!=="complete_broker_window"){
       box.append(elem("div","perf-unavailable",
         "Signed broker history unavailable. Performance values are not zero."));
@@ -108,6 +124,10 @@
       (data.signed_fill_count??"—")+" signed fills · "+
       (data.signed_wallet_posting_count??"—")+" wallet postings"));
     const trades=data.trade_rows||[];
+    const ambiguous=trades.filter(v=>v.reason==="overlapping_external_postings").length;
+    if(ambiguous)box.append(elem("p","perf-unavailable",
+      ambiguous+" closed trades await independent broker wallet attribution. "+
+      "No good/bad verdict or trade P&L has been inferred."));
     if(!trades.length)box.append(elem("div","perf-empty","No FIRE activity in the seven-day window"));
     else{
       const list=elem("div","perf-trade-list");
@@ -133,14 +153,19 @@
     long.setAttribute("aria-pressed",String(period==="last_7d"));
     root.replaceChildren();
     const accounts=current?.accounts||{};
+    const activity=current?.attempt_activity||{};
+    const stale=current?.stale===true;
     for(const name of ["BTC","GOLD"])
-      root.append(card(name,accounts[name]));
+      root.append(card(name,accounts[name],stale,activity[name]));
     const count=["BTC","GOLD"].filter(k=>
       accounts[k]?.status==="complete_broker_window").length;
-    sync.textContent=(current?.checked_at?
-      count+"/2 signed histories · "+timeLabel(current.checked_at):
-      "Awaiting signed broker history");
-    sync.dataset.state=count===2?"ok":"warn";
+    const status=current?.refresh_status==="refreshing"?
+      "Refreshing signed histories":stale?
+      "Waiting for fresh signed histories":"Signed histories";
+    sync.textContent=status+" · "+(stale?0:count)+"/2 fresh · "+
+      (current?.checked_at?timeLabel(current.checked_at):
+      "No completed broker history yet");
+    sync.dataset.state=!stale&&count===2?"ok":"warn";
   }
   short.addEventListener("click",()=>{period="last_24h";render();});
   long.addEventListener("click",()=>{period="last_7d";render();});
@@ -156,12 +181,10 @@
       if(report?.mode!=="read_only" ||
          report.source!=="isolated_signed_broker_performance")
         throw new Error("Unexpected performance data source");
-      if(report.checked_at &&
-         Date.now()-Date.parse(report.checked_at)>450000)
-        throw new Error("Performance history is stale");
       current=report;
       render();
-      if(!report.checked_at ||
+      if(report.stale===true || report.refreshing===true ||
+         !report.checked_at ||
          ["BTC","GOLD"].some(k=>report.accounts?.[k]?.status==="loading"))
         wait=3000;
     }catch(_){
