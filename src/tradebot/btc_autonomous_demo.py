@@ -1,7 +1,7 @@
 """Bounded BTCUSD Delta India DEMO-only unattended pilot.
 
 Runs read-only eligibility checks every five minutes and may reserve at most
-48 GPT-6 FIRE attempts per UTC day, at least five minutes apart.
+GPT-6 FIRE attempts at least five minutes apart, without a daily count cap.
 After a verified trade close, waits five minutes before trying another. Broker risk/protection
 checks remain inside SupervisedBTCController. No production host is supported.
 """
@@ -33,7 +33,6 @@ from tradebot.btc_supervised_recent24h import load_recent24h_strategy_context
 # Historical arm token deliberately stays unchanged: rotating this secret
 # would unexpectedly disarm an already-approved isolated DEMO worker.
 ARM_CONTENT = "DELTA-INDIA-DEMO:BTCUSD:UNATTENDED:30MIN-MAX48-DYNAMIC6"
-MAX_DAILY_ATTEMPTS = 48
 MIN_INTERVAL = 5 * 60
 POLL_SECONDS = 300
 TERMINAL_SAFE = {"rejected_no_order", "flat_verified"}
@@ -201,7 +200,7 @@ class AutoBTCController(SupervisedBTCController):
             "unattended_demo_mode": True,
             "max_contracts_per_entry": MAX_AUTONOMOUS_LARGE_CONTRACTS,
             "one_attempt_operator_supervision_required": False,
-            "max_new_order_attempts_per_utc_day": MAX_DAILY_ATTEMPTS,
+            "daily_attempt_cap_enabled": False,
         }
 
 
@@ -223,9 +222,10 @@ def claim_attempt(data_dir, instant):
         old = db.execute(
             "SELECT requested_at FROM btc_auto_attempts "
             "ORDER BY requested_at DESC LIMIT 1").fetchone()
-        used = db.execute(
-            "SELECT COUNT(*) FROM btc_auto_attempts WHERE utc_day=?", (day,)).fetchone()[0]
-        if used >= MAX_DAILY_ATTEMPTS or (old and ts-old[0] < MIN_INTERVAL):
+        # Retain the UTC-day column for audit history, not admission.
+        # Only the durable 5-minute spacing and broker/preflight gates limit
+        # attempts; there is no per-day numeric AI attempt allocation.
+        if old and ts-old[0] < MIN_INTERVAL:
             db.rollback()
             return None
         entry_id = uuid4().hex
@@ -384,7 +384,7 @@ def run_once(data_dir, *, instant=None, armed=is_armed,
                 "remaining_seconds":remaining}
     attempt_id = claim_attempt(root,now)
     if attempt_id is None:
-        return {"status":"daily_or_interval_budget_exhausted"}
+        return {"status":"interval_cooldown_active"}
     try:
         bot = controller_factory(root/"fire-ops.sqlite",enabled=True,
                                  spawn=lambda task:task())
