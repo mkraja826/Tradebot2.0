@@ -8,6 +8,7 @@ Financial views have two disjoint meanings:
 Unknown funding, pagination, fills or order identities never become a $0 gain.
 No orders, no AI calls, no DB writes, no cross-subaccount aggregation.
 """
+from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -49,7 +50,7 @@ def _amount(v):
 def _read_trades(root, *, start_us, cutoff_us):
     """A bounded immutable snapshot; never initialize or alter FIRE ledgers."""
     name = "fire-ops.sqlite" if root.name == "btc-isolated" else "fire-xaut.sqlite"
-    with _sqlite(root / name) as db:
+    with closing(_sqlite(root / name)) as db:
         rows = db.execute(
             "SELECT press,created_at,status,result FROM fire_requests "
             "ORDER BY created_at DESC LIMIT ?", (MAX_RECEIPTS+1,)).fetchall()
@@ -342,7 +343,7 @@ def _local_attempt_activity(root):
         return result
     filename = "fire-ops.sqlite" if root.name == "btc-isolated" else "fire-xaut.sqlite"
     try:
-        with _sqlite(root / filename) as db:
+        with closing(_sqlite(root / filename)) as db:
             counts = dict(db.execute(
                 "SELECT status,COUNT(*) FROM fire_requests GROUP BY status").fetchall())
             latest = db.execute(
