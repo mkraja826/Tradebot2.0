@@ -7,6 +7,7 @@
   <meta name="description" content="Private read-only Delta India demo Tradebot 2.0 monitoring dashboard"/>
   <title>Tradebot 2.0 · Command Center</title>
   <link rel="stylesheet" href="/styles.css"/>
+  <link rel="stylesheet" href="/workspace.css"/>
   <script defer src="/app.js"></script>
   <script defer src="/charts.js"></script>
   <script defer src="/isolated.js"></script>
@@ -234,6 +235,7 @@
         <section class="panel" id="performance"><div class="eyebrow">DEMO ACCOUNT · LAST 24 HOURS</div><h2>Settled trading cash flows</h2><div id="returns"></div></section>
         <section class="panel activity-panel" id="activity">
           <div class="panel-header"><div><div class="eyebrow">AUDIT TRAIL</div><h2>Recent events</h2></div><span class="tiny-label">JOURNAL / LOCAL VM</span></div>
+          <p id="activity-summary" class="activity-summary" role="status" aria-live="polite">Waiting for recent events…</p>
           <div class="event-head"><span>EVENT</span><span>DETAILS</span><span>TIME (UTC)</span></div>
           <div id="events" class="event-list"><div class="empty">No journal events recorded yet</div></div>
         </section>
