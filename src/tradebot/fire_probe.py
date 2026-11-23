@@ -84,13 +84,13 @@ AUTONOMOUS_BTC_DIRECTION_INSTRUCTION = (
     "high/low. Missing or conflicting readings must be described accurately, "
     "not guessed or presented as strong evidence. "
     "Choose contract quantity yourself based on market evidence, "
-    "volatility and verified broker affordability. No weak/medium/strong "
-    "quantity-allocation tiers are applied and your selected count is "
+    "volatility and verified broker affordability. You may use small, "
+    "medium, or large size GUIDELINES, but your contract count is yours; "
     "never silently reduced. Use a positive integer not exceeding "
     "fire_execution_scope.max_contracts_per_entry; separate broker and "
     "demo maximum limits remain binding. An out-of-budget order is rejected. "
-    "Choose the integer 1..20 leverage yourself based on stop distance, "
-    "volatility and available margin, never to maximize quantity alone. "
+    "Use leverage exactly 20x for this owner's isolated DEMO policy; "
+    "all broker margin and liquidation checks still apply. "
     "The required margin is derived independently from your chosen "
     "contract count and leverage at the broker; it is NOT a separate "
     "unverified balance or an instruction to change account margin mode. "
@@ -198,10 +198,25 @@ def instruction_for_snapshot(snapshot):
             "with no daily model-attempt-count cap but at least "
             "five minutes between attempted decisions, plus a five-minute "
             "cooldown after a broker-verified closed trade. Up to six contracts "
-            "are model-selectable without confidence-tier allocation, "
+            "are selected by GPT-6 using small/medium/large guidelines, "
             "but always within separately verified broker margin, "
             "liquidation and attached bracket protections. " +
-            AUTONOMOUS_BTC_DIRECTION_INSTRUCTION
+            AUTONOMOUS_BTC_DIRECTION_INSTRUCTION +
+            (" For this isolated demo, return leverage exactly 20 and "
+             "optionally include size_tier as small, medium or large. "
+             "YOU choose the size_tier AND integer contracts yourself, "
+             "guided by 5%, 20% or 40% of verified account equity as "
+             "position NOTIONAL for small, medium or large respectively. "
+             "Compute approximate contracts using verified "
+             "notional_per_contract_usd, then adjust to a whole-contract "
+             "count based on signal quality and evidence. These percentages "
+             "are guidelines, NOT fixed contract allocations and no engine "
+             "automatically resizes your proposal. Signed broker margin "
+             "remains capped at 20% of equity. If one contract exceeds "
+             "a small target, choose one or a higher tier according to "
+             "your evidence without pretending an exact match. "
+             "Never exceed max_contracts_per_entry."
+             if scope.get("fixed_leverage") == 20 else "")
         )
     if scope.get("unattended_demo_mode") is not None:
         raise PlanError("Unsupported autonomous demo FIRE scope")
@@ -246,6 +261,11 @@ def validate(decision, core, *, require_leverage=False):
     if not lower < bid <= ask < upper:
         raise PlanError("Exit prices must bracket the quote in the chosen direction")
     plan = dict(direction=side, contracts=size, stop_loss=str(stop), take_profit=str(target))
+    tier = decision.get("size_tier")
+    if tier is not None:
+        if type(tier) is not str or tier not in ("small", "medium", "large"):
+            raise PlanError("Invalid proposed size tier")
+        plan["size_tier"] = tier
     if leverage is not None:
         plan["leverage"] = leverage
     return plan
