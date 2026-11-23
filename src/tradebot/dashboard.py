@@ -24,6 +24,7 @@ from tradebot.delta import DeltaDemo
 from tradebot.fire_dashboard import FirePreviewController
 from tradebot.fire_execution import FireDemoController
 from tradebot.equity_monitor import risk_health
+from tradebot.isolated_dashboard import IsolatedAccountsDashboard
 from tradebot.fire_probe import load_snapshot
 from tradebot.trade_memory import public_learning_summary
 from tradebot.market import _age_seconds, _candles, MarketDataError
@@ -40,6 +41,7 @@ ASSET_TYPES = {
     "/styles.css": ("styles.css", "text/css; charset=utf-8"),
     "/charts.js": ("charts.js", "text/javascript; charset=utf-8"),
     "/app.js": ("app.js", "text/javascript; charset=utf-8"),
+    "/isolated.js": ("isolated.js", "text/javascript; charset=utf-8"),
 }
 
 
@@ -202,6 +204,7 @@ class DashboardData:
             self.root / "fire-ops.sqlite",
             enabled=os.getenv("TRADEBOT_FIRE_DEMO_EXECUTION", "false") == "true",
         )
+        self.isolated_accounts = IsolatedAccountsDashboard(self.root)
         self.gold_preview = FirePreviewController(snapshot_loader=lambda: load_snapshot("XAUTUSD"))
         self.gold_trade = FireDemoController(
             self.root / "fire-xaut.sqlite", symbol="XAUTUSD",
@@ -399,6 +402,13 @@ def create_handler(state, *, allowed_hosts=None):
             path = urlsplit(self.path).path
             if path == "/api/overview":
                 data = json.dumps(state.snapshot(), separators=(",", ":")).encode()
+                mime = "application/json; charset=utf-8"
+            elif path == "/api/isolated/overview":
+                overview = getattr(state, "isolated_accounts", None)
+                if overview is None:
+                    self._headers(0, "application/json", 503)
+                    return
+                data = json.dumps(overview.snapshot(), separators=(",", ":")).encode()
                 mime = "application/json; charset=utf-8"
             elif path == "/api/risk/checkpoints":
                 data = json.dumps(

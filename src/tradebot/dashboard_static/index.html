@@ -9,6 +9,7 @@
   <link rel="stylesheet" href="/styles.css"/>
   <script defer src="/app.js"></script>
   <script defer src="/charts.js"></script>
+  <script defer src="/isolated.js"></script>
 </head>
 <body>
   <div class="shell">
@@ -16,6 +17,7 @@
       <div class="brand"><div class="brand-logo">T<span>2</span></div><div><strong>TRADEBOT <em>2.0</em></strong><small>INTELLIGENCE TERMINAL</small></div></div>
       <div class="section-label">COMMAND CENTER</div>
       <a href="#overview" class="nav active"><span class="nav-icon">◫</span> Overview</a>
+      <a href="#isolated-accounts" class="nav"><span class="nav-icon">◈</span> BTC + Gold Bots</a>
       <a href="#market" class="nav"><span class="nav-icon">⌁</span> Market &amp; Account</a>
       <a href="#intelligence" class="nav"><span class="nav-icon">✧</span> AI Decisions</a>
       <a href="#activity" class="nav"><span class="nav-icon">≡</span> Activity Log</a>
@@ -29,26 +31,40 @@
       <header class="topbar">
         <div class="crumb">Workspace <span>/</span> Dashboard <span>/</span> <strong>Tradebot 2.0</strong></div>
         <div class="top-right">
-          <span class="dot"></span><span>BTC/USD · DELTA DEMO</span>
+          <span class="dot"></span><span>BTC + GOLD · DELTA DEMO</span>
           <span id="heartbeat-head"></span><span class="refresh-label" id="refresh-label">Connecting…</span>
         </div>
       </header>
       <div class="content">
         <section class="intro" id="overview">
           <div><div class="eyebrow">DELTA INDIA / TESTNET</div>
-            <h1>Trading <span>terminal.</span></h1>
+            <h1>Autonomous <span>command center.</span></h1>
           </div>
           <div class="runtime-pill" id="runtime-pill"><span class="status-light"></span><span id="runtime-status">Awaiting heartbeat</span></div>
+        </section>
+        <section class="isolated-overview" id="isolated-accounts" aria-labelledby="isolated-title">
+          <div class="isolated-head">
+            <div><div class="eyebrow">TWO ISOLATED DELTA DEMO SUBACCOUNTS</div>
+              <h2 id="isolated-title">Autonomous trading · BTC + Gold</h2>
+              <p>Live signed broker snapshots and account-specific FIRE receipts. Separate credentials, trade histories, watchdogs and alerts. View-only: no orders or AI calls.</p>
+            </div>
+            <span id="isolated-sync" class="isolated-sync" role="status" aria-live="polite">Verifying broker accounts…</span>
+          </div>
+          <div id="isolated-grid" class="isolated-grid" aria-live="polite">
+            <article class="isolated-card"><div class="isolated-loading">Loading BTC isolated account…</div></article>
+            <article class="isolated-card"><div class="isolated-loading">Loading Gold isolated account…</div></article>
+          </div>
+          <p class="isolated-disclosure">Equity observations are not realized profit. A worker running is not proof of an active position. An unverified broker read is shown as unavailable, never zero.</p>
         </section>
         <div class="notice" id="halt-banner" hidden>◈ &nbsp;PERSISTENT EXECUTION HALT DETECTED — inspect exchange positions and orders before restarting.</div>
         <section id="equity-risk-banner" class="equity-risk-banner" role="status" aria-live="polite" aria-atomic="true" aria-label="Equity checkpoint risk" data-state="unavailable">
           <div class="equity-risk-banner-heading"><strong id="equity-risk-title">Equity risk checks unavailable</strong><span id="equity-risk-state">VERIFYING</span></div>
-          <p id="equity-risk-message">Checking signed daily and weekly equity checkpoints. New trades require separate risk approval.</p>
+          <p id="equity-risk-message">Legacy main-account checkpoint evidence. The isolated BTC and Gold reports above are authoritative for autonomous bots.</p>
           <p id="equity-risk-detail">FIRE execution remains controlled separately by broker and risk safeguards.</p>
         </section>
         <div id="priority" hidden role="status"></div>
         <section class="panel market-terminal" id="market-chart">
-          <div class="chart-top"><div><div class="eyebrow">DELTA INDIA DEMO</div><h2 id="market-title">Bitcoin perpetual</h2></div>
+          <div class="chart-top"><div><div class="eyebrow">LEGACY MANUAL MARKET DESK · NOT AUTONOMOUS ACCOUNT STATUS</div><h2 id="market-title">Bitcoin perpetual</h2></div>
             <div class="market-actions">            <label for="fire-market">Market</label>
             <select id="fire-market"><option value="BTCUSD">BTCUSD · Bitcoin</option><option value="XAUTUSD">XAUTUSD · Tether Gold</option></select>
             <button disabled id="fire-preview" type="button">FIRE · Analyze only</button>
@@ -88,7 +104,7 @@
             <div class="panel-header"><div><div class="eyebrow">DECISION ENGINE</div><h2>Latest AI analysis</h2></div><span class="tiny-label">TOP BILLING</span></div>
             <p id="next-scan"></p><div id="ai-decision" class="decision"><div class="empty">No AI decisions recorded yet. The bot may be offline or waiting for valid market data.</div></div>
           </section><section class="panel" id="position-card">
-            <div class="panel-header"><div><div class="eyebrow">LIVE TESTNET ACCOUNT</div><h2>Open BTC positions</h2></div><span class="tiny-label">READ ONLY</span></div>
+            <div class="panel-header"><div><div class="eyebrow">LEGACY MAIN DEMO ACCOUNT</div><h2>Main account BTC positions</h2></div><span class="tiny-label">READ ONLY</span></div>
             <p id="exit-due"></p><div id="positions-list" class="positions-list"><div class="empty">Connecting to the demo exchange…</div></div>
           </section></div>
         <section class="panel fire-panel" id="fire">
@@ -127,7 +143,7 @@
         </div>
         <div class="main-grid" id="market">
           <section class="panel equity-panel">
-            <div class="panel-header"><div><div class="eyebrow">ACCOUNT OBSERVATIONS</div><h2>Net equity history</h2></div><div class="panel-meta">NOT REALIZED P&amp;L</div></div>
+            <div class="panel-header"><div><div class="eyebrow">LEGACY MAIN ACCOUNT OBSERVATIONS</div><h2>Net equity history</h2></div><div class="panel-meta">NOT REALIZED P&amp;L</div></div>
             <div class="equity-stat"><span id="net-equity">—</span><small id="equity-label">Latest testnet equity, if supplied</small></div>
             <div class="plot" id="equity-plot"><div class="empty-chart">No recorded equity observations yet</div></div>
             <div class="chart-footer"><span>Recorded broker equity snapshots only</span><span id="point-count">0 observations</span></div>

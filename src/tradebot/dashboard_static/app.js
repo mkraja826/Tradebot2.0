@@ -32,12 +32,12 @@ function renderEquityCheckpointRisk(data) {
       "evidence_stale","evidence_unavailable","monitoring_degraded"].includes(data.status);
   const status=valid?data.status:"evidence_unavailable";
   const titles={
-    healthy:"Equity opening checkpoints verified",
-    checkpoint_pending:"Equity checkpoint observation pending",
-    checkpoint_missed:"Equity opening checkpoint missed — trading risk gate blocked",
-    evidence_stale:"Signed equity evidence is stale — risk review required",
-    evidence_unavailable:"Equity risk evidence unavailable — risk review required",
-    monitoring_degraded:"Safety monitoring needs attention — trading prerequisites incomplete"
+    healthy:"Legacy main-account equity checkpoints verified",
+    checkpoint_pending:"Legacy main-account checkpoint pending",
+    checkpoint_missed:"Legacy main-account equity checkpoint missed",
+    evidence_stale:"Legacy main-account equity evidence stale",
+    evidence_unavailable:"Legacy main-account equity evidence unavailable",
+    monitoring_degraded:"Legacy main-account monitoring needs attention"
   };
   const messages={
     healthy:"Daily and weekly opening checkpoints have been recorded; this does not authorize a trade.",
@@ -165,8 +165,8 @@ function render(data) {
   renderDesk(data);
   const runner=data.runner||{}, live=data.live||{}, market=live.market||{}, account=live.account||{}, ledger=data.ledger||{};
   text("refresh-label","Updated "+new Date().toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit"}));
-  text("runtime-status",runner.status==="running" ? "RUNNING · "+(runner.mode==="demo"?"DEMO TRADING":"OBSERVING") : runner.status==="stale" ? "HEARTBEAT STALE" : runner.status==="stopped"?"STOPPED":"NO RUNNING BOT VERIFIED");
-  byId("runtime-pill").dataset.state=runner.status||"unknown";
+  // The top runtime pill belongs to the signed isolated-account report.
+  // This legacy runner heartbeat must never override BTC/Gold worker status.
   text("agent-action",runner.action||"No heartbeat");
   text("last-heartbeat",runner.age_seconds==null?"No runner heartbeat recorded":ageLabel(runner.age_seconds));
   text("mode-label",runner.mode==="demo"?"DEMO TRADING MODE":runner.mode==="observe"?"READ-ONLY OBSERVER":"NOT VERIFIED");
@@ -202,8 +202,8 @@ async function update() {
     showPriority("Connection lost · showing the last received records.");
     text("sample-info","Offline · historical chart");
     text("refresh-label","Dashboard offline");
-    text("runtime-status","DATA CONNECTION LOST");
-    byId("runtime-pill").dataset.state="stale";
+    // Losing the legacy main-account observer must not mark active BTC/Gold
+    // isolated workers offline. The isolated report owns the top status.
   } finally { setTimeout(update,10000); }
 }
 document.querySelectorAll(".nav").forEach(link=>link.addEventListener("click",()=>{
