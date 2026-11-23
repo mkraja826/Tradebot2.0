@@ -141,7 +141,7 @@ class DemoSizeTests(unittest.TestCase):
             bot._assess_risk({**plan, "contracts": 6, "stop_loss": "63500"},
                              budget, quote)
         weak = bot._assess_risk(
-            {**plan, "contracts": 6, "take_profit": "63400"}, budget, quote)
+            {**plan, "contracts": 6, "take_profit": "63929"}, budget, quote)
         self.assertTrue(weak["approved"])
         self.assertIn("net_reward_risk_below_1_5", weak["quality_warnings"])
 
@@ -156,7 +156,7 @@ class DemoSizeTests(unittest.TestCase):
         quote = {"best_bid": "63214", "best_ask": "63214.5"}
         baseline = {
             "direction": "LONG", "contracts": 1, "leverage": 5,
-            "stop_loss": "62500", "take_profit": "63400",
+            "stop_loss": "62500", "take_profit": "63929",
         }
         evaluated = bot._assess_risk(baseline, budget, quote)
         self.assertTrue(evaluated["approved"])
@@ -165,15 +165,12 @@ class DemoSizeTests(unittest.TestCase):
         self.assertIn("net_reward_risk_below_1_5", evaluated["quality_warnings"])
         self.assertLess(Decimal(evaluated["expected_net_reward_risk"]), Decimal("1.5"))
         self.assertIsNone(evaluated["max_allowed_loss_usd"])
-        # An economically negative after-cost target is still a documented
-        # small DEMO experiment: never hide the warning from the record.
-        poor = bot._assess_risk({**baseline, "take_profit": "63225"}, budget, quote)
-        self.assertTrue(poor["approved"])
-        self.assertLess(Decimal(poor["estimated_net_target_reward_usd"]), 0)
-        self.assertEqual(
-            poor["quality_warnings"],
-            ["net_reward_risk_below_1_5",
-             "net_target_reward_after_costs_nonpositive"])
+        # Once the new gross exit-distance rule is enabled, a closer target
+        # than the SL distance must be rejected even on isolated DEMO.
+        with self.assertRaisesRegex(
+                RiskRejected, "Stop distance exceeds allowed reward distance"):
+            bot._assess_risk({**baseline, "take_profit": "63225"},
+                             budget, quote)
         # Unlike experimental DEMO, normal FIRE still enforces its own
         # minimum net reward/risk and cannot opt into warning-only.
         with self.assertRaises(RiskRejected):
