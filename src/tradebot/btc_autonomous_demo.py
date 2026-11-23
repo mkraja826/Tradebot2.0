@@ -120,6 +120,22 @@ class AutoBTCController(SupervisedBTCController):
     def _max_contracts_for_entry(self, budget):
         return min(MAX_AUTONOMOUS_LARGE_CONTRACTS, super()._max_contracts_for_entry(budget))
 
+    def _model_entry_budget(self, exchange, product_id, price):
+        """Read-only maximum-affordability preview, NOT broker leverage proof.
+
+        GPT-6 must choose its own leverage. Its suggested quantity is then
+        checked again at that exact leverage, against signed wallet equity
+        and the existing 20%-of-equity margin share before any order.
+        """
+        preview = self._entry_budget(
+            exchange, product_id, price, planned_leverage=20)
+        return {
+            **preview,
+            "capacity_preview_only": True,
+            "capacity_preview_leverage": 20,
+            "chosen_leverage_requires_live_broker_recheck": True,
+        }
+
     def _normalize_plan(self, plan, context):
         """Downgrade model size to independently proven tier, never create an entry."""
         self._sizing_record = {}
