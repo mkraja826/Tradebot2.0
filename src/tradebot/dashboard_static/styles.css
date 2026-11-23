@@ -215,3 +215,63 @@ body{background:var(--bg)}.eyebrow{color:#ddb982}.panel,.metric.card{border-colo
   .equity-risk-banner strong {font-size:12px}
   .equity-risk-banner p {font-size:11px;overflow-wrap:anywhere}
 }
+
+
+/* Isolated BTC/Gold autonomous account command center */
+.isolated-overview{margin:0 0 22px}
+.isolated-head{display:flex;align-items:flex-start;justify-content:space-between;gap:24px;margin:0 0 17px}
+.isolated-head h2{font-size:20px;letter-spacing:-.45px;margin:7px 0 9px}
+.isolated-head p{margin:0;color:var(--muted);font-size:12px;line-height:1.65;max-width:750px}
+.isolated-sync{display:inline-flex;align-items:center;flex-shrink:0;white-space:nowrap;padding:9px 11px;border:1px solid #344b54;border-radius:8px;color:#a9ced7;font-size:10px;font-weight:650;background:#10202a}
+.isolated-sync[data-state=ok]{color:#9aefd0;border-color:#2c5a48}
+.isolated-sync[data-state=warn]{color:#ffd19a;border-color:#604a32}
+.isolated-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.isolated-card{min-width:0;padding:22px 20px;background:linear-gradient(145deg,#111e2d,#0f1723 74%);border:1px solid #2a4050;border-radius:15px;box-shadow:0 12px 32px #050a1238}
+.isolated-card.iso-gold{background:linear-gradient(145deg,#211b19,#131922 72%);border-color:#4b3c32}
+.iso-account-head{display:flex;align-items:center;gap:13px}
+.iso-account-symbol{width:47px;height:47px;border:1px solid #2c6f7e;border-radius:12px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-weight:850;font-size:21px;color:#75d5f4;background:#132e3d}
+.iso-gold .iso-account-symbol{color:#f8c773;background:#3a2d19;border-color:#715a31;font-size:18px}
+.iso-account-name{min-width:0}.iso-account-name small{display:block;font-size:9px;color:#8aa4b8;letter-spacing:1.05px;font-weight:800}
+.iso-account-name h3{margin:3px 0 2px;font-size:23px;line-height:1.2;font-weight:800}
+.iso-account-name span{font-size:11px;color:#acbdcb}
+.iso-states{display:flex;flex-wrap:wrap;gap:6px;margin:18px 0}
+.iso-pill{display:inline-flex;align-items:center;gap:6px;border:1px solid #485263;border-radius:30px;padding:6px 9px;color:#bec8d5;background:#1d2b37;font-size:10px;font-weight:700;line-height:1.2;max-width:100%}
+.iso-pill:before{content:"";width:6px;height:6px;flex-shrink:0;border-radius:50%;background:#87909f}
+.iso-pill.ok{background:#15372b;border-color:#306850;color:#a3efd0}.iso-pill.ok:before{background:#59d8aa}
+.iso-pill.bad{background:#39262c;border-color:#744350;color:#ffa6aa}.iso-pill.bad:before{background:#fc868e}
+.iso-pill.warn{background:#3a2f23;border-color:#715737;color:#ffcc83}.iso-pill.warn:before{background:#ffbf69}
+.iso-stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}
+.iso-stat{display:flex;flex-direction:column;min-height:101px;padding:13px;background:#101c2bb5;border:1px solid #304254;border-radius:10px;overflow-wrap:anywhere}
+.iso-gold .iso-stat{background:#211f20b3;border-color:#4a3d34}
+.iso-stat small{font-size:9px;font-weight:800;line-height:1.4;color:#899fb3;letter-spacing:.7px}
+.iso-stat strong{margin:7px 0 4px;font-size:24px;line-height:1.1;font-weight:780;letter-spacing:-.6px;font-variant-numeric:tabular-nums}
+.iso-stat span{margin-top:auto;font-size:9px;line-height:1.5;color:#92a3b5}
+.iso-positions{padding-top:14px}
+.iso-positions h4,.iso-history h4{font-size:12px;margin:0 0 8px}
+.iso-unavailable{font-size:11px;padding:12px;border:1px solid #775138;color:#f3c8a2;background:#40302352;border-radius:9px;line-height:1.6}
+.iso-curve{margin:18px 0 12px;border-radius:10px;background:#08131fa3;border:1px solid #26384a;padding:13px}
+.iso-curve-caption{font-size:10px;color:#9bb1be;letter-spacing:.2px}
+.iso-curve svg{width:100%;height:83px;display:block}
+.iso-spark{stroke:#5bbff3;stroke-width:2.3;fill:none;stroke-linejoin:round;stroke-linecap:round}
+.iso-gold .iso-spark{stroke:#f7c270}
+.iso-guide{stroke:#344354;stroke-width:1;stroke-dasharray:3 6}
+.iso-curve small{font-size:9px;color:#8298ab}
+.iso-monitor{border-top:1px solid #2a394a;padding:10px 0}
+.iso-line{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:6px 0;font-size:11px;line-height:1.4}
+.iso-line span{color:#92a3b4}.iso-line strong{font-weight:670;color:#e3edf5;text-align:right;overflow-wrap:anywhere}
+.iso-history{border-top:1px solid #2a394a;padding-top:13px}
+.iso-history-head{display:flex;justify-content:space-between;gap:10px;align-items:center}
+.iso-history-head small{font-size:10px;color:#8ba0b1}
+.iso-receipt{padding:9px 0;border-bottom:1px solid #293847}
+.iso-receipt:last-child{border-bottom:0}
+.iso-receipt-head{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.iso-receipt-head strong{text-transform:capitalize;font-size:11px;color:#d9e9f5}
+.iso-receipt-head time{font-size:9px;color:#7f93a3}
+.iso-receipt p{font-size:10px;color:#aabec9;margin:7px 0 5px;line-height:1.45}
+.iso-receipt .iso-pill{font-size:9px;padding:4px 7px}
+.iso-warning{display:block;color:#f1bb9e;margin:5px 0;font-size:10px;overflow-wrap:anywhere}
+.iso-empty,.isolated-loading{font-size:12px;color:#8097ab;padding:17px 4px}
+.iso-foot{display:flex;flex-wrap:wrap;justify-content:space-between;gap:7px;border-top:1px solid #2b3c4b;padding-top:12px;color:#92a8b7;font-size:9px;line-height:1.5}
+.isolated-disclosure{font-size:10px;color:#879caf;line-height:1.6;margin:11px 2px 0}
+@media(max-width:1110px){.isolated-grid{grid-template-columns:1fr}}
+@media(max-width:650px){.isolated-head{flex-direction:column;gap:11px}.isolated-head h2{font-size:18px}.isolated-sync{white-space:normal}.isolated-grid{gap:10px}.isolated-card{padding:18px 14px}.iso-stats{gap:7px}.iso-stat{padding:12px 10px;min-height:96px}.iso-stat strong{font-size:22px}.iso-account-name h3{font-size:21px}}
