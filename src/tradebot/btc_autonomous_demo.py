@@ -25,7 +25,8 @@ from tradebot.fire_account_guard import (
     AccountExposureRejected, require_flat_demo_account_for_configuration,
 )
 from tradebot.btc_demo_size import MAX_AUTONOMOUS_LARGE_CONTRACTS
-from tradebot.isolated_tier_sizing import size_guideline_evidence, FIXED_LEVERAGE
+from tradebot.isolated_tier_sizing import size_guideline_evidence, FIXED_LEVERAGE, BTC_DEMO_CAP, MAX_MARGIN_SHARE
+from tradebot.fire_budget import entry_budget
 from tradebot.fire_risk import FireRiskLimits, assess_fire_plan
 from tradebot.signed_margin_mode import signed_account_margin_mode
 from tradebot.fire_account_guard import require_flat_demo_account
@@ -134,11 +135,17 @@ class AutoBTCController(SupervisedBTCController):
         return False
 
     def _hard_contract_cap(self):
-        """AI chooses quantity; separate absolute DEMO safety cap remains six."""
-        return MAX_AUTONOMOUS_LARGE_CONTRACTS
+        """AI chooses quantity; signed broker affordability still gates."""
+        return BTC_DEMO_CAP
 
     def _max_contracts_for_entry(self, budget):
-        return min(MAX_AUTONOMOUS_LARGE_CONTRACTS, super()._max_contracts_for_entry(budget))
+        return min(BTC_DEMO_CAP, super()._max_contracts_for_entry(budget))
+
+    def _entry_budget(self, exchange, product_id, price, *, planned_leverage=None):
+        return entry_budget(exchange, self.symbol, product_id, price,
+            planned_leverage=planned_leverage,
+            max_contracts_limit=self._hard_contract_cap(),
+            margin_share=MAX_MARGIN_SHARE)
 
     def _model_entry_budget(self, exchange, product_id, price):
         """Read-only maximum-affordability preview, NOT broker leverage proof.
@@ -195,13 +202,13 @@ class AutoBTCController(SupervisedBTCController):
         return {
             "strategy_history_version": "btc-demo-recent24h-v1",
             "unattended_demo_mode": True,
-            "max_contracts_per_entry": MAX_AUTONOMOUS_LARGE_CONTRACTS,
+            "max_contracts_per_entry": BTC_DEMO_CAP,
             "one_attempt_operator_supervision_required": False,
             "daily_attempt_cap_enabled": False,
             "fixed_leverage": FIXED_LEVERAGE,
-            "equity_notional_tiers": {"small": "0.05", "medium": "0.20",
+            "equity_margin_tiers": {"small": "0.05", "medium": "0.20",
                                       "large": "0.40"},
-            "broker_margin_cap_fraction": "0.20",
+            "broker_margin_cap_fraction": str(MAX_MARGIN_SHARE),
         }
 
 
