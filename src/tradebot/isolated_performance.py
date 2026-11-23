@@ -257,6 +257,43 @@ def _overlap_evidence_summary(trade, product, fills, postings):
         return empty
 
 
+def _unattributed_evidence_summary(trade, product, fills, postings):
+    """Read-only posting timing/identity counts; never infer trade P&L."""
+    try:
+        owned = {identifier(trade["broker_order_id"])} | {
+            identifier(x) for x in (trade.get("exit_order_ids") or {}).values()}
+        selected = [f for f in fills if f["order_id"] in owned]
+        if len(selected) < 2:
+            return {"status": "unavailable"}
+        first, last = selected[0]["at_us"], selected[-1]["at_us"]
+        owned_fills = {f["id"] for f in selected}
+        pid = identifier(product["id"])
+        unrelated = [p for p in postings
+                     if p["at_us"] >= first and p["type"] not in EXTERNAL_TYPES
+                     and p["product_id"] in (None, pid)
+                     and p["order_id"] not in owned
+                     and p["fill_id"] not in owned_fills]
+        after = [p for p in unrelated if p["at_us"] > last]
+        return {
+            "status": "timing_counts_only",
+            "nonowned_since_entry": len(unrelated),
+            "nonowned_during_position": len(unrelated)-len(after),
+            "nonowned_after_flat_fill": len(after),
+            "after_flat_without_order_or_fill_ref": sum(
+                p["order_id"] is None and p["fill_id"] is None for p in after),
+            "after_flat_commissions": sum(p["type"]=="commission" for p in after),
+            "after_flat_cashflows": sum(p["type"]=="cashflow" for p in after),
+            "after_flat_funding": sum(p["type"]=="funding" for p in after),
+            "after_flat_other_types": sum(p["type"] not in (
+                "commission","cashflow","funding") for p in after),
+            "after_flat_unscoped_product": sum(
+                p["product_id"] is None for p in after),
+            "is_verified_trade_pnl": False,
+        }
+    except (KeyError, TypeError, ValueError, ReconciliationError):
+        return {"status": "unavailable"}
+
+
 def _trade_result(symbol, row, product, broker, fills, postings, start, end):
     trade=row["body"]
     base={
@@ -303,6 +340,10 @@ def _trade_result(symbol, row, product, broker, fills, postings, start, end):
         if reason == "overlapping_external_postings":
             return dict(base,reason=reason,
                         overlap_evidence=_overlap_evidence_summary(
+                            trade, product, fills, postings)),None
+        if reason == "unattributed_wallet_posting":
+            return dict(base,reason=reason,
+                        wallet_timing_evidence=_unattributed_evidence_summary(
                             trade, product, fills, postings)),None
         return dict(base,reason=reason),None
     except Exception:
