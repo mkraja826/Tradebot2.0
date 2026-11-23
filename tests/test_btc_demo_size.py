@@ -133,9 +133,10 @@ class DemoSizeTests(unittest.TestCase):
         with self.assertRaises(RiskRejected):
             bot._assess_risk({**plan, "contracts": 6, "stop_loss": "63500"},
                              budget, quote)
-        with self.assertRaises(RiskRejected):
-            bot._assess_risk({**plan, "contracts": 6, "take_profit": "63400"},
-                             budget, quote)
+        weak = bot._assess_risk(
+            {**plan, "contracts": 6, "take_profit": "63400"}, budget, quote)
+        self.assertTrue(weak["approved"])
+        self.assertIn("net_reward_risk_below_1_5", weak["quality_warnings"])
 
     def test_autonomous_demo_weak_net_reward_risk_is_warning_only(self):
         from decimal import Decimal
