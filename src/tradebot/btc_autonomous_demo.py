@@ -9,7 +9,6 @@ from pathlib import Path
 from contextlib import closing
 from uuid import uuid4
 import json
-from decimal import Decimal
 import os
 import sqlite3
 import stat
@@ -57,9 +56,9 @@ def is_armed(path=None):
         return False
 
 
-# No UTC-day equity-loss ceiling on autonomous DEMO entries. Broker-backed
-# per-trade risk, 15-minute session, weekly/peak and protection gates still apply.
-MAX_STRONG_TRADE_RISK_FRACTION = Decimal("0.005")
+# No UTC-day or per-trade estimated-loss percentage halt on autonomous DEMO.
+# Verified chart-based SL/TP, broker margin, position cap, liquidation checks,
+# 15-minute session, weekly/peak and protection gates still apply.
 
 
 class AutoBTCController(SupervisedBTCController):
@@ -130,12 +129,12 @@ class AutoBTCController(SupervisedBTCController):
             self, "_sizing_record", None) else {}
 
     def _assess_risk(self, plan, budget, quote):
-        """Confidence tier also limits maximum DEMO dollar loss per trade.
+        """Accept chart-chosen GPT-6 SL/TP without any fixed equity-loss ceiling.
 
-        Strong entries can risk up to 0.5% of equity per individual trade;
-        every tier still fails closed on broker margin, liquidation and SL/TP.
+        Still calculate and record estimated loss (fees/slippage included).
+        Position size, broker affordability, liquidation cushion, effective
+        leverage and reward/risk continue to be independently enforced.
         """
-        fractions = {1: Decimal("0.0025"), 2: Decimal("0.0035")}
         size = plan.get("contracts")
         if type(size) is not int or not 1 <= size <= self._hard_contract_cap():
             from tradebot.fire_risk import RiskRejected
@@ -143,8 +142,8 @@ class AutoBTCController(SupervisedBTCController):
         return assess_fire_plan(
             plan, budget, quote, limits=FireRiskLimits(
                 max_contracts=self._hard_contract_cap(),
-                equity_risk_fraction=fractions.get(size, MAX_STRONG_TRADE_RISK_FRACTION),
-                version="btc-demo-evidence-size-v3"))
+                equity_risk_fraction=None,
+                version="btc-demo-chart-stop-v4"))
 
     def _additional_fire_scope(self):
         return {
