@@ -189,6 +189,10 @@ class IsolatedAccountsDashboard:
         self.credential_loader = credential_loader
         self.service_check = service_check
         self.refresh_seconds = max(20, int(refresh_seconds))
+        # Financial reconciliation is a separate, slower read-only cache.
+        # Dashboard API requests never fetch expensive broker history inline.
+        from tradebot.isolated_performance import IsolatedPerformanceDashboard
+        self.performance = IsolatedPerformanceDashboard(self)
         self._lock = Lock()
         self._checked = float("-inf")
         self._updating = False

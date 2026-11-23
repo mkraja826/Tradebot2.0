@@ -35,6 +35,32 @@ isolated = {
         for label in ("BTC", "GOLD")
     }
 }
+performance = {
+    "mode": "read_only", "source": "isolated_signed_broker_performance",
+    "checked_at": iso, "window_days": 7,
+    "accounts": {
+        label: {
+            "status":"complete_broker_window", "as_of":iso,
+            "signed_fill_count":4, "signed_wallet_posting_count":5,
+            "broker_reconciled_closed_trades":0,
+            "unverified_or_open_trades":1, "verified_subset_net_usd":None,
+            "verified_subset_win_rate_pct":None,
+            "trade_rows":[{
+                "time":iso,"status":"flat_verified","direction":"LONG",
+                "contracts":2,"is_net_realized_pnl":False,
+                "reconciliation_status":"unverified",
+                "reason":"missing_broker_funding_total"}],
+            "wallet":{
+                "last_24h":{"status":"verified_posted_cashflow",
+                    "posted_net_usd":"2.25", "gross_cashflow_usd":"3.00",
+                    "fees_usd":"-0.75","funding_usd":"0"},
+                "last_7d":{"status":"verified_posted_cashflow",
+                    "posted_net_usd":"14.25", "gross_cashflow_usd":"16.00",
+                    "fees_usd":"-1.75","funding_usd":"0"}
+            }
+        } for label in ("BTC","GOLD")
+    }
+}
 snapshot = {
     "live": {"checked_at": iso, "candles": bars, "market": {"status":"fresh","bid":"100","ask":"102"},
              "account":{"status":"connected","btc_open_positions":0,"account_open_orders":0}},
@@ -55,11 +81,20 @@ with sync_playwright() as p:
         page.route("**/api/overview", slow_snapshot)
         page.route("**/api/isolated/overview",
                    lambda r: r.fulfill(json=isolated))
+        page.route("**/api/isolated/performance",
+                   lambda r: r.fulfill(json=performance))
         page.goto(f"http://127.0.0.1:{server.server_port}/")
         page.get_by_text("BTC + GOLD · ACTIVE",exact=True).wait_for()
         assert page.locator(".isolated-card").count() == 2
         assert page.locator("#isolated-grid").get_by_text("BTCUSD").is_visible()
         assert page.locator("#isolated-grid").get_by_text("XAUTUSD").is_visible()
+        page.locator("#performance-grid .performance-card").first.get_by_text("$2.25").wait_for()
+        assert page.locator("#performance-grid .perf-unverified").count()==2
+        assert page.locator("#performance-grid .perf-verified").count()==0
+        page.locator("#performance-7d").click()
+        assert page.locator("#performance-7d").get_attribute("aria-pressed")=="true"
+        assert page.locator("#performance-grid .performance-card").first.get_by_text("$14.25").is_visible()
+        page.locator("#performance-24h").click()
         page.get_by_text("Bitcoin observer chart and activity", exact=True).click()
         assert page.locator("#mid").inner_text().replace("\n","")=="$101.00"
         assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")

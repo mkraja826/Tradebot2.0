@@ -42,6 +42,7 @@ ASSET_TYPES = {
     "/charts.js": ("charts.js", "text/javascript; charset=utf-8"),
     "/app.js": ("app.js", "text/javascript; charset=utf-8"),
     "/isolated.js": ("isolated.js", "text/javascript; charset=utf-8"),
+    "/performance.js": ("performance.js", "text/javascript; charset=utf-8"),
 }
 
 
@@ -409,6 +410,15 @@ def create_handler(state, *, allowed_hosts=None):
                     self._headers(0, "application/json", 503)
                     return
                 data = json.dumps(overview.snapshot(), separators=(",", ":")).encode()
+                mime = "application/json; charset=utf-8"
+            elif path == "/api/isolated/performance":
+                overview = getattr(state, "isolated_accounts", None)
+                perf = getattr(overview, "performance", None)
+                if perf is None:
+                    self._headers(0, "application/json", 503)
+                    return
+                data = json.dumps(perf.snapshot(), separators=(",", ":"),
+                                  allow_nan=False).encode()
                 mime = "application/json; charset=utf-8"
             elif path == "/api/risk/checkpoints":
                 data = json.dumps(
