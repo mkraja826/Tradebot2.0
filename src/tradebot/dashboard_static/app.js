@@ -147,14 +147,91 @@ function eventDescription(event) {
   return values.join(" · ") || "No additional details";
 }
 function renderEvents(events) {
-  const root=byId("events");root.replaceChildren();
-  if(!events?.length){root.append(node("div","empty","No bot activity recorded yet. Start observe mode to populate this timeline."));return;}
-  events.slice(0,30).forEach(e=>{
-    const row=node("div","event"),first=node("div","event-name"),dot=node("span","event-chip"),kind=e.kind||"event";
-    if(/alert|failure|error|critical|halt/i.test(kind))dot.classList.add("error");else if(/reject|pending|warn/i.test(kind))dot.classList.add("warning");
-    first.append(dot,document.createTextNode(kind.replace(/_/g," ")));
-    row.append(first,node("div","event-description",eventDescription(e)),node("div","event-time",timeLabel(e.time)));root.append(row);
+  const root=byId("events");
+  root.replaceChildren();
+  const feed=Array.isArray(events)?events.slice(0,30):[];
+  if(!feed.length){
+    root.append(node("div","empty","No journal events yet. The two isolated bots have their own execution receipts."));
+    text("activity-summary","No recent main-account journal entries");
+    text("home-latest-activity","No recent journal entries. Open Bots for signed execution receipts.");
+    return;
+  }
+  const latest=feed[0];
+  const latestKind=String(latest.kind||"event");
+  let headline=eventDescription(latest);
+  if(/response.*reject|ai.*reject/i.test(latestKind)
+      && /completion_limit/i.test(headline)){
+    headline="A model response hit its completion limit; no valid recommendation was produced.";
+  }else if(latestKind==="ai_decision" &&
+      String(latest.details?.strategy||"").toUpperCase()==="WAIT"){
+    headline="Most recent recorded AI observation: WAIT · "+headline;
+  }
+  text("home-latest-activity",String(headline).slice(0,170));
+  const grouped=new Map(), display=[];
+  feed.forEach((e,i)=>{
+    const kind=String(e.kind||"event");
+    const details=e.details||{};
+    const description=eventDescription(e);
+    const isWait=kind==="ai_decision" &&
+      String(details.strategy||"").toUpperCase()==="WAIT";
+    const isLimit=/response.*reject|ai.*reject/i.test(kind) &&
+      /completion_limit/i.test(description);
+    // Group repetitive *observations*, not fills, executions, incidents,
+    // broker failures, or autonomous decisions from isolated ledgers.
+    const key=isWait?"wait":isLimit?"completion_limit":"single_"+i;
+    if(!grouped.has(key)){
+      const record={key,events:[],kind:isWait?"wait":isLimit?"completion_limit":"single"};
+      grouped.set(key,record);
+      display.push(record);
+    }
+    grouped.get(key).events.push(e);
   });
+  const wait=grouped.get("wait")?.events.length||0;
+  const limits=grouped.get("completion_limit")?.events.length||0;
+  text("activity-summary",feed.length+" raw journal events · "+
+    display.length+" readable groups"+
+    (wait?" · "+wait+" WAIT observations":"")+
+    (limits?" · "+limits+" completion-limit responses":""));
+  const renderRow=e=>{
+    const kind=String(e.kind||"event"),row=node("div","event"),
+      first=node("div","event-name"),dot=node("span","event-chip");
+    if(/alert|failure|error|critical|halt/i.test(kind))
+      dot.classList.add("error");
+    else if(/reject|pending|warn/i.test(kind))
+      dot.classList.add("warning");
+    first.append(dot,document.createTextNode(kind.replace(/_/g," ")));
+    let description=eventDescription(e);
+    if(/response.*reject|ai.*reject/i.test(kind)
+        && /completion_limit/i.test(description)){
+      description="The model reached its completion limit before a usable decision. "+
+        "Technical reason: completion_limit. Check broker receipts separately.";
+    }
+    row.append(first,node("div","event-description",description),
+      node("div","event-time",timeLabel(e.time)));
+    return row;
+  };
+  for(const group of display){
+    if(group.events.length<2){root.append(renderRow(group.events[0]));continue;}
+    const wrap=document.createElement("details");
+    wrap.className="activity-group";
+    const summary=document.createElement("summary");
+    const heading=group.kind==="wait"
+      ? group.events.length+" similar WAIT observations"
+      :group.events.length+" AI responses hit the completion limit";
+    const explanation=group.kind==="wait"
+      ? "Repeated no-entry observations in the legacy main-account journal. "+
+        "This is not the isolated bots' broker-execution history."
+      : "The provider response was rejected before a usable model decision. "+
+        "Broker execution must be checked separately.";
+    summary.append(node("strong","",heading),
+      node("span","",explanation),
+      node("small","","Tap to inspect "+group.events.length+" original records"));
+    wrap.append(summary);
+    const entries=node("div","activity-group-entries");
+    group.events.forEach(e=>entries.append(renderRow(e)));
+    wrap.append(entries);
+    root.append(wrap);
+  }
 }
 function render(data) {
   if (data.live && Date.now()-Date.parse(data.live.checked_at)>90000) {
