@@ -177,3 +177,27 @@ body[data-screen="desk"] .desk{scroll-margin-top:14px}
   .home-bot-tile,.home-health-ring{transition:none!important}
   body[data-screen] .isolated-overview,body[data-screen] .isolated-performance{animation:none!important}
 }
+
+/* Activity aggregation — tap to expand, original records retained. */
+.activity-summary{font-size:12px;color:#a9c4d5;background:#15263a;
+ border:1px solid #2d4b60;padding:13px 14px;border-radius:10px;
+ line-height:1.6;margin:18px 0 13px}
+.activity-group{background:linear-gradient(145deg,#142639,#101c2b);
+ border:1px solid #2e4c61;border-radius:13px;overflow:hidden}
+.activity-group summary{cursor:pointer;display:flex;flex-direction:column;gap:8px;
+ padding:16px 17px;line-height:1.55;list-style:none}
+.activity-group summary::-webkit-details-marker{display:none}
+.activity-group summary strong{font-size:14px;color:#e5f5ff}
+.activity-group summary span{font-size:12px;color:#b1c3d0}
+.activity-group summary small{font-size:10px;color:#83e6ca}
+.activity-group summary:after{content:"⌄";color:#91d6d4;font-size:17px;position:absolute;right:14px;top:14px}
+.activity-group{position:relative}
+.activity-group[open] summary:after{content:"⌃"}
+.activity-group-entries{padding:0 12px 13px;border-top:1px solid #30495b}
+.activity-group-entries .event{background:#101927!important;border-radius:8px!important;
+ margin-top:7px;border-color:#2c3b49!important}
+@media(max-width:500px){
+ .activity-group summary{padding:15px 38px 15px 13px}
+ .activity-group-entries{padding:0 7px 11px}
+ .activity-group-entries .event{padding:12px!important}
+}
