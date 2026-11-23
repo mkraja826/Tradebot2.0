@@ -94,29 +94,73 @@ class DemoSizeTests(unittest.TestCase):
             assess_fire_plan({**plan,"contracts":4},base,quote,
                              limits=FireRiskLimits(max_contracts=2))
 
-    def test_autonomous_risk_budget_scales_with_independent_tier(self):
+    def test_autonomous_chart_stop_exceeds_old_percent_caps_all_sizes(self):
         from decimal import Decimal
-        bot=AutoBTCController(self.root / "auto-risk.sqlite")
-        base={
-            "leverage":"5", "equity_usd":"173.81",
-            "contract_value":"0.001", "max_contracts_per_entry":6,
-            "taker_commission_rate":"0.0005",
+        bot = AutoBTCController(self.root / "auto-risk.sqlite")
+        budget = {
+            "leverage": "5", "equity_usd": "173.81",
+            "contract_value": "0.001", "max_contracts_per_entry": 6,
+            "taker_commission_rate": "0.0005",
         }
-        quote={"best_bid":"63214", "best_ask":"63214.5"}
-        template={"direction":"LONG", "leverage":5,
-                  "stop_loss":"63205", "take_profit":"64000"}
-        for qty,risk_fraction in ((1,"0.0025"),(2,"0.0035"),(3,"0.005"),(4,"0.005"),(6,"0.005")):
-            with self.subTest(qty=qty):
-                assessed=bot._assess_risk({**template,"contracts":qty},base,quote)
-                self.assertTrue(assessed["approved"])
-                self.assertEqual(
-                    Decimal(assessed["max_allowed_loss_usd"]),
-                    Decimal("173.81")*Decimal(risk_fraction))
+        quote = {"best_bid": "63214", "best_ask": "63214.5"}
+        # A chart-selected stop 714.5 USD below entry exceeds every legacy
+        # size-tier percent threshold, but preserves valid margin and R:R.
+        plan = {"direction": "LONG", "leverage": 5,
+                "stop_loss": "62500", "take_profit": "65000"}
+        for size, prior_cap in ((1, "0.0025"), (2, "0.0035"), (3, "0.005"),
+                                (4, "0.005"), (6, "0.005")):
+            with self.subTest(contracts=size):
+                result = bot._assess_risk({**plan, "contracts": size},
+                                          budget, quote)
+                self.assertTrue(result["approved"])
+                self.assertEqual(result["policy_version"], "btc-demo-chart-stop-v4")
+                self.assertFalse(result["equity_loss_ceiling_enabled"])
+                self.assertIsNone(result["max_allowed_loss_usd"])
+                self.assertGreater(
+                    Decimal(result["estimated_loss_fraction_of_equity"]),
+                    Decimal(prior_cap))
+                self.assertGreater(
+                    Decimal(result["estimated_loss_including_costs_usd"]), 0)
+                self.assertGreaterEqual(
+                    Decimal(result["expected_net_reward_risk"]), Decimal("1.5"))
+        # A malformed size, insufficient broker margin or unprotected stop
+        # still cannot be approved merely because equity percent is uncapped.
         with self.assertRaises(RiskRejected):
-            bot._assess_risk({**template,"contracts":3,
-                              "stop_loss":"62800"},base,quote)
+            bot._assess_risk({**plan, "contracts": 7}, budget, quote)
         with self.assertRaises(RiskRejected):
-            bot._assess_risk({**template,"contracts":7},base,quote)
+            bot._assess_risk({**plan, "contracts": 6},
+                             {**budget, "max_contracts_per_entry": 2}, quote)
+        with self.assertRaises(RiskRejected):
+            bot._assess_risk({**plan, "contracts": 6, "stop_loss": "63500"},
+                             budget, quote)
+        with self.assertRaises(RiskRejected):
+            bot._assess_risk({**plan, "contracts": 6, "take_profit": "63400"},
+                             budget, quote)
+
+    def test_chart_stop_policy_opt_in_does_not_undercut_normal_fire(self):
+        from decimal import Decimal
+        with self.assertRaises(ValueError):
+            FireRiskLimits(equity_risk_fraction=None)
+        with self.assertRaises(ValueError):
+            FireRiskLimits(equity_risk_fraction=None, max_contracts=6)
+        with self.assertRaises(ValueError):
+            FireRiskLimits(equity_risk_fraction=None,
+                           version="btc-demo-chart-stop-v4", max_contracts=1)
+        base = {
+            "leverage": "20", "equity_usd": "173.81",
+            "contract_value": "0.001", "max_contracts_per_entry": 6,
+            "taker_commission_rate": "0.0005",
+        }
+        quote = {"best_bid": "63214", "best_ask": "63214.5"}
+        # An extremely distant stop is still rejected if it crosses the
+        # theoretical liquidation cushion, even with no percent-loss ceiling.
+        distant = {"direction": "LONG", "leverage": 20, "contracts": 6,
+                   "stop_loss": "60000", "take_profit": "75000"}
+        bot = AutoBTCController(self.root / "chart-guard.sqlite")
+        with self.assertRaisesRegex(RiskRejected, "liquidation"):
+            bot._assess_risk(distant, base, quote)
+        self.assertEqual(
+            FireRiskLimits().equity_risk_fraction, Decimal("0.0025"))
 
     def test_supervised_broker_cap_stays_one(self):
         ctrl=SupervisedBTCController(self.root / "supervised.sqlite")
@@ -268,6 +312,9 @@ class DemoSizeTests(unittest.TestCase):
         }
         prompt = instruction_for_snapshot(obj)
         self.assertIn("Up to six contracts",prompt)
+        self.assertIn("chart", prompt)
+        self.assertIn("stop_loss", prompt)
+        self.assertIn("no fixed per-trade percentage-loss cap", prompt)
         self.assertIn("Direction must be LONG or SHORT",prompt)
         self.assertNotIn("Direction must be WAIT, LONG or SHORT",prompt)
         with self.assertRaises(PlanError):
