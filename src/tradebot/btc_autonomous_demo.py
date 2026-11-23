@@ -26,7 +26,7 @@ from tradebot.fire_account_guard import (
 from tradebot.btc_demo_size import evidence_contract_ceiling, MAX_AUTONOMOUS_LARGE_CONTRACTS
 from tradebot.fire_risk import FireRiskLimits, assess_fire_plan
 
-ARM_CONTENT = "DELTA-INDIA-DEMO:BTCUSD:UNATTENDED:30MIN-MAX48-UTC-DAY"
+ARM_CONTENT = "DELTA-INDIA-DEMO:BTCUSD:UNATTENDED:30MIN-MAX48-DYNAMIC6"
 MAX_DAILY_ATTEMPTS = 48
 MIN_INTERVAL = 30 * 60
 POLL_SECONDS = 300
