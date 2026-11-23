@@ -227,15 +227,16 @@ def check_candidate(data_dir, *, broker_factory=DeltaDemo,
         return False
     r = preflight(
         broker, Path(data_dir), allow_daily_loss_warning=True,
-        allow_portfolio_loss_warnings=True)
+        allow_portfolio_loss_warnings=True, allow_signed_subaccount=True)
     return (
         type(r) is dict
         and r.get("status") == "operator_review_candidate_only"
         and r.get("blockers") == []
         and r.get("supervised_session_verified") is True
         and r.get("recent_btc_history_local_quality_verified") is True
-        and r.get("signed_isolated_margin_verified") is False
-        and r.get("owner_declared_main_isolated_accepted") is True
+        and r.get("signed_isolated_margin_verified") is True
+        and r.get("margin_evidence_source") == "signed_parent_subaccount"
+        and r.get("owner_declared_main_isolated_accepted") is False
         and r.get("account_wide_flatness_verified") is True
         and r.get("watchdog_and_collector_active") is True
         and r.get("both_dashboard_fire_endpoints_disabled") is True
