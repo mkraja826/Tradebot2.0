@@ -139,3 +139,44 @@ position/order is skipped without consuming an AI attempt.
 The policy may increase the number of directional DEMO trades relative to
 a strategy that permits WAIT. This is an experimental risk choice, not
 an established statistical trading edge.
+
+
+## Loss-analysis evidence pipeline (no paid AI)
+
+The existing BTC/XAUT read-only learning watcher now refreshes a local
+BTCUSD loss-diagnostics snapshot once per 30-minute UTC bucket, without
+changing trades, calling GPT-6/Kimi, or modifying broker accounts:
+
+- data/btc-loss-diagnostics.json (local mode-0600 report)
+- Rebuild manually with:
+  PYTHONPATH=src .venv/bin/python -m tradebot.btc_loss_diagnostics
+  --financial-database data/fire-reconciliation.sqlite
+  --fire-database data/fire-ops.sqlite
+
+This analysis requires a FINISHED trade and a complete independent
+broker reconciliation: matched entry/exit fills, broker wallet
+cashflows, fees, funding and unique ownership IDs. Without it, the
+output explicitly reports financial_reconciliation_ledger_missing or
+awaiting_broker_reconciled_trades. A position disappearing, an AI
+hypothesis or a locally reported flat state is never evidence of
+realized profit or loss.
+
+The verified subset is broken down by exploratory-one / medium-two /
+strong-three size tier, LONG versus SHORT, wins versus losses,
+and net USD expectancy. For each verified loser the report distinguishes
+three ACCOUNTING components: negative gross fill-price P&L, fees
+overwhelming otherwise nonnegative gross P&L, and funding turning
+otherwise nonnegative post-fee P&L into a loss.
+
+**Important:** These are measurable loss contributions, not proven
+reasons why the market moved. Questions such as late entry, contradictory
+EMA/ADX, range chop, poor stop placement, or excessive spread need
+matched pre-entry market context and multiple winners AND losers as
+comparison examples. Kimi can later generate candidate hypotheses
+only once broker facts exist; its paid reviewer remains OFF by default,
+and no hypothesis changes GPT-6 execution instructions automatically.
+
+More DEMO trades are useful for testing, but do not imply that more
+losses are desirable or that the strategy has learned. Avoid changing
+strategy thresholds after each isolated loss, and validate any proposed
+rule on an untouched out-of-sample period.
