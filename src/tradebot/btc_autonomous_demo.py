@@ -305,6 +305,27 @@ def signed_active_trade_skip(root, *, broker_factory=DeltaDemo,
         return None
 
 
+def _verified_preorder_retry(root, press, receipt):
+    """Retry only independently evidenced no-order AI/risk rejections.
+
+    A new attempt must still pass fresh signed broker checks, cooldown,
+    position and margin checks, plus the full risk governor again.
+    Unknown exposure or unresolved execution never retries.
+    """
+    if (Path(root).name != "btc-isolated" or type(press) is not str
+            or type(receipt) is not dict
+            or receipt.get("orders_submitted") is not False
+            or receipt.get("protection_verified") is not False
+            or receipt.get("broker_order_id")
+            or receipt.get("reason_code") not in (
+                "risk_governor_failed", "model_decision_failed")):
+        return False
+    from tradebot.btc_auto_review import evidence
+    proof = evidence(root)
+    return (type(proof) is dict and proof.get("press") == press
+            and proof.get("reason_code") == receipt.get("reason_code"))
+
+
 def prior_fire_receipts_safe(root):
     """Never auto-retry an unresolved/error FIRE after a process restart."""
     path=Path(root)/"fire-ops.sqlite"
@@ -319,15 +340,17 @@ def prior_fire_receipts_safe(root):
             if any(row[0] not in TERMINAL_SAFE for row in all_statuses):
                 return False
             last=db.execute(
-                "SELECT status,result FROM fire_requests "
+                "SELECT press,status,result FROM fire_requests "
                 "ORDER BY created_at DESC, rowid DESC LIMIT 1").fetchone()
             if last is None:
                 return True
-            detail=json.loads(last[1])
+            detail=json.loads(last[2])
             if type(detail) is not dict:
                 return False
-            if last[0]=="rejected_no_order":
+            if last[1]=="rejected_no_order":
                 if detail.get("reason_code")=="gpt6_wait_no_trade":
+                    return True
+                if _verified_preorder_retry(root,last[0],detail):
                     return True
                 # Only precisely reviewed historical no-order incidents
                 # qualify. An old generic risk_governor_failed must reproduce
@@ -340,7 +363,7 @@ def prior_fire_receipts_safe(root):
                     from tradebot.btc_auto_review import reviewed_receipt_matches
                     return reviewed_receipt_matches(root)
                 return False
-            return (last[0]=="flat_verified"
+            return (last[1]=="flat_verified"
                     and detail.get("reason_code") not in (
                         "emergency_flat_verified","execution_or_protection_unverified"))
     except (sqlite3.Error,OSError,ValueError,TypeError):
@@ -400,7 +423,8 @@ def run_once(data_dir, *, instant=None, armed=is_armed,
         # before another unattended attempt; no fail-open retry loops.
         unexpected_rejection = (
             status == "rejected_no_order"
-            and receipt.get("reason_code") != "gpt6_wait_no_trade")
+            and receipt.get("reason_code") != "gpt6_wait_no_trade"
+            and not _verified_preorder_retry(root,attempt_id,receipt))
         emergency_closeout = (
             status == "flat_verified"
             and receipt.get("reason_code") in (
