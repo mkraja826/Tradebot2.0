@@ -52,6 +52,22 @@ def identifier(value):
     return str(value)
 
 
+def canonical_fill_id(value):
+    """Use broker-defined UUID identity, regardless of casing or 32/36 form.
+
+    Delta fills may use uppercase UUID strings while commission wallet
+    metadata contains lowercase fill_uuid. Only UUID spelling is normalized;
+    unknown or non-UUID identifiers retain their exact identity.
+    """
+    identity = identifier(value)
+    if type(value) is str and len(value) in (32, 36):
+        try:
+            return str(UUID(value))
+        except (ValueError, AttributeError):
+            pass
+    return identity
+
+
 def timestamp_us(value):
     """Broker microseconds or explicit timezone-aware ISO; no guessed units."""
     if type(value) is int or (isinstance(value, str) and value.isdigit()):
@@ -81,7 +97,7 @@ def normalize_fill(raw):
     require(isinstance(meta, dict), "invalid_fill_metadata")
     position = meta.get("new_position") or {}
     require(isinstance(product, dict) and isinstance(position, dict), "invalid_fill_metadata")
-    row = {"id": identifier(raw.get("id")), "order_id": identifier(raw.get("order_id")),
+    row = {"id": canonical_fill_id(raw.get("id")), "order_id": identifier(raw.get("order_id")),
            "product_id": identifier(raw.get("product_id")), "symbol": raw.get("product_symbol"),
            "at_us": timestamp_us(raw.get("created_at")), "side": raw.get("side"),
            "size": decimal_text(raw.get("size")), "price": decimal_text(raw.get("price")),
@@ -110,7 +126,8 @@ def normalize_posting(raw):
     require(isinstance(meta, dict), "invalid_posting_metadata")
     refs = {}
     for key in ("order_id", "fill_id"):
-        values = {identifier(source[key]) for source in (raw, meta)
+        normalize = canonical_fill_id if key == "fill_id" else identifier
+        values = {normalize(source[key]) for source in (raw, meta)
                   if source.get(key) is not None}
         require(len(values) <= 1, "conflicting_posting_reference")
         refs[key] = next(iter(values), None)
