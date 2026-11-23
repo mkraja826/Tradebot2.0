@@ -25,7 +25,7 @@ from tradebot.fire_budget import entry_budget
 from tradebot.fire_leverage import synchronize_leverage, verify_liquidation_clearance, LeverageRejected, LiquidationUnsafe
 from tradebot.fire_account_guard import require_flat_demo_account
 from tradebot.fire_portfolio_reservation import FirePortfolioReservation
-from tradebot.fire_risk import assess_fire_plan, FireRiskLimits
+from tradebot.fire_risk import assess_fire_plan, FireRiskLimits, RiskRejected
 from tradebot.portfolio_equity_guard import RuntimeEquityGuard
 from tradebot.fire_indicators import decision_context
 from tradebot.fire_entry import FireEntries
@@ -47,6 +47,31 @@ EXPOSED = frozenset({
 
 class FireTradeError(RuntimeError):
     pass
+
+
+# Report only fixed, source-controlled risk labels, never raw exceptions.
+RISK_REJECTION_LABELS = {
+    "Invalid proposal size or direction": "invalid_side_or_quantity",
+    "Proposed size exceeds scoped BTC DEMO quantity policy": "quantity_cap_exceeded",
+    "Above verified margin limit": "margin_capacity_exceeded",
+    "GPT-6 proposed leverage outside 1..20": "leverage_outside_policy",
+    "Margin budget not calculated for proposed leverage": "leverage_budget_mismatch",
+    "Missing or invalid verified risk input": "risk_input_invalid",
+    "Unexpected broker fee rate": "broker_fee_unverified",
+    "Invalid stop or target against executable quote": "stop_target_quote_invalid",
+    "Stop distance exceeds allowed reward distance": "stop_distance_exceeds_target",
+    "Non-positive net reward or invalid risk": "net_reward_nonpositive",
+    "Stop-loss exposure exceeds equity risk limit": "equity_risk_ceiling_exceeded",
+    "Effective leverage exceeds policy": "effective_leverage_exceeded",
+    "Stop too close to theoretical liquidation at selected leverage": "liquidation_cushion_insufficient",
+    "Expected net reward-to-risk below policy": "net_reward_risk_below_policy",
+}
+
+
+def safe_risk_rejection_detail(exc):
+    if not isinstance(exc, RiskRejected):
+        return "unexpected_risk_exception"
+    return RISK_REJECTION_LABELS.get(str(exc), "unclassified_risk_rejection")
 
 
 def _now():
@@ -246,7 +271,7 @@ class FireTradeStore:
         allowed = {"model", "direction", "contracts", "stop_loss",
                    "take_profit", "broker_order_id", "order_state",
                    "protection_verified", "orders_submitted",
-                   "model_latency_ms", "budget", "sizing_estimate", "sizing_evidence", "risk_assessment", "reason_code", "snapshot_at", "thesis", "decision_at", "entry", "exit_order_ids", "protected_at", "decision_quote", "indicators", "selected_leverage", "liquidation_verified", "liquidation_price"}
+                   "model_latency_ms", "budget", "sizing_estimate", "sizing_evidence", "risk_assessment", "reason_code", "risk_rejection_detail", "snapshot_at", "thesis", "decision_at", "entry", "exit_order_ids", "protected_at", "decision_quote", "indicators", "selected_leverage", "liquidation_verified", "liquidation_price"}
         if set(fields) - allowed:
             raise FireTradeError("Unexpected FIRE status data")
         with closing(self._connect()) as db:
@@ -665,13 +690,15 @@ class FireDemoController:
                 liquidation_price=receipt.get("liquidation_price"),
                 exit_order_ids=receipt.get("exit_order_ids", {}), protected_at=receipt.get("protected_at"),
                 orders_submitted=True)
-        except Exception:
-            # No raw provider/broker error is logged or returned to browser.
+        except Exception as exc:
+            # Preserve existing retry semantics and safety gates.
             if not submitted:
+                detail = ({"risk_rejection_detail": safe_risk_rejection_detail(exc)}
+                          if stage == "risk_governor" else {})
                 self.store.update(press, "rejected_no_order",
                                   reason_code=stage + "_failed",
                                   protection_verified=False,
-                                  orders_submitted=False)
+                                  orders_submitted=False, **detail)
                 return
             # FireEntries always commits a durable intent before making
             # a broker POST. If no such row exists, no order was submitted

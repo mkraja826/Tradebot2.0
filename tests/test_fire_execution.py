@@ -420,6 +420,8 @@ class FireExecutionTests(unittest.TestCase):
         fire.start()
         self.assertEqual(fire.snapshot()["status"], "rejected_no_order")
         self.assertEqual(fire.snapshot()["reason_code"], "risk_governor_failed")
+        self.assertEqual(fire.snapshot()["risk_rejection_detail"],
+                         "equity_risk_ceiling_exceeded")
         self.assertEqual(self.exchange.requests, [])
 
     def test_gpt6_wait_is_explicit_no_trade_with_zero_orders(self):
@@ -447,6 +449,8 @@ class FireExecutionTests(unittest.TestCase):
         fire.start()
         self.assertEqual(fire.snapshot()["status"], "rejected_no_order")
         self.assertEqual(fire.snapshot()["reason_code"], "risk_governor_failed")
+        self.assertEqual(fire.snapshot()["risk_rejection_detail"],
+                         "net_reward_nonpositive")
         self.assertEqual(self.exchange.requests, [])
 
     def test_equity_drop_before_submission_recomputes_budget(self):

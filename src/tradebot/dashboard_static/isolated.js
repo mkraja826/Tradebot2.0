@@ -90,6 +90,9 @@
         ? "SL/TP + liquidation verified" : "Protection unverified",
         record.protection_verified===true && record.liquidation_verified===true ? "ok" : "bad"));
     if (record.reason_code) row.append(make("small","iso-warning","Reason: "+record.reason_code));
+    if (record.risk_rejection_detail)
+      row.append(make("small","iso-warning","Risk detail: "+
+        String(record.risk_rejection_detail).replace(/_/g," "));
     return row;
   };
 

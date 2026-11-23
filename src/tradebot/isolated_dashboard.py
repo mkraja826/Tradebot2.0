@@ -34,7 +34,7 @@ ACCOUNTS = {
 VALID_STATUS = frozenset(("protected_active", "flat_verified", "rejected_no_order",
                           "reasoning", "created", "awaiting_broker", "unknown"))
 RECEIPT_FIELDS = ("status", "direction", "contracts", "selected_leverage",
-                  "stop_loss", "take_profit", "model", "reason_code",
+                  "stop_loss", "take_profit", "model", "reason_code", "risk_rejection_detail",
                   "orders_submitted", "protection_verified",
                   "liquidation_verified", "model_latency_ms")
 
