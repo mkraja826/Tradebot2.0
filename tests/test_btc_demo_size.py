@@ -90,6 +90,53 @@ class DemoSizeTests(unittest.TestCase):
         self.assertEqual(auto._hard_contract_cap(),2)
         self.assertEqual(ctrl._normalize_plan({"direction":"LONG","contracts":3},strong_context())["contracts"],3)
 
+    def test_scope_two_only_admitted_in_unattended_demo(self):
+        from tradebot.ai import PlanError
+        from tradebot.fire_probe import instruction_for_snapshot
+        features = strong_context()
+        features["atr_5m"] = 150
+        features["historical_levels"] = {
+            "source":"original_delta_demo_24h_5m_local_only",
+            "strategy_history_version":"btc-demo-recent24h-v1",
+            "periods":{"last_24h":{
+                "bars":288,"expected":288,"quality_status":"provisionally_valid"}},
+        }
+        features["local_market_screen"] = {
+            "status":"passed",
+            "independent_price_verified":False,
+            "trade_authorized":False,
+            "external_spot_reference":{
+                "status":"spot_reference_corroborated",
+                "independent_perpetual_trade_print_verified":False,
+                "trade_authorized":False,
+            },
+        }
+        scope = {
+            "strategy_history_version":"btc-demo-recent24h-v1",
+            "max_contracts_per_entry":2,
+            "attached_stop_loss_and_take_profit_required":True,
+            "unattended_demo_mode":True,
+            "one_attempt_operator_supervision_required":False,
+            "max_new_order_attempts_per_utc_day":2,
+        }
+        obj = {
+            "environment":"delta-india-demo",
+            "core":{"ticker":{"symbol":"BTCUSD"}},
+            "fire_execution_scope":scope,
+            "indicators":features,
+        }
+        prompt = instruction_for_snapshot(obj)
+        self.assertIn("up to two contracts",prompt)
+        self.assertIn("WAIT remains valid",prompt)
+        with self.assertRaises(PlanError):
+            instruction_for_snapshot({
+                **obj,"fire_execution_scope":{
+                    **scope,"unattended_demo_mode":None}})
+        with self.assertRaises(PlanError):
+            instruction_for_snapshot({
+                **obj,"fire_execution_scope":{
+                    **scope,"max_contracts_per_entry":3}})
+
     def test_budget_sizing_cannot_exceed_requested_cap(self):
         class Fake:
             def _request(self,method,path,*,auth=False):
