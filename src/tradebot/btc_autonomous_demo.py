@@ -5,6 +5,7 @@ Runs read-only eligibility checks every five minutes and may reserve at most
 checks remain inside SupervisedBTCController. No production host is supported.
 """
 from datetime import datetime, timezone
+from decimal import Decimal
 from pathlib import Path
 from contextlib import closing
 from uuid import uuid4
@@ -21,7 +22,7 @@ from tradebot.fire_btc_supervised_commission import readonly_btc_commission_pref
 from tradebot.fire_account_guard import (
     AccountExposureRejected, require_flat_demo_account_for_configuration,
 )
-from tradebot.btc_demo_size import evidence_contract_ceiling, MAX_AUTONOMOUS_LARGE_CONTRACTS
+from tradebot.btc_demo_size import MAX_AUTONOMOUS_LARGE_CONTRACTS
 from tradebot.fire_risk import FireRiskLimits, assess_fire_plan
 from tradebot.signed_margin_mode import signed_account_margin_mode
 from tradebot.fire_account_guard import require_flat_demo_account
@@ -125,7 +126,7 @@ class AutoBTCController(SupervisedBTCController):
         return False
 
     def _hard_contract_cap(self):
-        """GPT-6 chooses strong-case quantity; DEMO backend enforces six max."""
+        """AI chooses quantity; separate absolute DEMO safety cap remains six."""
         return MAX_AUTONOMOUS_LARGE_CONTRACTS
 
     def _max_contracts_for_entry(self, budget):
@@ -148,28 +149,24 @@ class AutoBTCController(SupervisedBTCController):
         }
 
     def _normalize_plan(self, plan, context):
-        """Downgrade model size to independently proven tier, never create an entry."""
+        """Preserve the AI-selected quantity: no evidence-tier downgrading.
+
+        A malformed or unaffordable proposal is rejected by later independently
+        signed broker and risk checks; never silently turn it into another order.
+        Existing absolute demo cap remains a separate execution safety bound.
+        """
         self._sizing_record = {}
-        cap = evidence_contract_ceiling(context, plan.get("direction"))
-        if cap == 0:
-            return plan
-        # A malformed, oversized model proposal is rejected by the existing
-        # contract-size gate; do not silently transform it into a valid order.
-        proposed = plan["contracts"]
+        proposed = plan.get("contracts")
         if type(proposed) is not int or not 1 <= proposed <= self._hard_contract_cap():
             return plan
-        selected = min(proposed, cap)
-        tier = ("strong_dynamic" if selected >= 3 else
-                "medium_two" if selected == 2 else "exploratory_one")
         self._sizing_record = {
-            "tier": tier,
-            "policy": "btc-demo-evidence-size-v3",
-            "evidence_contract_ceiling": cap,
+            "policy": "btc-demo-model-selected-size-v1",
             "model_proposed_contracts": proposed,
-            "selected_contracts": selected,
-            "model_selected_leverage": plan["leverage"],
+            "selected_contracts": proposed,
+            "model_selected_leverage": plan.get("leverage"),
+            "quantity_auto_reduced": False,
         }
-        return {**plan, "contracts": selected}
+        return plan
 
     def _entry_sizing_record(self):
         return {"sizing_evidence": self._sizing_record} if getattr(
@@ -191,6 +188,7 @@ class AutoBTCController(SupervisedBTCController):
                 max_contracts=self._hard_contract_cap(),
                 equity_risk_fraction=None,
                 minimum_net_reward_risk=None,
+                minimum_gross_reward_risk=Decimal("1"),
                 version="btc-demo-chart-stop-v4"))
 
     def _additional_fire_scope(self):
