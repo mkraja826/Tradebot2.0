@@ -189,14 +189,21 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--database", default="data/fire-ops.sqlite")
     parser.add_argument("--interval", type=int, default=15)
+    parser.add_argument("--symbol", choices=("BTCUSD", "XAUTUSD", "BOTH"),
+                        default="BOTH",
+                        help="Restrict protection to one isolated demo account")
     args = parser.parse_args(argv)
     if not 5 <= args.interval <= 60:
         parser.error("interval must be 5..60 seconds")
+    market_paths = (("BTCUSD", args.database),
+                    ("XAUTUSD", Path(args.database).with_name("fire-xaut.sqlite")))
+    if args.symbol != "BOTH":
+        market_paths = tuple((symbol, path) for symbol, path in market_paths
+                             if symbol == args.symbol)
     markets = [(FireTradeStore(path), FireMarket(symbol,
                 api_key=os.environ.get("DELTA_DEMO_API_KEY", ""),
                 api_secret=os.environ.get("DELTA_DEMO_API_SECRET", ""), allow_orders=True))
-               for symbol, path in (("BTCUSD", args.database),
-                                    ("XAUTUSD", Path(args.database).with_name("fire-xaut.sqlite")))]
+               for symbol, path in market_paths]
     monitoring_path = Path(args.database).parent / "fire-monitoring.sqlite"
     monitoring_started = False
     last_monitor_error = None
