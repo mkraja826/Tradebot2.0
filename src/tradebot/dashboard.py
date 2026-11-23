@@ -42,6 +42,7 @@ ASSET_TYPES = {
     "/charts.js": ("charts.js", "text/javascript; charset=utf-8"),
     "/app.js": ("app.js", "text/javascript; charset=utf-8"),
     "/isolated.js": ("isolated.js", "text/javascript; charset=utf-8"),
+    "/performance.js": ("performance.js", "text/javascript; charset=utf-8"),
 }
 
 
