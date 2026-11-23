@@ -36,7 +36,7 @@ class GoldAutonomousTests(unittest.TestCase):
 
     def test_broker_leverage_at_20x_is_supported_by_gold_controller(self):
         bot=AutoGoldController(self.root/"fire-xaut.sqlite",enabled=False)
-        self.assertEqual(bot._hard_contract_cap(),64)
+        self.assertEqual(bot._hard_contract_cap(),1200)
         self.assertEqual(bot._decision_model_id(),"tb-deepseek-v4-1-flash")
 
     def test_unique_gold_arm_cannot_be_btc_authorization(self):
@@ -287,7 +287,7 @@ class GoldAutonomousTests(unittest.TestCase):
 
     def test_gold_uses_same_chart_derived_warning_only_loss_policy(self):
         bot=AutoGoldController(self.root/"fire-xaut.sqlite",enabled=False)
-        self.assertEqual(bot._hard_contract_cap(),64)
+        self.assertEqual(bot._hard_contract_cap(),1200)
         self.assertFalse(bot._allow_wait_choice())
         self.assertEqual(bot._decision_model_id(),"tb-deepseek-v4-1-flash")
         self.assertTrue(bot.equity_guard.allow_portfolio_loss_warnings)
