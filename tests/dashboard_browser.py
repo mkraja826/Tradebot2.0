@@ -140,7 +140,7 @@ with sync_playwright() as p:
                 arg=screen)
         switch("bots")
         assert page.locator(".isolated-card").count() == 2
-        assert page.locator("#isolated-grid").get_by_text("BTCUSD").is_visible()
+        assert page.locator("#isolated-grid").get_by_role("heading",name="BTCUSD",exact=True).is_visible()
         assert page.locator("#isolated-grid").get_by_text("XAUTUSD").is_visible()
         page.locator("#isolated-grid .iso-bracket-lane").wait_for()
         assert page.locator("#isolated-grid .iso-bracket-marker").count()==4
