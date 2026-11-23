@@ -16,6 +16,7 @@ from tradebot.dashboard import create_handler
 from tradebot.delta import DEMO_API
 from tradebot.isolated_dashboard import (
     IsolatedAccountsDashboard, _read_keyfile, _fire_receipts, _sanitized_positions,
+    _signed_brackets,
 )
 
 
@@ -174,6 +175,52 @@ class IsolatedDashboardTests(unittest.TestCase):
         self.assertEqual(items[0]["symbol"],"OTHER DERIVATIVE")
         with self.assertRaises(ValueError):
             _sanitized_positions([{"size": "not-a-number"}],"BTCUSD")
+
+    def test_signed_pending_brackets_for_actual_broker_position(self):
+        positions=_sanitized_positions([{
+            "size":"2","product_symbol":"BTCUSD","entry_price":"61523",
+            "mark_price":"61477.56","liquidation_price":"49372.20",
+            "unrealized_pnl":"-0.2"}],"BTCUSD")
+        orders=[
+            {"product_symbol":"BTCUSD","side":"sell","reduce_only":True,
+             "state":"pending","stop_order_type":"stop_loss_order",
+             "stop_price":"61280","size":2,"client_order_id":"PRIVATE"},
+            {"product_symbol":"BTCUSD","side":"sell","reduce_only":True,
+             "state":"pending","stop_order_type":"take_profit_order",
+             "stop_price":"61840","size":2,"client_order_id":"PRIVATE"}
+        ]
+        _signed_brackets(positions,orders)
+        self.assertEqual(positions[0]["protection"]["status"],
+                         "signed_pending_bracket")
+        self.assertEqual(positions[0]["protection"]["stop_loss"],"61280")
+        self.assertEqual(positions[0]["protection"]["take_profit"],"61840")
+        self.assertEqual(positions[0]["mark"],"61477.56")
+        self.assertEqual(positions[0]["liquidation"],"49372.20")
+        self.assertNotIn("PRIVATE",json.dumps(positions))
+
+    def test_missing_wrong_or_duplicate_broker_exits_never_claim_protection(self):
+        template={"size":"1","product_symbol":"XAUTUSD","entry_price":"4500"}
+        ok=[
+            {"product_symbol":"XAUTUSD","side":"sell","reduce_only":True,
+             "state":"pending","stop_order_type":"stop_loss_order",
+             "stop_price":"4480","size":1},
+            {"product_symbol":"XAUTUSD","side":"sell","reduce_only":True,
+             "state":"pending","stop_order_type":"take_profit_order",
+             "stop_price":"4530","size":1},
+        ]
+        for invalid in (ok[:1],ok+[dict(ok[0])],
+                        [dict(ok[0],reduce_only=False),ok[1]],
+                        [dict(ok[0],state="cancelled"),ok[1]],
+                        [dict(ok[0],side="buy"),ok[1]],
+                        [dict(ok[0],size=0),ok[1]],
+                        [dict(ok[0],stop_price="4550"),ok[1]],
+                        [dict(ok[0],product_symbol="BTCUSD"),ok[1]]):
+            with self.subTest(invalid=invalid):
+                view=_sanitized_positions([template],"XAUTUSD")
+                _signed_brackets(view,invalid)
+                self.assertEqual(view[0]["protection"]["status"],"unverified")
+                self.assertIsNone(view[0]["protection"]["stop_loss"])
+                self.assertIsNone(view[0]["protection"]["take_profit"])
 
     def test_local_fire_reports_do_not_expose_secrets(self):
         path=self.root/"gold-isolated"

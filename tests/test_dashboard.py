@@ -151,7 +151,8 @@ class DashboardTests(unittest.TestCase):
             self.assertFalse(risk["trade_authorized"])
             self.assertEqual(risk["mode"], "read_only")
         self.assertFalse((self.dir / "fire-equity-risk.sqlite").exists())
-        for route in ("/styles.css", "/app.js", "/workspace.css", "/workspace.js"):
+        for route in ("/styles.css", "/app.js", "/workspace.css", "/workspace.js",
+                      "/analytics-visuals.css", "/analytics-visuals.js"):
             with urlopen(base + route) as res:
                 self.assertEqual(res.status, 200)
                 self.assertTrue(res.read())
@@ -171,6 +172,8 @@ class DashboardTests(unittest.TestCase):
         self.assertIn('href="/styles.css"', html)
         self.assertIn('href="/workspace.css"', html)
         self.assertIn('src="/workspace.js"', html)
+        self.assertIn('src="/analytics-visuals.js"', html)
+        self.assertIn('href="/analytics-visuals.css"', html)
         # The SVG namespace is an identifier, not a network request.
         self.assertNotIn('src="http', html)
         self.assertNotIn('href="http', html)

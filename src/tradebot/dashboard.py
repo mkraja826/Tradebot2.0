@@ -44,6 +44,8 @@ ASSET_TYPES = {
     "/isolated.js": ("isolated.js", "text/javascript; charset=utf-8"),
     "/performance.js": ("performance.js", "text/javascript; charset=utf-8"),
     "/workspace.js": ("workspace.js", "text/javascript; charset=utf-8"),
+    "/analytics-visuals.js": ("analytics-visuals.js", "text/javascript; charset=utf-8"),
+    "/analytics-visuals.css": ("analytics-visuals.css", "text/css; charset=utf-8"),
     "/workspace.css": ("workspace.css", "text/css; charset=utf-8"),
 }
 

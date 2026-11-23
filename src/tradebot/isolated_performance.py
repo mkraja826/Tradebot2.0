@@ -119,6 +119,94 @@ def _cashflows(postings, *, start_us, end_us):
     return partitions
 
 
+def _cashflow_buckets(postings, *, start_us, end_us):
+    """Complete signed-wallet cashflow buckets, not trading profit.
+
+    A bucket is withheld if any in-scope posting type or asset cannot be
+    classified. Entries are half-open to prevent duplicate boundary events.
+    """
+    def summarize(begin, finish, label, *, partial=False):
+        amount = {key: Decimal(0) for key in
+                  ("gross_cashflow_usd", "fees_usd", "funding_usd")}
+        included = unknown = excluded = 0
+        for p in postings:
+            if not begin <= p["at_us"] < finish:
+                continue
+            if p["type"] in EXTERNAL_TYPES:
+                excluded += 1
+                continue
+            if p["asset"] != "USD" or p["type"] not in POSTED_TYPES:
+                unknown += 1
+                continue
+            key = ("fees_usd" if p["type"] in FEE_TYPES else
+                   "funding_usd" if p["type"] == "funding"
+                   else "gross_cashflow_usd")
+            amount[key] += number(p["amount"])
+            included += 1
+        total = sum(amount.values(), Decimal(0))
+        return {
+            "label": label, "start": _utc(begin),
+            "status": "verified_posted_cashflow" if unknown == 0
+                      else "unclassified_postings",
+            "posted_net_usd": _amount(total) if unknown == 0 else None,
+            "fees_usd": _amount(amount["fees_usd"]) if unknown == 0 else None,
+            "funding_usd": _amount(amount["funding_usd"]) if unknown == 0 else None,
+            "included_postings": included, "unclassified_postings": unknown,
+            "excluded_external_transfers": excluded, "partial": partial,
+            "is_verified_trade_pnl": False, "is_strategy_attributed": False,
+        }
+
+    # Twelve consecutive two-hour rolling buckets cover the prior 24 hours.
+    step = 2 * 3600 * 1_000_000
+    hourly = []
+    for i in range(12):
+        left = end_us - (12-i)*step
+        right = min(end_us+1, left+step)
+        hourly.append(summarize(left, right, _utc(left)[11:16]+" UTC",
+                                partial=i == 11))
+    # Seven UTC calendar days, including the current incomplete UTC day.
+    now = datetime.fromtimestamp(end_us/1_000_000, timezone.utc)
+    midnight = now.replace(hour=0,minute=0,second=0,microsecond=0)
+    daily=[]
+    for i in range(7):
+        day = midnight - timedelta(days=6-i)
+        left = int(day.timestamp()*1_000_000)
+        right = min(end_us+1, left+86400*1_000_000)
+        daily.append(summarize(left,right,day.strftime("%d %b"),
+                               partial=i==6))
+    return {
+        "last_24h": hourly, "last_7d": daily,
+        "source": "complete_signed_wallet_postings",
+        "is_verified_trade_pnl": False,
+        "is_strategy_attributed": False,
+    }
+
+
+def _trade_distribution(trades, *, truncated=False):
+    """Mutually exclusive 7-day FIRE outcomes, without inventing win rates."""
+    groups = {
+        "verified_wins": 0, "verified_losses": 0, "verified_breakeven": 0,
+        "no_order": 0, "open_or_unresolved": 0, "unverified": 0,
+    }
+    for row in trades:
+        if row.get("is_net_realized_pnl") is True:
+            amount = number(row["net_realized_pnl_usd"])
+            key = ("verified_wins" if amount > 0 else
+                   "verified_losses" if amount < 0 else "verified_breakeven")
+        elif row.get("reconciliation_status") == "no_order":
+            key = "no_order"
+        elif row.get("reconciliation_status") == "position_open_or_unresolved":
+            key = "open_or_unresolved"
+        else:
+            key = "unverified"
+        groups[key] += 1
+    return {
+        "counts": groups, "total": len(trades),
+        "coverage": "partial_bounded_receipts" if truncated else "complete_7d_receipts",
+        "is_win_rate": False,
+    }
+
+
 def _trade_result(symbol, row, product, broker, fills, postings, start, end):
     trade=row["body"]
     base={
@@ -225,6 +313,8 @@ def collect_account_performance(broker, root, symbol, *, now=None):
         "is_verified_strategy_profitability":False,
         "history_truncated":overflow,
         "wallet":_cashflows(postings,start_us=start,end_us=end),
+        "cashflow_series":_cashflow_buckets(postings,start_us=start,end_us=end),
+        "trade_distribution":_trade_distribution(trades,truncated=overflow),
         "signed_fill_count":len(fills),
         "signed_wallet_posting_count":len(postings),
         "fire_trade_count_in_window":len(trades),

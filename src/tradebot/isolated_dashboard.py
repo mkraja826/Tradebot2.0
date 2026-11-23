@@ -172,9 +172,65 @@ def _sanitized_positions(rows, symbol):
             "symbol": shown_symbol, "size": size,
             "side": "LONG" if Decimal(size) > 0 else "SHORT",
             "entry": _num(row.get("entry_price")),
+            "mark": _num(row.get("mark_price")),
+            "liquidation": _num(row.get("liquidation_price")),
             "unrealized_pnl": _num(row.get("unrealized_pnl")),
         })
     return positions[:10]
+
+
+def _signed_brackets(view, orders):
+    """Display broker-signed pending protective stops, never guessed receipt levels.
+
+    Requires matching symbol, opposite side, reduce-only, enough contracts and
+    exactly one stop-loss and take-profit trigger per open position. An order
+    count alone is NOT protection proof.
+    """
+    if not isinstance(orders, list) or len(orders) > 200:
+        raise ValueError("Signed broker order inventory unavailable")
+    for position in view:
+        position["protection"] = {
+            "status": "unverified", "stop_loss": None, "take_profit": None,
+            "source": "signed_pending_broker_orders",
+        }
+        symbol=position["symbol"]
+        entry=_num(position.get("entry"))
+        if symbol not in ("BTCUSD", "XAUTUSD") or entry is None:
+            continue
+        size=Decimal(position["size"])
+        side="sell" if size > 0 else "buy"
+        found={"stop_loss_order": [], "take_profit_order": []}
+        for order in orders:
+            if not isinstance(order, dict):
+                raise ValueError("Malformed signed broker order")
+            if order.get("product_symbol") != symbol:
+                continue
+            if (order.get("state") != "pending"
+                    or order.get("reduce_only") is not True
+                    or order.get("side") != side):
+                continue
+            kind=order.get("stop_order_type")
+            if kind not in found:
+                continue
+            amount=_num(order.get("size"))
+            trigger=_num(order.get("stop_price"))
+            if (amount is None or trigger is None or Decimal(trigger) <= 0
+                    or Decimal(amount) < abs(size)):
+                continue
+            found[kind].append(Decimal(trigger))
+        if len(found["stop_loss_order"]) != 1 or len(found["take_profit_order"]) != 1:
+            continue
+        sl=found["stop_loss_order"][0]; tp=found["take_profit_order"][0]
+        price=Decimal(entry)
+        if (size > 0 and not sl < price < tp) or (size < 0 and not tp < price < sl):
+            # A pending order may be broker-signed yet not form a valid bracket
+            # against this entry. Do not claim it protects the position.
+            continue
+        position["protection"] = {
+            "status": "signed_pending_bracket",
+            "stop_loss": _num(sl), "take_profit": _num(tp),
+            "source": "signed_pending_broker_orders",
+        }
 
 
 class IsolatedAccountsDashboard:
@@ -300,6 +356,7 @@ class IsolatedAccountsDashboard:
             net = _num((wallet.get("meta") or {}).get("net_equity"))
             if not isinstance(orders, list) or net is None:
                 raise ValueError("Broker orders or net equity unverified")
+            _signed_brackets(view, orders)
             info.update({
                 "status": "connected", "margin_mode": "isolated_verified",
                 "broker_checked_at": datetime.now(timezone.utc).isoformat(),
