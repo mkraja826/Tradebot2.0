@@ -31,3 +31,37 @@ A report of `eligible_read_only_no_order` **never** authorizes a trade. The auto
 2. Inspect the exact last FIRE receipt: model failure, `orders_submitted=false`, no broker intent, current signed account-wide exposure flatness, and independent watchdog health.
 3. Require explicit owner approval for any release from a model-error stop or unattended arming. Do not bypass manual review by directly editing a trade record.
 4. Leave all order execution flags off until an authenticated DEMO-only end-to-end readiness review passes.
+
+## Audited recovery of the exact historical no-order model failure
+
+Read evidence without modifying anything:
+
+```bash
+cd ~/Tradebot2.0
+PYTHONPATH=src .venv/bin/python -m tradebot.btc_auto_review --data-dir data
+```
+
+After reviewing the exact model-failure receipt, proving that its
+`orders_submitted` value is false and there is **no durable `fire_entries`
+intent**, and confirming fresh authenticated signed broker exposure is flat
+with the independent protection services working, an authorized operator can
+acknowledge that one record:
+
+```bash
+set -a; source ~/.config/tradebot2/keys.env; set +a
+PYTHONPATH=src .venv/bin/python -m tradebot.btc_auto_review --data-dir data \
+  --acknowledge \
+  --approval 'REVIEW BTC DEMO MODEL FAILURE WITH NO ORDER'
+```
+
+The acknowledgement creates a private mode-0600 `data/btc-auto-reviewed-no-order.json`
+marker containing the exact receipt identity and SHA-256 digest, without
+rewriting or removing the original FIRE record. It rejects changed receipts,
+any durable broker intent, unverified signed DEMO flatness, unknown failures
+or mismatched marker permissions.
+
+**This is a review of a proven historical no-order event, not a trade
+authorization.** It does not create the separate autonomous arm file, touch
+broker settings, restart services, or call GPT. A new failure is not
+automatically reviewed. The worker continues to impose its normal halt latch,
+daily and per-trade risk limits, and broker protection checks at execution time.
