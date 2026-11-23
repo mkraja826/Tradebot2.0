@@ -146,6 +146,7 @@ class DemoSizeTests(unittest.TestCase):
 
         path = self.root / "triple-btc.sqlite"
         demo = FakeDemo()
+        demo.leverage = 6  # 3 contracts fit the initial broker margin ceiling
         seed_demo_equity(path, "173.81")
         plan = {
             "direction":"LONG", "contracts":3, "leverage":6,
@@ -160,7 +161,7 @@ class DemoSizeTests(unittest.TestCase):
         ok,_=bot.start()
         self.assertTrue(ok)
         receipt=bot.snapshot()
-        self.assertEqual(receipt["status"],"protected_active")
+        self.assertEqual(receipt["status"],"protected_active", receipt.get("reason_code"))
         self.assertTrue(receipt["orders_submitted"])
         self.assertTrue(receipt["protection_verified"])
         self.assertTrue(receipt["liquidation_verified"])
@@ -210,7 +211,7 @@ class DemoSizeTests(unittest.TestCase):
         }
         prompt = instruction_for_snapshot(obj)
         self.assertIn("at most three contracts per attempt",prompt)
-        self.assertIn("WAIT remains valid",prompt)
+        self.assertIn("still require WAIT",prompt)
         with self.assertRaises(PlanError):
             instruction_for_snapshot({
                 **obj,"fire_execution_scope":{
