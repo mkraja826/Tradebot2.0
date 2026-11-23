@@ -43,11 +43,19 @@ ALERTS = READ_FAILURES | {
 }
 
 DAILY_ONLY_WARNING = "equity_daily_loss_limit_breached"
+PORTFOLIO_LOSS_WARNING = "equity_loss_limit_breached"
 
 
-def demo_monitoring_operational(monitor, *, allow_daily_loss_warning=False):
-    """Only a typed daily-only warning may be ignored by the autonomous demo."""
+def demo_monitoring_operational(monitor, *, allow_daily_loss_warning=False,
+                                allow_portfolio_loss_warnings=False):
+    """Scope only known financial-threshold alerts to optional DEMO warnings.
+
+    Watchdog/equity collector health, stale data and broker/protection alerts
+    remain enforced even when pure equity-loss thresholds are warnings.
+    """
     accepted = {DAILY_ONLY_WARNING} if allow_daily_loss_warning else set()
+    if allow_portfolio_loss_warnings:
+        accepted.add(PORTFOLIO_LOSS_WARNING)
     if not isinstance(monitor, dict):
         return False
     codes = monitor.get("alert_codes")
