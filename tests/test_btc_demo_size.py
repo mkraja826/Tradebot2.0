@@ -122,6 +122,57 @@ class DemoSizeTests(unittest.TestCase):
         self.assertEqual(auto._hard_contract_cap(),3)
         self.assertEqual(ctrl._normalize_plan({"direction":"LONG","contracts":3},strong_context())["contracts"],3)
 
+    def test_three_contract_offline_broker_post_has_full_brackets(self):
+        from tradebot.fire_execution import FireDemoController
+        from test_fire_execution import FakeDemo, snapshot, seed_demo_equity
+        from pathlib import Path
+
+        class ScopedDemo(FireDemoController):
+            def _hard_contract_cap(self):
+                return 3
+            def _assess_risk(self, plan, budget, quote):
+                return assess_fire_plan(
+                    plan, budget, quote,
+                    limits=FireRiskLimits(
+                        max_contracts=3,
+                        equity_risk_fraction=__import__("decimal").Decimal("0.005")))
+            def _decision_context(self, exchange, collected, midpoint):
+                return {}
+            def _historical_levels(self, collected, midpoint):
+                return {"periods":{
+                    name:{"quality_status":"provisionally_valid"}
+                    for name in ("day", "previous_day", "week",
+                                 "previous_week", "month", "previous_month")}}
+
+        path = self.root / "triple-btc.sqlite"
+        demo = FakeDemo()
+        seed_demo_equity(path, "173.81")
+        plan = {
+            "direction":"LONG", "contracts":3, "leverage":6,
+            "stop_loss":"63205", "take_profit":"64000",
+            "thesis":"Verified strong trend (offline simulated)"
+        }
+        bot = ScopedDemo(
+            path,enabled=True,exchange_factory=lambda:demo,
+            snapshot_loader=snapshot,
+            probe=lambda routes,load: {"results":{"fire":{"decision":plan}}},
+            spawn=lambda task:task(),pause=lambda seconds:None)
+        ok,_=bot.start()
+        self.assertTrue(ok)
+        receipt=bot.snapshot()
+        self.assertEqual(receipt["status"],"protected_active")
+        self.assertTrue(receipt["orders_submitted"])
+        self.assertTrue(receipt["protection_verified"])
+        self.assertTrue(receipt["liquidation_verified"])
+        self.assertEqual(len(demo.requests),1)
+        order_method,order_path,payload=demo.requests[0]
+        self.assertEqual((order_method,order_path),("POST","/v2/orders"))
+        self.assertEqual(payload["size"],3)
+        self.assertEqual(payload["bracket_stop_loss_price"],"63205")
+        self.assertEqual(payload["bracket_take_profit_price"],"64000")
+        self.assertEqual(len(demo.active_orders),2)
+        self.assertEqual([entry["size"] for entry in demo.active_orders],[3,3])
+
     def test_scope_two_only_admitted_in_unattended_demo(self):
         from tradebot.ai import PlanError
         from tradebot.fire_probe import instruction_for_snapshot
