@@ -71,7 +71,10 @@ with sync_playwright() as p:
         page.route("**/api/overview", lambda r: r.abort())
         page.clock.fast_forward(10100)
         # Legacy observer outage must not override isolated workers.
-        page.get_by_text("Dashboard offline",exact=True).wait_for()
+        # The old refresh-label is CSS-hidden at 375px; inspect its text,
+        # not visibility, while testing observer disconnect handling.
+        page.wait_for_function(
+            'document.getElementById("refresh-label").textContent === "Dashboard offline"')
         assert page.locator("#runtime-status").inner_text() == "BTC + GOLD · ACTIVE"
         assert page.locator("#inspect-text").inner_text()==inspected
         page.unroute("**/api/overview")
