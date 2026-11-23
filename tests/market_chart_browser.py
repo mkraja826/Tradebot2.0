@@ -30,7 +30,7 @@ with sync_playwright() as pw:
     b=pw.chromium.launch(**({'executable_path':executable} if executable else {'channel':'chrome'}))
     page=b.new_page(viewport={'width':390,'height':844},has_touch=True)
     page.route('**/*',route)
-    page.goto('http://desk.local/')
+    page.goto('http://desk.local/#desk')
     page.wait_for_selector('#desk-positions button')
     page.select_option('#fire-market','XAUTUSD')
     page.wait_for_function("document.querySelector('#desk-price').textContent==='3,700'")
