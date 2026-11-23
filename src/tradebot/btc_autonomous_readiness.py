@@ -25,6 +25,7 @@ def inspect(data_dir, *, broker_factory=DeltaDemo,
         "operator_arm_present": False,
         "previous_fire_receipts_safe": False,
         "demo_broker_preflight_verified": False,
+        "equity_quality_warnings": [],
         "owner_margin_attestation_is_broker_proof": False,
         "order_authorized": False,
         "broker_mutations": False,
@@ -58,8 +59,21 @@ def inspect(data_dir, *, broker_factory=DeltaDemo,
                 or getattr(broker, "allow_orders", None) is not False):
             blockers.append("readonly_delta_demo_client_required")
         else:
-            check = preflight(broker, root)
+            check = preflight(
+                broker, root, allow_daily_loss_warning=True,
+                allow_portfolio_loss_warnings=True)
             if type(check) is dict:
+                allowed_warnings = {
+                    "supervised_session_loss_limit",
+                    "historical_high_watermark_drawdown_limit",
+                    "equity_daily_loss_limit_breached",
+                    "equity_loss_limit_breached",
+                }
+                warnings = check.get("equity_quality_warnings", [])
+                if type(warnings) is list:
+                    result["equity_quality_warnings"] = sorted(
+                        {item for item in warnings
+                         if type(item) is str and item in allowed_warnings})
                 ok = (check.get("status") == "operator_review_candidate_only"
                       and check.get("blockers") == []
                       and check.get("supervised_session_verified") is True
