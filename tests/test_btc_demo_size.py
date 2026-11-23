@@ -225,6 +225,61 @@ class DemoSizeTests(unittest.TestCase):
                 **obj,"fire_execution_scope":{
                     **scope,"max_contracts_per_entry":7}})
 
+    def test_gpt6_leverage_changes_affordable_quantity_without_bypassing_broker(self):
+        class Broker:
+            def _request(self, method, path, *, auth=False):
+                if path == "/v2/products/BTCUSD":
+                    return {"result": {
+                        "symbol": "BTCUSD", "id": 27,
+                        "contract_type": "perpetual_futures",
+                        "settling_asset": {"symbol": "USD"},
+                        "notional_type": "vanilla", "initial_margin": "0.5",
+                        "contract_value": "0.001",
+                        "taker_commission_rate": "0.0005"}}
+                return {"result": {"leverage": 5, "product_id": 27}}
+            def wallet_balances(self):
+                return {"meta": {"net_equity": "200"},
+                        "balances": [{"asset_symbol": "USD",
+                                     "available_balance": "200"}]}
+        broker = Broker()
+        ctrl = AutoBTCController(self.root / "large-margin.sqlite")
+        preview = ctrl._model_entry_budget(broker, 27, "63214.5")
+        self.assertTrue(preview["capacity_preview_only"])
+        self.assertEqual(preview["capacity_preview_leverage"], 20)
+        self.assertEqual(preview["broker_leverage"], "5")
+        self.assertEqual(preview["max_contracts_per_entry"], 6)
+        actual_five = ctrl._entry_budget(broker, 27, "63214.5",
+                                        planned_leverage=5)
+        actual_ten = ctrl._entry_budget(broker, 27, "63214.5",
+                                       planned_leverage=10)
+        self.assertLess(actual_five["max_contracts_per_entry"], 6)
+        self.assertGreater(actual_ten["max_contracts_per_entry"],
+                           actual_five["max_contracts_per_entry"])
+        plan = {"direction": "LONG", "contracts": 6, "leverage": 5,
+                "stop_loss": "63205", "take_profit": "64000"}
+        quote = {"best_bid": "63214", "best_ask": "63214.5"}
+        with self.assertRaises(RiskRejected):
+            ctrl._assess_risk(plan, actual_five, quote)
+        # Even when the 20x preview advertises capacity, the final broker
+        # budget at GPT-6's chosen leverage is the authority.
+        with self.assertRaises(RiskRejected):
+            ctrl._assess_risk(plan, preview, quote)
+
+    def test_sizing_receipt_preserves_gpt6_choice_without_raw_model_output(self):
+        from tradebot.fire_execution import FireTradeStore
+        store = FireTradeStore(self.root / "size-receipt.sqlite")
+        press = store.reserve()
+        self.assertIsInstance(press, str)
+        record = {"tier": "strong_dynamic", "model_proposed_contracts": 5,
+                  "selected_contracts": 5, "model_selected_leverage": 12,
+                  "evidence_contract_ceiling": 6,
+                  "policy": "btc-demo-evidence-size-v3",
+                  "margin_is_broker_budget_verified": False}
+        saved = store.update(press, "preflight", sizing_evidence=record,
+                             selected_leverage=12)
+        self.assertEqual(saved["sizing_evidence"], record)
+        self.assertEqual(saved["selected_leverage"], 12)
+
     def test_budget_sizing_cannot_exceed_requested_cap(self):
         class Fake:
             def _request(self,method,path,*,auth=False):
