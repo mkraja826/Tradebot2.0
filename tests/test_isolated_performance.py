@@ -1,5 +1,6 @@
 """No fabricated P&L: signed broker cashflow and strict closed-FIRE evidence."""
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -83,10 +84,10 @@ class PerformanceTests(unittest.TestCase):
         for key in ("last_24h","last_7d"):
             wallet=report["wallet"][key]
             self.assertEqual(wallet["status"],"verified_posted_cashflow")
-            self.assertEqual(wallet["posted_net_usd"],"14.20")
-            self.assertEqual(wallet["gross_cashflow_usd"],"15.00")
-            self.assertEqual(wallet["fees_usd"],"-1.00")
-            self.assertEqual(wallet["funding_usd"],"0.20")
+            self.assertEqual(Decimal(wallet["posted_net_usd"]),Decimal("14.20"))
+            self.assertEqual(Decimal(wallet["gross_cashflow_usd"]),Decimal("15.00"))
+            self.assertEqual(Decimal(wallet["fees_usd"]),Decimal("-1.00"))
+            self.assertEqual(Decimal(wallet["funding_usd"]),Decimal("0.20"))
             self.assertEqual(wallet["excluded_external_transfers"],2)
             self.assertFalse(wallet["is_verified_trade_pnl"])
             self.assertFalse(wallet["is_strategy_attributed"])
