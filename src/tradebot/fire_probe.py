@@ -163,8 +163,9 @@ def validate(decision, core, *, require_leverage=False):
     return plan
 
 
-def decision_failure_code(error):
-    # Only known local errors and HTTP status numbers may enter public receipts.
+def decision_failure_code(error, *, stage=None):
+    # Only locally defined categories and HTTP status numbers enter public receipts.
+    # The original provider exception / model response is never persisted.
     http = re.fullmatch(r"Top Billing API HTTP ([1-5][0-9]{2})", str(error))
     if http:
         return "provider_http_" + http[1]
@@ -183,7 +184,11 @@ def decision_failure_code(error):
         "Missing or malformed price": "model_invalid_price",
         "Invalid price": "model_invalid_price",
         "Exit prices must bracket the quote in the chosen direction": "model_invalid_exit_levels",
-    }.get(str(error), "model_decision_failed")
+    }.get(str(error), {
+        "provider_request": "provider_unclassified_failure",
+        "completion": "model_unclassified_completion_failure",
+        "validation": "model_unclassified_validation_failure",
+    }.get(stage, "model_decision_failed"))
 
 
 def decision_payload(choice):
@@ -216,23 +221,30 @@ def run_probe(routes, snapshot_loader, client_factory=TopBillingClient):
     def query(model):
         client = client_factory()
         start = monotonic()
+        stage = "provider_request"
         try:
             reply = client._call(TOPBILLING_CHAT_URL, body={
-                "model": model, "messages": [{"role": "system", "content": instruction},
-                                             {"role": "user", "content": content}]}, timeout=60)
+                "model": model,
+                # Provider supports this bound; GPT-6 route does not advertise
+                # structured-output, so do not request response_format.
+                "max_completion_tokens": 1024,
+                "messages": [{"role": "system", "content": instruction},
+                             {"role": "user", "content": content}]}, timeout=60)
+            stage = "completion"
             choice = reply["choices"][0]
             if not isinstance(choice, dict):
                 raise PlanError("Malformed Top Billing response")
             parsed = decision_payload(choice)
+            stage = "validation"
             decision = validate(parsed, snapshot["core"],
                                 require_leverage=bool(snapshot.get("fire_execution_scope", {}).get("dynamic_leverage_enabled")))
             result = {"decision": decision, "usage": reply.get("usage"), "request_id": client.last_request_id}
             if isinstance(parsed.get("thesis"), str):
                 result["thesis"] = parsed["thesis"][:350]
         except PlanError as exc:
-            result = {"error": str(exc)}
+            result = {"error": str(exc), "error_stage": stage}
         except (KeyError, IndexError, TypeError, ValueError):
-            result = {"error": "Malformed completion"}
+            result = {"error": "Malformed completion", "error_stage": stage}
         return dict(result, model=model, latency_ms=round((monotonic() - start) * 1000))
 
     # Exactly one billable completion: GPT-6 FIRE. Kimi is never queried.

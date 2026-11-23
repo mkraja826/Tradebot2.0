@@ -1,6 +1,6 @@
 import json
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from tradebot.ai import AIPlanner, PlanError, PRIMARY_MODEL
 from tradebot.fire_probe import ROLES, decision_failure_code, decision_payload, run_probe, validate
@@ -17,14 +17,16 @@ class FireProbeTest(unittest.TestCase):
             def _call(self, url, *, body=None, timeout):
                 if body is None:
                     return {"data": [{"id": ROLES["fire"]}]}
-                calls.append(body["model"])
+                calls.append(body)
                 answer = json.dumps(PLAN)
                 return {"choices": [{"message": {"content": answer}}]}
         snapshot = Mock(return_value={"core": CORE, "collected_at": "example"})
         report = run_probe(ROLES, snapshot, Client)
         snapshot.assert_called_once()
         self.assertEqual(ROLES, {"fire": "tb-gpt-6"})
-        self.assertEqual(calls, ["tb-gpt-6"])
+        self.assertEqual([row["model"] for row in calls], ["tb-gpt-6"])
+        self.assertEqual(calls[0]["max_completion_tokens"], 1024)
+        self.assertNotIn("response_format", calls[0])
         self.assertEqual(list(report["results"]), ["fire"])
         self.assertEqual(report["results"]["fire"]["decision"]["contracts"], 2)
 
@@ -51,6 +53,55 @@ class FireProbeTest(unittest.TestCase):
     def test_public_error_codes_exclude_arbitrary_provider_text(self):
         self.assertEqual(decision_failure_code("Top Billing API HTTP 402"), "provider_http_402")
         self.assertEqual(decision_failure_code("sensitive upstream body"), "model_decision_failed")
+
+    def test_unknown_provider_failure_gets_bounded_reason_code(self):
+        class Client:
+            last_request_id = None
+            def _call(self, url, *, body=None, timeout):
+                if body is None:
+                    return {"data": [{"id": ROLES["fire"]}]}
+                raise PlanError("upstream-opaque-message-that-must-not-persist")
+        report = run_probe(ROLES, lambda: {
+            "core": CORE, "collected_at": "example"}, Client)
+        result = report["results"]["fire"]
+        self.assertEqual(result["error_stage"], "provider_request")
+        self.assertEqual(decision_failure_code(
+            result["error"], stage=result["error_stage"]),
+            "provider_unclassified_failure")
+        self.assertEqual(decision_failure_code(
+            "upstream-opaque-message-that-must-not-persist"), "model_decision_failed")
+
+    def test_unknown_validation_failure_gets_bounded_reason_code(self):
+        class Client:
+            last_request_id = None
+            def _call(self, url, *, body=None, timeout):
+                if body is None:
+                    return {"data": [{"id": ROLES["fire"]}]}
+                return {"choices": [{"message": {"content": json.dumps(PLAN)}}]}
+        with patch("tradebot.fire_probe.validate",
+                   side_effect=PlanError("nonspecific private model failure")):
+            result = run_probe(ROLES, lambda: {
+                "core": CORE, "collected_at": "example"}, Client)["results"]["fire"]
+        self.assertEqual(result["error_stage"], "validation")
+        self.assertEqual(decision_failure_code(
+            result["error"], stage=result["error_stage"]),
+            "model_unclassified_validation_failure")
+
+    def test_missing_model_choice_is_classified_without_retry(self):
+        calls = []
+        class Client:
+            last_request_id = None
+            def _call(self, url, *, body=None, timeout):
+                if body is None:
+                    return {"data": [{"id": ROLES["fire"]}]}
+                calls.append("completion")
+                return {"choices": []}
+        result = run_probe(ROLES, lambda: {
+            "core": CORE, "collected_at": "example"}, Client)["results"]["fire"]
+        self.assertEqual(calls, ["completion"])
+        self.assertEqual(result["error_stage"], "completion")
+        self.assertEqual(decision_failure_code(
+            result["error"], stage=result["error_stage"]), "model_invalid_json")
 
     def test_kimi_or_second_route_is_refused_before_any_model_call(self):
         client = Mock()
