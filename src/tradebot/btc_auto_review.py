@@ -1,4 +1,4 @@
-"""One-time audited owner review of a historical NO-ORDER BTC model failure.
+"""One-time audited owner review of a historical BTC no-order failure.
 
 Never modifies trade receipts, removes the halt latch, arms the worker, sends an
 exchange mutation or requests an AI completion. Future attempts still require
@@ -15,11 +15,61 @@ import stat
 
 MARKER_NAME = "btc-auto-reviewed-no-order.json"
 APPROVAL = "REVIEW BTC DEMO MODEL FAILURE WITH NO ORDER"
+RISK_APPROVAL = "REVIEW BTC DEMO NET REWARD-RISK REJECTION WITH NO ORDER"
 MAX_MARKER_BYTES = 400
 
 
+def _proved_historical_low_net_rr(db, press, receipt):
+    """Reproduce the specific historical pre-order risk rejection off-line.
+
+    The old controller persisted only the generic risk_governor_failed code,
+    so never assume all such errors are benign. The recorded model proposal,
+    signed-budget fields and the saved entry quote must independently produce
+    the *known* minimum net reward-to-risk failure with the current DEMO
+    policy. Absence of broker entry intent is checked separately.
+    """
+    from tradebot.fire_risk import FireRiskLimits, RiskRejected, assess_fire_plan
+    try:
+        row = db.execute(
+            "SELECT snapshot FROM fire_model_inputs WHERE press=?",
+            (press,)).fetchone()
+        if row is None:
+            return False
+        snapshot = json.loads(row[0])
+        if (type(snapshot) is not dict
+                or snapshot.get("environment") != "delta-india-demo"
+                or (snapshot.get("fire_execution_scope") or {}).get(
+                    "unattended_demo_mode") is not True):
+            return False
+        core = snapshot.get("core")
+        quote = receipt.get("decision_quote")
+        if (type(core) is not dict or type(quote) is not dict
+                or quote != {k: core.get(k) for k in ("best_bid", "best_ask")}):
+            return False
+        budget = receipt.get("budget")
+        if type(budget) is not dict:
+            return False
+        plan = {
+            "direction": receipt.get("direction"),
+            "contracts": receipt.get("contracts"),
+            "leverage": receipt.get("selected_leverage"),
+            "stop_loss": receipt.get("stop_loss"),
+            "take_profit": receipt.get("take_profit"),
+        }
+        assess_fire_plan(
+            plan, budget, quote, limits=FireRiskLimits(
+                max_contracts=6, equity_risk_fraction=None,
+                version="btc-demo-chart-stop-v4"))
+    except RiskRejected as exc:
+        return str(exc) == "Expected net reward-to-risk below policy"
+    except (sqlite3.Error, ValueError, TypeError, KeyError):
+        return False
+    return False
+
+
+
 def evidence(root):
-    """Identify the exact latest model failure, proven no-order in the ledger."""
+    """Identify a strictly evidenced latest no-order model or risk rejection."""
     root = Path(root)
     path = root / "fire-ops.sqlite"
     if root.is_symlink() or not root.is_dir() or path.is_symlink() or not path.is_file():
@@ -37,10 +87,13 @@ def evidence(root):
                     or status != "rejected_no_order" or not isinstance(result, str)):
                 return None
             receipt = json.loads(result)
-            if (type(receipt) is not dict
-                    or receipt.get("reason_code") != "model_decision_failed"
+            reason = receipt.get("reason_code") if type(receipt) is dict else None
+            if (reason not in ("model_decision_failed", "risk_governor_failed")
                     or receipt.get("orders_submitted") is not False
                     or receipt.get("protection_verified") is True):
+                return None
+            if (reason == "risk_governor_failed"
+                    and not _proved_historical_low_net_rr(db, press, receipt)):
                 return None
             # An unresolved intent is never released by a model-error review.
             exists = db.execute(
@@ -54,7 +107,7 @@ def evidence(root):
                 (press + "\x00" + status + "\x00" + result).encode("utf-8")
             ).hexdigest()
             return {"press": press, "receipt_sha256": digest,
-                    "reason_code": "model_decision_failed"}
+                    "reason_code": reason}
     except (OSError, sqlite3.Error, ValueError, TypeError, UnicodeError):
         return None
 
@@ -104,11 +157,15 @@ def _signed_candidate(root):
 def acknowledge(root, *, approval, candidate=_signed_candidate):
     """Explicit owner-reviewed local no-order acknowledgement, no API mutation."""
     root = Path(root)
-    if approval != APPROVAL or root.is_symlink() or not root.is_dir():
-        raise ValueError("Explicit review consent and trusted data directory required")
+    if root.is_symlink() or not root.is_dir():
+        raise ValueError("Trusted data directory required")
     before = evidence(root)
     if before is None:
-        raise ValueError("No exact locally verified model-failure no-order receipt")
+        raise ValueError("No exact locally verified no-order failure receipt")
+    expected_approval = (RISK_APPROVAL if before["reason_code"] == "risk_governor_failed"
+                         else APPROVAL)
+    if approval != expected_approval:
+        raise ValueError("Exact incident-specific operator consent required")
     if reviewed_receipt_matches(root):
         return {"status": "already_reviewed", "broker_mutations": False,
                 "ai_calls": 0}
