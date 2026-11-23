@@ -18,6 +18,9 @@ from tradebot.delta import DEMO_API, DeltaDemo
 from tradebot.fire_account_guard import require_flat_demo_account_for_configuration
 from tradebot.fire_commission_preflight import _services_active, _fire_disabled
 from tradebot.operator_account_mode import read_manual_mode
+from tradebot.signed_margin_mode import (
+    signed_account_margin_mode, MarginModeEvidenceError,
+)
 
 APPROVAL_PHRASE = "EXECUTE ONE BTC DEMO FIRE"
 ATTEMPT_FILE = "btc-demo-supervised-attempt.lock"
@@ -31,7 +34,8 @@ def readonly_btc_commission_preflight(
         manual_mode_fn=read_manual_mode,
         flat_fn=require_flat_demo_account_for_configuration,
         allow_daily_loss_warning=False,
-        allow_portfolio_loss_warnings=False):
+        allow_portfolio_loss_warnings=False,
+        allow_signed_subaccount=False):
     report = {
         "mode": "supervised_btc_demo_read_only_preflight",
         "status": "blocked", "blockers": [],
@@ -86,22 +90,36 @@ def readonly_btc_commission_preflight(
         pass
     if not report["recent_btc_history_local_quality_verified"]:
         blocks.append("restricted_btc_recent24h_history_unverified")
-    # Demo operator policy: the private 0600 declaration replaces ONLY the
-    # API's unavailable margin-mode field. Do not label it broker verified.
-    try:
-        mode = manual_mode_fn(exchange)
-        report["owner_declared_main_isolated_accepted"] = (
-            isinstance(mode, dict)
-            and mode.get("status") == "owner_declared_not_broker_verified"
-            and mode.get("account") == "main"
-            and mode.get("declared_mode") == "isolated"
-            and mode.get("broker_margin_verified") is False
-            and mode.get("trade_authorized") is False)
-    except Exception:
-        pass
-    if not report["owner_declared_main_isolated_accepted"]:
-        blocks.append("owner_main_isolated_declaration_missing_or_expired")
+    # Autonomous isolated subaccounts have a stronger proof than the legacy
+    # main-account owner's declaration: exact child identity matched to the
+    # separately signed parent roster. This opt-in never alters manual FIRE.
+    if allow_signed_subaccount:
+        try:
+            report["signed_isolated_margin_verified"] = (
+                signed_account_margin_mode(exchange) == "isolated")
+        except (MarginModeEvidenceError, Exception):
+            pass
+        if report["signed_isolated_margin_verified"]:
+            report["margin_evidence_source"] = "signed_parent_subaccount"
+        else:
+            blocks.append("signed_subaccount_margin_evidence_unavailable")
     else:
+        # Legacy demo manual supervision remains deliberately unchanged.
+        try:
+            mode = manual_mode_fn(exchange)
+            report["owner_declared_main_isolated_accepted"] = (
+                isinstance(mode, dict)
+                and mode.get("status") == "owner_declared_not_broker_verified"
+                and mode.get("account") == "main"
+                and mode.get("declared_mode") == "isolated"
+                and mode.get("broker_margin_verified") is False
+                and mode.get("trade_authorized") is False)
+        except Exception:
+            pass
+        if not report["owner_declared_main_isolated_accepted"]:
+            blocks.append("owner_main_isolated_declaration_missing_or_expired")
+    if (report["signed_isolated_margin_verified"]
+            or report["owner_declared_main_isolated_accepted"]):
         try:
             exposure = flat_fn(exchange)
             report["account_wide_flatness_verified"] = (
