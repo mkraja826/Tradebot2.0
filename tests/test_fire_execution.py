@@ -220,6 +220,34 @@ class FireExecutionTests(unittest.TestCase):
         self.assertFalse(fire.snapshot()["orders_submitted"])
         self.assertEqual(self.exchange.requests, [])
 
+    def test_autonomous_known_low_net_reward_risk_is_clean_no_order(self):
+        # No order intent or broker mutation can occur on the first
+        # deterministic pre-intent risk gate for this explicitly scoped mode.
+        fire = self.make(plan=PLAN | {"take_profit": "63450"})
+        fire._allow_clean_reward_risk_rejection = lambda: True
+        self.assertTrue(fire.start()[0])
+        state = fire.snapshot()
+        self.assertEqual(state["status"], "rejected_no_order")
+        self.assertEqual(state["reason_code"], "btc_demo_net_reward_risk_below_minimum")
+        self.assertFalse(state["orders_submitted"])
+        self.assertFalse(state["protection_verified"])
+        self.assertEqual(self.exchange.requests, [])
+        self.assertEqual(self.exchange.leverage_changes, [])
+        import sqlite3
+        with sqlite3.connect(self.path) as db:
+            self.assertEqual(db.execute(
+                "SELECT count(*) FROM fire_entries WHERE press=?",
+                (state["press"],)).fetchone()[0], 0)
+
+    def test_normal_fire_does_not_auto_classify_same_risk_rejection(self):
+        fire = self.make(plan=PLAN | {"take_profit": "63450"})
+        self.assertTrue(fire.start()[0])
+        state = fire.snapshot()
+        self.assertEqual(state["status"], "rejected_no_order")
+        self.assertEqual(state["reason_code"], "risk_governor_failed")
+        self.assertFalse(state["orders_submitted"])
+        self.assertEqual(self.exchange.requests, [])
+
     def test_one_click_posts_one_order_and_verifies_both_protective_stops(self):
         fire = self.make()
         accepted, _ = fire.start()
