@@ -11,27 +11,26 @@
   <script defer src="/charts.js"></script>
   <script defer src="/isolated.js"></script>
   <script defer src="/performance.js"></script>
+  <script defer src="/workspace.js"></script>
 </head>
 <body>
   <div class="shell">
     <aside class="sidebar">
       <div class="brand"><div class="brand-logo">T<span>2</span></div><div><strong>TRADEBOT <em>2.0</em></strong><small>INTELLIGENCE TERMINAL</small></div></div>
-      <div class="section-label">COMMAND CENTER</div>
-      <a href="#overview" class="nav active"><span class="nav-icon">◫</span> Overview</a>
-      <a href="#isolated-accounts" class="nav"><span class="nav-icon">◈</span> BTC + Gold Bots</a>
-      <a href="#autonomous-performance" class="nav"><span class="nav-icon">▤</span> Performance</a>
-      <a href="#market" class="nav"><span class="nav-icon">⌁</span> Market &amp; Account</a>
-      <a href="#intelligence" class="nav"><span class="nav-icon">✧</span> AI Decisions</a>
-      <a href="#activity" class="nav"><span class="nav-icon">≡</span> Activity Log</a>
-      <a href="#learning" class="nav"><span class="nav-icon">◈</span> Kimi Learning</a>
+      <div class="section-label">WORKSPACE</div>
+      <a href="#home" data-workspace-link="home" class="nav active"><span class="nav-icon" aria-hidden="true">⌂</span> Home</a>
+      <a href="#bots" data-workspace-link="bots" class="nav"><span class="nav-icon" aria-hidden="true">◈</span> BTC + Gold Bots</a>
+      <a href="#analytics" data-workspace-link="analytics" class="nav"><span class="nav-icon" aria-hidden="true">▥</span> Analytics</a>
+      <a href="#activity" data-workspace-link="activity" class="nav"><span class="nav-icon" aria-hidden="true">≡</span> Activity</a>
+      <a href="#desk" data-workspace-link="desk" class="nav"><span class="nav-icon" aria-hidden="true">⌁</span> Advanced desk</a>
       <div class="sidebar-bottom">
         <div class="secure-mark">◈ &nbsp;PRIVATE MONITOR</div>
-        <div class="sidebar-caption">Delta India testnet only<br/>FIRE execution requires explicit Demo activation.</div>
+        <div class="sidebar-caption">Delta India demo only<br/>Display is read-only. Bot safety controls run separately.</div>
       </div>
     </aside>
     <main id="terminal">
       <header class="topbar">
-        <div class="crumb">Workspace <span>/</span> Dashboard <span>/</span> <strong>Tradebot 2.0</strong></div>
+        <div class="crumb"><strong>TRADEBOT 2.0</strong> <span>/</span> Private demo terminal</div>
         <div class="top-right">
           <span class="dot"></span><span>BTC + GOLD · DELTA DEMO</span>
           <span id="heartbeat-head"></span><span class="refresh-label" id="refresh-label">Connecting…</span>
@@ -39,10 +38,58 @@
       </header>
       <div class="content">
         <section class="intro" id="overview">
-          <div><div class="eyebrow">DELTA INDIA / TESTNET</div>
-            <h1>Autonomous <span>command center.</span></h1>
+          <div><div class="eyebrow">PRIVATE WORKSPACE · DELTA INDIA DEMO</div>
+            <h1 id="workspace-title">Your trading desk</h1>
+            <p id="workspace-subtitle">A clear view of what matters right now.</p>
           </div>
-          <div class="runtime-pill" id="runtime-pill"><span class="status-light"></span><span id="runtime-status">Awaiting heartbeat</span></div>
+          <div class="runtime-pill" id="runtime-pill"><span class="status-light"></span><span id="runtime-status">Verifying bots</span></div>
+        </section>
+        <section class="home-hub" id="home-summary" data-health="review" aria-label="BTC and Gold demo portfolio overview">
+          <div class="home-primary">
+            <div class="home-portfolio">
+              <div class="home-topline"><span class="home-kicker">YOUR DEMO PORTFOLIO</span><span class="home-live-state" id="home-portfolio-state">Verifying signed accounts…</span></div>
+              <p class="home-equity-label">Combined net equity</p>
+              <strong id="home-equity" class="home-equity-value">—</strong>
+              <p id="home-equity-caption" class="home-equity-caption">Two isolated signed demo wallets · not realized P&amp;L</p>
+              <div class="home-quick-stats">
+                <div><span>Open positions</span><strong id="home-open-positions">—</strong></div>
+                <div><span>Pending orders</span><strong id="home-open-orders">—</strong></div>
+                <div><span>Running bots</span><strong id="home-bots-running">—</strong></div>
+              </div>
+            </div>
+            <div class="home-systems">
+              <div class="home-health-ring" id="home-health-ring" role="img" aria-label="Checking service health">
+                <div class="home-ring-middle"><strong id="home-service-count">—</strong><span>services</span></div>
+              </div>
+              <div><div class="home-kicker">SYSTEM HEALTH</div><strong id="home-operational">Verifying services</strong><p id="home-service-note">Independent workers, watchdogs, equity monitors and alerts</p></div>
+            </div>
+          </div>
+          <div class="home-lower">
+            <div class="home-trend">
+              <div class="home-trend-head"><div><div class="home-kicker">PORTFOLIO MONITORING</div><h2>Equity trends</h2></div>
+                <span class="home-chart-legends"><i class="home-dot-btc"></i> BTC <i class="home-dot-gold"></i> Gold</span></div>
+              <svg id="home-equity-graph" class="home-graph" viewBox="0 0 680 152" role="img" aria-label="Waiting for signed equity history" preserveAspectRatio="none"></svg>
+              <div class="home-trend-foot"><span id="home-chart-state">Waiting for signed equity history</span><span id="home-updated">Connecting…</span></div>
+            </div>
+            <div class="home-bots">
+              <a href="#bots" id="home-btc-bot" class="home-bot-tile" data-health="review">
+                <span class="home-bot-label"><span class="home-symbol btc">₿</span><span><strong>Bitcoin</strong><small>BTCUSD · GPT-6</small></span><span class="home-arrow">↗</span></span>
+                <strong id="home-btc-equity" class="home-bot-equity">—</strong>
+                <span class="home-bot-foot"><span id="home-btc-status">Verifying</span><span id="home-btc-position">Positions unavailable</span></span>
+              </a>
+              <a href="#bots" id="home-gold-bot" class="home-bot-tile" data-health="review">
+                <span class="home-bot-label"><span class="home-symbol gold">Au</span><span><strong>Gold</strong><small>XAUTUSD · DeepSeek</small></span><span class="home-arrow">↗</span></span>
+                <strong id="home-gold-equity" class="home-bot-equity">—</strong>
+                <span class="home-bot-foot"><span id="home-gold-status">Verifying</span><span id="home-gold-position">Positions unavailable</span></span>
+              </a>
+            </div>
+          </div>
+          <div class="home-bottom">
+            <div class="home-market-note"><span class="home-note-icon" aria-hidden="true">✦</span>
+              <div><strong>Latest AI activity</strong><p id="home-latest-activity">Waiting for the latest signed activity snapshot.</p></div>
+            </div>
+            <div class="home-actions"><a href="#activity">Review activity</a><a href="#analytics">View analytics</a></div>
+          </div>
         </section>
         <section class="isolated-overview" id="isolated-accounts" aria-labelledby="isolated-title">
           <div class="isolated-head">
@@ -130,6 +177,7 @@
             <p id="exit-due"></p><div id="positions-list" class="positions-list"><div class="empty">Connecting to the demo exchange…</div></div>
           </section></div>
         <section class="panel fire-panel" id="fire">
+          <button id="open-chat" class="home-desk-chat" type="button">Ask BTC about the market</button>
           <div class="panel-header">
             <div><div class="eyebrow">MANUAL DECISION LAB · PERPETUAL FUTURES</div><h2>FIRE <span class="fire-accent">GPT-6</span></h2></div>
             <span class="tiny-label" id="fire-mode-label">READ-ONLY PROBE</span>
@@ -189,7 +237,13 @@
           <div class="event-head"><span>EVENT</span><span>DETAILS</span><span>TIME (UTC)</span></div>
           <div id="events" class="event-list"><div class="empty">No journal events recorded yet</div></div>
         </section>
-        <nav class="dock" aria-label="Terminal navigation"><a href="#overview">Overview</a><a href="#trades">Trades</a><a href="#activity">Activity</a><button id="open-chat">Ask BTC</button></nav><footer class="footer"><div>TRADEBOT 2.0 <span>●</span> DELTA INDIA DEMO</div><div>Private read-only interface · Values may be delayed · Never interpreted as guaranteed P&amp;L</div></footer>
+        <nav class="dock" aria-label="Main navigation">
+          <a href="#home" data-workspace-link="home"><span aria-hidden="true">⌂</span><small>Home</small></a>
+          <a href="#bots" data-workspace-link="bots"><span aria-hidden="true">◈</span><small>Bots</small></a>
+          <a href="#analytics" data-workspace-link="analytics"><span aria-hidden="true">▥</span><small>Analytics</small></a>
+          <a href="#activity" data-workspace-link="activity"><span aria-hidden="true">≡</span><small>Activity</small></a>
+          <a href="#desk" data-workspace-link="desk"><span aria-hidden="true">⌁</span><small>Desk</small></a>
+        </nav><footer class="footer"><div>TRADEBOT 2.0 <span>●</span> DELTA INDIA DEMO</div><div>Private read-only interface · Values may be delayed · Never interpreted as guaranteed P&amp;L</div></footer>
       </div>
     </main>
   </div>
