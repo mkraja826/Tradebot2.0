@@ -24,6 +24,8 @@ from tradebot.fire_account_guard import (
 from tradebot.btc_demo_size import evidence_contract_ceiling, MAX_AUTONOMOUS_LARGE_CONTRACTS
 from tradebot.fire_risk import FireRiskLimits, assess_fire_plan
 from tradebot.signed_margin_mode import signed_account_margin_mode
+from tradebot.fire_account_guard import require_flat_demo_account
+from tradebot.btc_supervised_recent24h import load_recent24h_strategy_context
 
 ARM_CONTENT = "DELTA-INDIA-DEMO:BTCUSD:UNATTENDED:30MIN-MAX48-DYNAMIC6"
 MAX_DAILY_ATTEMPTS = 48
@@ -33,7 +35,11 @@ TERMINAL_SAFE = {"rejected_no_order", "flat_verified"}
 
 
 def arm_path():
-    return Path.home() / ".config" / "tradebot2" / "btc-auto-demo-armed"
+    # Broker-account migration must never reuse the old main-account arm.
+    label = os.environ.get("TRADEBOT_EXPECTED_DEMO_SUBACCOUNT")
+    name = ("btc-isolated-autonomous-armed" if label == "BTC"
+            else "btc-auto-demo-armed")
+    return Path.home() / ".config" / "tradebot2" / name
 
 
 def is_armed(path=None):
@@ -86,12 +92,32 @@ class AutoBTCController(SupervisedBTCController):
     def _require_account_flat(self, exchange, product_id):
         if not is_armed():
             raise ValueError("autonomous_demo_disarmed")
-        # This check runs before GPT-6 and once again before broker POST.
-        # It prevents the known MAIN-account ambiguity from causing an
-        # immediate paid round trip through emergency reduce-only closeout.
+        # The autonomous worker is scoped to the explicitly named isolated
+        # BTC child. The inherited supervised path uses the old MAIN-account
+        # owner declaration, which must never authorize this child.
+        if os.environ.get("TRADEBOT_EXPECTED_DEMO_SUBACCOUNT") != "BTC":
+            raise ValueError("autonomous_btc_isolated_scope_required")
         if not signed_isolated_margin_proven(exchange):
             raise ValueError("signed_demo_margin_mode_required_before_entry")
-        return super()._require_account_flat(exchange, product_id)
+        # Live full-account exposure is reverified before the model call and
+        # the POST, against the SAME subaccount credentials.
+        return require_flat_demo_account(
+            exchange, selected_symbol=self.symbol,
+            selected_product_id=product_id)
+
+    def _decision_context(self, exchange, collected, midpoint):
+        # Public BTC candles are account-independent; the archival DB stays
+        # shared under the original data root while trades, equity and FIRE
+        # receipts are kept strictly inside the isolated account directory.
+        if self.path.parent.name != "btc-isolated":
+            raise ValueError("autonomous_btc_private_data_scope_required")
+        if self.path.parent.is_symlink() or self.path.parent.parent.is_symlink():
+            raise ValueError("untrusted_btc_market_archive_root")
+        context, levels = load_recent24h_strategy_context(
+            self.path.parent.parent, at=collected, price=midpoint)
+        self._restricted_levels = levels
+        self._restricted_at = int(collected.timestamp()) // 300 * 300
+        return context
 
     def _allow_wait_choice(self):
         """Autonomous AI may propose only LONG/SHORT, not a neutral choice."""
