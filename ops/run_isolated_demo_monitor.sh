@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
 # Per-account Delta India DEMO watchdog/equity collector. NEVER places entries.
-# Usage: run_isolated_demo_monitor.sh BTC|GOLD watchdog|equity
+# Usage: run_isolated_demo_monitor.sh BTC-watchdog|BTC-equity|GOLD-watchdog|GOLD-equity
 set -euo pipefail
 set +x
 umask 077
-if [[ ${#} != 2 ]]; then echo "Expected account and role" >&2; exit 2; fi
-ACCOUNT="$1"
-ROLE="$2"
+if [[ ${#} != 1 || "$1" != *-* ]]; then
+    echo "Expected account-role service instance" >&2
+    exit 2
+fi
+ACCOUNT="${1%%-*}"
+ROLE="${1#*-}"
 PROJECT="/home/support/Tradebot2.0"
 ROOT="/home/support/.config/tradebot2"
 case "$ACCOUNT:$ROLE" in
