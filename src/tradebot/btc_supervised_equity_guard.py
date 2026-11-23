@@ -13,7 +13,7 @@ from tradebot.btc_supervised_session import (
     ALLOWED_STANDARD_BLOCKERS, _read_original_high_watermark,
     assess_supervised_session,
 )
-from tradebot.equity_monitor import risk_health
+from tradebot.equity_monitor import risk_health, demo_monitoring_operational, DAILY_ONLY_WARNING
 from tradebot.equity_receipt import validate_receipt
 from tradebot.portfolio_equity_guard import EquityRiskError, amount
 
@@ -28,10 +28,12 @@ class SupervisedSessionEquityGuard:
     """
 
     def __init__(self, path, *, health_fn=risk_health,
-                 peak_reader=_read_original_high_watermark):
+                 peak_reader=_read_original_high_watermark,
+                 allow_daily_loss_warning=False):
         self.path = Path(path)
         self.health_fn = health_fn
         self.peak_reader = peak_reader
+        self.allow_daily_loss_warning = allow_daily_loss_warning
         self._first = None
         self._first_receipt = None
         self._file_identity = None
@@ -53,15 +55,10 @@ class SupervisedSessionEquityGuard:
                 or health.get("observation_status") != "fresh"
                 or type(conditions) is not list
                 or any(type(v) is not str for v in conditions)
-                or not set(conditions) <= ALLOWED_STANDARD_BLOCKERS
-                or not isinstance(monitor, dict)
-                or monitor.get("alert_codes") != []
-                or any(monitor.get(k) != "healthy"
-                       for k in ("watchdog", "equity_collector"))
-                or any(type(monitor.get(k)) not in (int, float)
-                       or not 0 <= monitor[k] <= limit
-                       for k,limit in (("watchdog_age_seconds", 90),
-                                      ("equity_collector_age_seconds", 180)))):
+                or not set(conditions) <= (ALLOWED_STANDARD_BLOCKERS |
+                    ({DAILY_ONLY_WARNING} if self.allow_daily_loss_warning else set()))
+                or not demo_monitoring_operational(
+                    monitor, allow_daily_loss_warning=self.allow_daily_loss_warning)):
             raise EquityRiskError("supervised_session_history_or_monitor_unverified")
         peak, identity = self.peak_reader(self.path)
         if self._file_identity is not None and identity != self._file_identity:

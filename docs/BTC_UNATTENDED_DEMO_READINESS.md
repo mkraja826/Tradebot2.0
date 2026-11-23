@@ -14,11 +14,18 @@ mode, and a disabled normal FIRE dashboard.
 The local five-minute screen and Coinbase spot sanity check run before any
 paid GPT-6 decision. New RSI/ADX/RVOL/MACD/Bollinger features are advisory.
 
-- One contract maximum, enforced in both model scope and execution code.
-- At most two attempts per UTC day, at least four hours apart; reservations
+- GPT-6 can propose 1–6 DEMO BTC contracts, subject to evidence-based
+  downgrades, margin, liquidation clearance and independent per-trade risk.
+- At most 48 attempts per UTC day, at least 30 minutes apart; reservations
   persist **before** contacting the AI or broker and are not refunded.
-- The broker-read wallet equity has an additional persistent UTC-day 0.5%
-  decline threshold. The 15-minute authenticated session guard remains.
+- Autonomous BTC DEMO has **no UTC-day equity-loss percentage halt**.
+  A daily-only loss warning is logged but does not block subsequent autonomous
+  entries; a weekly or historical-peak breach still blocks as a separate safeguard.
+  Original signed equity receipts, wallet integrity checks and the 15-minute
+  authenticated session guard remain mandatory.
+- Per-entry stop-loss exposure remains independently limited: up to 0.25%,
+  0.35%, or 0.5% of verified equity for the selected size tier. This is a
+  **per-trade maximum estimated loss**, not an aggregate daily loss ceiling.
 - Broker-side SL/TP, liquidation clearance, order reconciliation and
   emergency closeout remain mandatory, with an independent active watchdog.
 - If the model fails, execution becomes ambiguous, a stop is unverified, or

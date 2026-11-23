@@ -29,7 +29,8 @@ def readonly_btc_commission_preflight(
         session_fn=inspect_btc_session_candidate,
         recent_fn=inspect_recent_btc_window,
         manual_mode_fn=read_manual_mode,
-        flat_fn=require_flat_demo_account_for_configuration):
+        flat_fn=require_flat_demo_account_for_configuration,
+        allow_daily_loss_warning=False):
     report = {
         "mode": "supervised_btc_demo_read_only_preflight",
         "status": "blocked", "blockers": [],
@@ -52,7 +53,8 @@ def readonly_btc_commission_preflight(
         blocks.append("readonly_delta_demo_client_required")
         return report
     try:
-        s = session_fn(exchange, data_dir)
+        s = (session_fn(exchange, data_dir, allow_daily_loss_warning=True)
+             if allow_daily_loss_warning else session_fn(exchange, data_dir))
         report["supervised_session_verified"] = (
             type(s) is dict and s.get("status") == "baseline_candidate_review_only"
             and s.get("session_budget_within_limits") is True

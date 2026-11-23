@@ -18,7 +18,6 @@ import time
 from tradebot.delta import DeltaDemo, DEMO_API
 from tradebot.btc_supervised_execution import SupervisedBTCController
 from tradebot.btc_supervised_equity_guard import SupervisedSessionEquityGuard
-from tradebot.portfolio_equity_guard import EquityRiskError, amount
 from tradebot.fire_btc_supervised_commission import readonly_btc_commission_preflight
 from tradebot.fire_account_guard import (
     AccountExposureRejected, require_flat_demo_account_for_configuration,
@@ -58,51 +57,17 @@ def is_armed(path=None):
         return False
 
 
-MAX_DAILY_EQUITY_DECLINE = Decimal("0.005")
-
-
-def check_daily_equity_limit(root, now, current):
-    """Original broker receipt is verified by caller; persist earliest UTC baseline."""
-    current = amount(current)
-    if current <= 0:
-        raise EquityRiskError("btc_auto_daily_equity_unverified")
-    dbpath=Path(root)/"btc-auto-demo.sqlite"
-    if dbpath.is_symlink():
-        raise EquityRiskError("btc_auto_equity_ledger_untrusted")
-    day=now.astimezone(timezone.utc).date().isoformat()
-    with closing(_connect(dbpath)) as db:
-        db.execute("""CREATE TABLE IF NOT EXISTS btc_auto_daily_equity(
-            utc_day TEXT PRIMARY KEY, starting_equity TEXT NOT NULL)""")
-        db.execute("BEGIN IMMEDIATE")
-        row=db.execute("SELECT starting_equity FROM btc_auto_daily_equity "
-                       "WHERE utc_day=?",(day,)).fetchone()
-        if row is None:
-            db.execute("INSERT INTO btc_auto_daily_equity VALUES (?,?)",
-                       (day,str(current)))
-            baseline=current
-        else:
-            baseline=amount(row[0])
-        if baseline<=0:
-            raise EquityRiskError("btc_auto_daily_baseline_invalid")
-        if (baseline-current)/baseline >= MAX_DAILY_EQUITY_DECLINE:
-            raise EquityRiskError("btc_auto_daily_loss_limit")
-        db.commit()
-
-
-class AutoDailyEquityGuard(SupervisedSessionEquityGuard):
-    """Unattended attempts share a durable day-long 0.5% decline ceiling."""
-    def require_verified_read(self, equity, receipt, *, now=None):
-        verdict=super().require_verified_read(equity,receipt,now=now)
-        instant=now or datetime.now(timezone.utc)
-        check_daily_equity_limit(self.path.parent,instant,equity)
-        return {**verdict,"autonomous_daily_equity_limit":"0.5_percent"}
+# No UTC-day equity-loss ceiling on autonomous DEMO entries. Broker-backed
+# per-trade risk, 15-minute session, weekly/peak and protection gates still apply.
+MAX_STRONG_TRADE_RISK_FRACTION = Decimal("0.005")
 
 
 class AutoBTCController(SupervisedBTCController):
     def __init__(self,path,*,enabled=False,**kwargs):
         super().__init__(path,enabled=enabled,**kwargs)
-        self.equity_guard = AutoDailyEquityGuard(
-            self.path.parent/"fire-equity-risk.sqlite")
+        self.equity_guard = SupervisedSessionEquityGuard(
+            self.path.parent/"fire-equity-risk.sqlite",
+            allow_daily_loss_warning=True)
 
     def _require_account_flat(self, exchange, product_id):
         if not is_armed():
@@ -167,7 +132,7 @@ class AutoBTCController(SupervisedBTCController):
     def _assess_risk(self, plan, budget, quote):
         """Confidence tier also limits maximum DEMO dollar loss per trade.
 
-        Strong entries can risk up to the existing daily 0.5% equity limit;
+        Strong entries can risk up to 0.5% of equity per individual trade;
         every tier still fails closed on broker margin, liquidation and SL/TP.
         """
         fractions = {1: Decimal("0.0025"), 2: Decimal("0.0035")}
@@ -178,7 +143,7 @@ class AutoBTCController(SupervisedBTCController):
         return assess_fire_plan(
             plan, budget, quote, limits=FireRiskLimits(
                 max_contracts=self._hard_contract_cap(),
-                equity_risk_fraction=fractions.get(size, MAX_DAILY_EQUITY_DECLINE),
+                equity_risk_fraction=fractions.get(size, MAX_STRONG_TRADE_RISK_FRACTION),
                 version="btc-demo-evidence-size-v3"))
 
     def _additional_fire_scope(self):
@@ -239,7 +204,7 @@ def check_candidate(data_dir, *, broker_factory=DeltaDemo,
         allow_orders=False)
     if getattr(broker, "base_url", None) != DEMO_API or broker.allow_orders is not False:
         return False
-    r = preflight(broker, Path(data_dir))
+    r = preflight(broker, Path(data_dir), allow_daily_loss_warning=True)
     return (
         type(r) is dict
         and r.get("status") == "operator_review_candidate_only"

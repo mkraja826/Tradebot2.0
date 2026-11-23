@@ -18,7 +18,7 @@ import sqlite3
 import stat
 
 from tradebot.delta import DEMO_API, DeltaDemo
-from tradebot.equity_monitor import risk_health
+from tradebot.equity_monitor import risk_health, demo_monitoring_operational, DAILY_ONLY_WARNING
 from tradebot.equity_receipt import validate_receipt, EquityReadError
 from tradebot.portfolio_equity_guard import amount, EquityRiskError, validated_watermark
 
@@ -120,11 +120,13 @@ def _read_original_high_watermark(path):
 
 
 def inspect_btc_session_candidate(exchange, data_dir, *,
-                                  now=None, health_fn=risk_health):
+                                  now=None, health_fn=risk_health,
+                                  allow_daily_loss_warning=False):
     """Propose a genuine fresh session equity baseline without any writes.
 
-    Missed *weekly* opening is the only existing equity-health blocker
-    tolerated for a nonauthorizing supervised-session proposal. Daily anchor,
+    A missed weekly opening is tolerated. Only opted-in autonomous DEMO
+    checks may also treat a typed daily-only collector breach as a warning.
+    Daily anchor,
     latest historical receipt, existing high watermark and operational
     watchdog/collector must all remain valid.
     """
@@ -178,14 +180,8 @@ def inspect_btc_session_candidate(exchange, data_dir, *,
             health.get("latest_receipt_status") == "verified" and
             health.get("observation_status") == "fresh")
         monitor = health.get("monitoring")
-        report["watchdog_and_collector_healthy"] = (
-            type(monitor) is dict and monitor.get("alert_codes") == [] and
-            all(monitor.get(k) == "healthy"
-                for k in ("watchdog", "equity_collector")) and
-            all(type(monitor.get(k)) in (int, float) and
-                0 <= monitor[k] <= limit
-                for k, limit in (("watchdog_age_seconds", 90),
-                                 ("equity_collector_age_seconds", 180))))
+        report["watchdog_and_collector_healthy"] = demo_monitoring_operational(
+            monitor, allow_daily_loss_warning=allow_daily_loss_warning)
         conditions = health.get("blocking_conditions")
         if (type(conditions) is not list or
                 any(type(x) is not str for x in conditions)):
@@ -196,7 +192,8 @@ def inspect_btc_session_candidate(exchange, data_dir, *,
                 not report["daily_checkpoint_verified"] or
                 not report["latest_receipt_verified"] or
                 not report["watchdog_and_collector_healthy"] or
-                not set(conditions) <= ALLOWED_STANDARD_BLOCKERS):
+                not set(conditions) <= (ALLOWED_STANDARD_BLOCKERS |
+                    ({DAILY_ONLY_WARNING} if allow_daily_loss_warning else set()))):
             report["reason"] = "original_daily_receipts_or_monitoring_unverified"
             return report
         peak, identity = _read_original_high_watermark(path)
