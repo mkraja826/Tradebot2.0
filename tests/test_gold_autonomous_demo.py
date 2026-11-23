@@ -131,6 +131,50 @@ class GoldAutonomousTests(unittest.TestCase):
         self.assertTrue((self.root/"gold-auto-demo-halt").is_file())
         self.assertFalse((self.root/"btc-auto-demo-halt").exists())
 
+    def test_gold_no_order_risk_rejection_is_retryable_without_halt(self):
+        fake=Mock()
+        fake.start.return_value=(True,"accepted")
+        fake.snapshot.return_value={
+            "status":"rejected_no_order","orders_submitted":False,
+            "reason_code":"risk_governor_failed",
+            "protection_verified":False}
+        response=run_once(self.root,instant=NOW,armed=lambda:True,
+            candidate=lambda x:True,receipt_check=lambda x:True,
+            controller_factory=lambda *a,**k:fake,do_execute=True)
+        self.assertEqual(response["result"],"rejected_no_order")
+        self.assertFalse(response["orders_submitted"])
+        self.assertFalse((self.root/"gold-auto-demo-halt").exists())
+
+    def test_gold_prior_safe_no_order_receipt_may_retry_after_interval(self):
+        db=self.root/"fire-xaut.sqlite"
+        with sqlite3.connect(db) as conn:
+            conn.execute("CREATE TABLE fire_requests("
+                         "press TEXT,status TEXT,result TEXT,created_at TEXT)")
+            conn.execute("INSERT INTO fire_requests VALUES(?,?,?,?)",
+                         ("x","rejected_no_order",json.dumps({
+                            "orders_submitted":False,
+                            "protection_verified":False,
+                            "reason_code":"risk_governor_failed"}),NOW.isoformat()))
+        self.assertTrue(receipts_safe(self.root))
+        with sqlite3.connect(db) as conn:
+            conn.execute("UPDATE fire_requests SET result=?",
+                (json.dumps({"orders_submitted":True,
+                    "protection_verified":False,
+                    "reason_code":"risk_governor_failed"}),))
+        self.assertFalse(receipts_safe(self.root))
+
+    def test_unknown_no_order_reason_requires_review(self):
+        db=self.root/"fire-xaut.sqlite"
+        with sqlite3.connect(db) as conn:
+            conn.execute("CREATE TABLE fire_requests("
+                         "press TEXT,status TEXT,result TEXT,created_at TEXT)")
+            conn.execute("INSERT INTO fire_requests VALUES(?,?,?,?)",
+                         ("x","rejected_no_order",json.dumps({
+                            "orders_submitted":False,
+                            "protection_verified":False,
+                            "reason_code":"execution_or_protection_unverified"}),NOW.isoformat()))
+        self.assertFalse(receipts_safe(self.root))
+
     def test_no_ledger_history_with_unknown_receipt_is_replayed(self):
         import sqlite3
         db=self.root/"fire-xaut.sqlite"

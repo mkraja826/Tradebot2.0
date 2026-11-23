@@ -103,9 +103,16 @@ def receipts_safe(root):
             detail=json.loads(row[1])
             if not isinstance(detail,dict):return False
             if row[0]=="rejected_no_order":
-                # A failed/ambiguous model outcome needs an operator review,
-                # not a disguised successful no-order retry.
-                return False
+                # A *documented* no-order rejection may be revisited on the
+                # next normal interval, after a fresh broker-wide flatness
+                # check. It is never treated as evidence of a protected fill.
+                # Unknown/ambiguous outcomes remain blocked.
+                return (detail.get("orders_submitted") is False
+                    and detail.get("protection_verified") is False
+                    and detail.get("reason_code") in (
+                        "risk_governor_failed",
+                        "autonomous_invalid_wait",
+                        "market_quality_failed"))
             # Broker-signed watchdog closed an ordinarily protected trade.
             # In a naturally flat terminal receipt, attached protection is
             # no longer active, so do not require protection_verified=True.
@@ -186,8 +193,19 @@ def run_once(data_dir,*,instant=None,armed=is_gold_armed,candidate=check_candida
         emergency=(status=="flat_verified"
             and receipt.get("reason_code") in (
                 "emergency_flat_verified","execution_or_protection_unverified"))
+        # No-order discretionary risk/model failures are not broker
+        # exposure incidents. Log them as rejected attempts, do not halt
+        # unattended demo scheduling solely for a documented no-order.
+        safe_no_order = (
+            status == "rejected_no_order"
+            and receipt.get("orders_submitted") is False
+            and receipt.get("protection_verified") is False
+            and receipt.get("reason_code") in (
+                "risk_governor_failed", "autonomous_invalid_wait",
+                "market_quality_failed"))
         if ((status not in TERMINAL_SAFE and not protected)
-                or status=="rejected_no_order" or emergency):
+                or (status=="rejected_no_order" and not safe_no_order)
+                or emergency):
             _mark_halt(root)
         return {
             "status":"attempt_finished","accepted":bool(accepted),
