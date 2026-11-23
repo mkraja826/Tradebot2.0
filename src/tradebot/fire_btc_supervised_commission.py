@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import sys
+import subprocess
 
 from tradebot.btc_supervised_execution import SupervisedBTCController
 from tradebot.btc_supervised_recent24h import inspect_recent_btc_window
@@ -24,8 +25,6 @@ from tradebot.signed_margin_mode import (
 
 def _isolated_btc_services_active():
     """Confirm the watchdog and wallet collector for this exact BTC child."""
-    import subprocess
-    import os
     if os.environ.get("TRADEBOT_EXPECTED_DEMO_SUBACCOUNT") != "BTC":
         return False
     services = (
