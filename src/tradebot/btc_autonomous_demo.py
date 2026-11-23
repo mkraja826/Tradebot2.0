@@ -157,7 +157,6 @@ class AutoBTCController(SupervisedBTCController):
             "model_proposed_contracts": proposed,
             "selected_contracts": selected,
             "model_selected_leverage": plan["leverage"],
-            "margin_is_broker_budget_verified": False,
         }
         return {**plan, "contracts": selected}
 
