@@ -74,6 +74,19 @@ class FireProbeTest(unittest.TestCase):
         self.assertEqual(second["contracts"], 0)
         self.assertEqual(second["thesis"], wait["thesis"])
 
+    def test_autonomous_prompt_requires_net_cost_aware_ratio(self):
+        from tradebot.fire_probe import (
+            AUTONOMOUS_BTC_DIRECTION_INSTRUCTION, INSTRUCTION)
+        prompt = AUTONOMOUS_BTC_DIRECTION_INSTRUCTION
+        self.assertIn("quality threshold is 1.5", prompt)
+        self.assertIn("WARNING ONLY", prompt)
+        self.assertIn("taker_commission_rate", prompt)
+        self.assertIn("0.0005", prompt)
+        self.assertIn("contract_value", prompt)
+        self.assertIn("never fabricate a distant", prompt)
+        # This DEMO-only prompt change must not alter standard FIRE.
+        self.assertNotIn("at least 1.5", INSTRUCTION)
+
     def test_autonomous_direction_policy_rejects_wait_without_retry(self):
         from tradebot.fire_probe import AUTONOMOUS_BTC_DIRECTION_INSTRUCTION
         self.assertIn("Direction must be LONG or SHORT", AUTONOMOUS_BTC_DIRECTION_INSTRUCTION)

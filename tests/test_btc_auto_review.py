@@ -35,6 +35,52 @@ class NoOrderReviewTests(unittest.TestCase):
                            "orders_submitted": submitted,
                            "protection_verified": False})))
 
+    def test_historical_generic_risk_failure_requires_reproduced_low_net_rr(self):
+        """An old generic risk failure is reviewable only if independently explained."""
+        with sqlite3.connect(self.dbpath) as db:
+            db.execute("CREATE TABLE fire_model_inputs(press TEXT PRIMARY KEY, snapshot TEXT)")
+            snap = {
+                "environment": "delta-india-demo",
+                "fire_execution_scope": {"unattended_demo_mode": True},
+                "core": {"best_bid": "60897.5", "best_ask": "60898.5"},
+            }
+            db.execute("INSERT INTO fire_model_inputs VALUES (?,?)",
+                       (PRESS, json.dumps(snap)))
+            outcome = {
+                "reason_code": "risk_governor_failed",
+                "orders_submitted": False,
+                "protection_verified": False,
+                "direction": "LONG", "contracts": 1, "selected_leverage": 5,
+                "stop_loss": "60770", "take_profit": "61140",
+                "decision_quote": {"best_bid": "60897.5", "best_ask": "60898.5"},
+                "budget": {
+                    "leverage": "5", "equity_usd": "149.65",
+                    "contract_value": "0.001",
+                    "max_contracts_per_entry": 2,
+                    "taker_commission_rate": "0.0005",
+                },
+            }
+            db.execute("UPDATE fire_requests SET result=? WHERE press=?",
+                       (json.dumps(outcome), PRESS))
+        found = evidence(self.root)
+        self.assertEqual(found["reason_code"], "risk_governor_failed")
+        with self.assertRaises(ValueError):
+            acknowledge(self.root, approval=APPROVAL, candidate=lambda root: True)
+        from tradebot.btc_auto_review import RISK_APPROVAL
+        approved = acknowledge(
+            self.root, approval=RISK_APPROVAL, candidate=lambda root: True)
+        self.assertEqual(approved["status"], "reviewed_no_order")
+        self.assertTrue(reviewed_receipt_matches(self.root))
+        self.assertTrue(prior_fire_receipts_safe(self.root))
+        # The legacy receipt can proceed only after matching signed review;
+        # the separate halt latch still requires its own incident-specific
+        # release path. New warning-only receipts take the normal path.
+        with sqlite3.connect(self.dbpath) as db:
+            db.execute("UPDATE fire_requests SET result=? WHERE press=?",
+                       (json.dumps({**outcome, "take_profit": "62000"}), PRESS))
+        self.assertIsNone(evidence(self.root))
+        self.assertFalse(reviewed_receipt_matches(self.root))
+
     def test_operator_acknowledgement_requires_exact_consent_and_broker(self):
         self.assertIsNotNone(evidence(self.root))
         self.assertFalse(prior_fire_receipts_safe(self.root))
