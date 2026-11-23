@@ -35,12 +35,44 @@ class FireProbeTest(unittest.TestCase):
                     "stop_loss":None,"take_profit":None,
                     "thesis":"No verified entry with adequate net reward-to-risk."}
         self.assertEqual(validate(no_trade,CORE)["direction"],"WAIT")
+        normalized = validate(no_trade, CORE, require_leverage=True)
+        self.assertEqual(normalized["thesis"], no_trade["thesis"])
+        self.assertIsNone(normalized["leverage"])
+        self.assertEqual(
+            validate(normalized, CORE, require_leverage=True), normalized)
         with self.assertRaises(PlanError):
             validate(no_trade | {"contracts":1},CORE)
         with self.assertRaises(PlanError):
             validate(no_trade | {"thesis":""},CORE)
         with self.assertRaises(PlanError):
             validate(no_trade | {"take_profit":"111"},CORE)
+
+    def test_gpt6_wait_roundtrips_through_execution_validator(self):
+        calls = []
+        wait = {
+            "direction": "WAIT", "contracts": 0, "leverage": None,
+            "stop_loss": None, "take_profit": None,
+            "thesis": "Insufficient verified price evidence for a safe entry.",
+        }
+        class Client:
+            last_request_id = None
+            def _call(self, url, *, body=None, timeout):
+                if body is None:
+                    return {"data": [{"id": ROLES["fire"]}]}
+                calls.append("one_model_request")
+                return {"choices": [
+                    {"message": {"content": json.dumps(wait)}, "finish_reason": "stop"}]}
+        snapshot = lambda: {
+            "core": CORE, "collected_at": "example",
+            "fire_execution_scope": {"dynamic_leverage_enabled": True},
+        }
+        report = run_probe(ROLES, snapshot, Client)
+        self.assertEqual(calls, ["one_model_request"])
+        intermediate = report["results"]["fire"]["decision"]
+        second = validate(intermediate, CORE, require_leverage=True)
+        self.assertEqual(second["direction"], "WAIT")
+        self.assertEqual(second["contracts"], 0)
+        self.assertEqual(second["thesis"], wait["thesis"])
 
     def test_single_fenced_object_still_requires_valid_finished_decision(self):
         choice = {"message": {"content": "```json\n" + json.dumps(PLAN) + "\n```"}, "finish_reason":"stop"}
