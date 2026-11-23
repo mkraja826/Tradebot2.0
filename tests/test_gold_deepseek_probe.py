@@ -1,6 +1,7 @@
 """DeepSeek Gold-only model choice; no broker POST authority."""
 import json
 import unittest
+from datetime import datetime, timezone, timedelta
 
 from tradebot.ai import PlanError
 from tradebot.fire_probe import ROLES
@@ -13,7 +14,7 @@ from tradebot.gold_deepseek_probe import (
 def gold_snapshot():
     return {
         "environment": "delta-india-demo",
-        "collected_at": "2026-11-23T05:30:00+00:00",
+        "collected_at": datetime.now(timezone.utc).isoformat(),
         "core": {
             "best_bid": "4120.0",
             "best_ask": "4121.0",
@@ -61,6 +62,35 @@ class GoldDeepSeekTests(unittest.TestCase):
                     run_gold_deepseek_probe(GOLD_ROLES, lambda:snap,client)
         with self.assertRaises(PlanError):
             run_gold_deepseek_probe(ROLES,gold_snapshot,client)
+
+    def test_stale_or_tampered_broker_quote_blocks_before_model(self):
+        for bad in (
+            {"collected_at": (datetime.now(timezone.utc)
+                 - timedelta(minutes=3)).isoformat()},
+            {"collected_at": "2026-11-23T00:00:00"},
+            {"core": {**gold_snapshot()["core"],"best_ask":"4100.0"}},
+            {"core": {**gold_snapshot()["core"],"ticker":{
+                **gold_snapshot()["core"]["ticker"],"tick_size":"0"}}},
+        ):
+            snap={**gold_snapshot(),**bad}
+            with self.subTest(bad=bad):
+                with self.assertRaises(PlanError):
+                    validate_gold_isolated_snapshot(snap)
+
+    def test_off_tick_model_stop_rejected_without_broker_order(self):
+        class Client:
+            last_request_id=None
+            def _call(self,url,*,body=None,timeout):
+                if body is None:return {"data":[{"id":GOLD_MODEL}]}
+                return {"choices":[{"finish_reason":"stop",
+                     "message":{"content":json.dumps({
+                        "direction":"LONG","leverage":3,"contracts":1,
+                        "stop_loss":4100.15,"take_profit":4160.0,
+                        "thesis":"tick alignment test"})}}]}
+        report=run_gold_deepseek_probe(GOLD_ROLES,gold_snapshot,Client)
+        self.assertIn("error",report["results"]["fire"])
+        self.assertNotIn("decision",report["results"]["fire"])
+        self.assertFalse(report["trade_authorized"])
 
     def test_single_deepseek_gold_completion_with_valid_json(self):
         paid=[]
