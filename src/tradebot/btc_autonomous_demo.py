@@ -66,7 +66,8 @@ class AutoBTCController(SupervisedBTCController):
         super().__init__(path,enabled=enabled,**kwargs)
         self.equity_guard = SupervisedSessionEquityGuard(
             self.path.parent/"fire-equity-risk.sqlite",
-            allow_daily_loss_warning=True)
+            allow_daily_loss_warning=True,
+            allow_portfolio_loss_warnings=True)
 
     def _require_account_flat(self, exchange, product_id):
         if not is_armed():
@@ -204,7 +205,9 @@ def check_candidate(data_dir, *, broker_factory=DeltaDemo,
         allow_orders=False)
     if getattr(broker, "base_url", None) != DEMO_API or broker.allow_orders is not False:
         return False
-    r = preflight(broker, Path(data_dir), allow_daily_loss_warning=True)
+    r = preflight(
+        broker, Path(data_dir), allow_daily_loss_warning=True,
+        allow_portfolio_loss_warnings=True)
     return (
         type(r) is dict
         and r.get("status") == "operator_review_candidate_only"
