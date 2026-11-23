@@ -150,6 +150,30 @@ class GoldDeepSeekTests(unittest.TestCase):
         self.assertEqual(report["results"]["fire"]["decision"]["direction"],"WAIT")
         self.assertFalse(report["trade_authorized"])
 
+    def test_unattended_gold_never_accepts_wait_from_deepseek(self):
+        snap=gold_snapshot()
+        snap["fire_execution_scope"].update({
+            "unattended_demo_mode":True,
+            "one_attempt_operator_supervision_required":False,
+        })
+        class Client:
+            last_request_id=None
+            def _call(self,url,*,body=None,timeout):
+                if body is None:
+                    return {"data":[{"id":GOLD_MODEL}]}
+                self_outer.assertIn("Never return WAIT",body["messages"][0]["content"])
+                return {"choices":[{"finish_reason":"stop",
+                    "message":{"content":json.dumps({
+                        "direction":"WAIT","contracts":0,"leverage":None,
+                        "stop_loss":None,"take_profit":None,
+                        "thesis":"Low confidence"})}}]}
+        self_outer=self
+        report=run_gold_deepseek_probe(GOLD_ROLES,lambda:snap,Client)
+        result=report["results"]["fire"]
+        self.assertEqual(result["error"],"Gold unattended WAIT prohibited")
+        self.assertNotIn("decision",result)
+        self.assertFalse(report["trade_authorized"])
+
     def test_catalogue_must_confirm_deepseek_before_any_completion(self):
         class Client:
             last_request_id=None

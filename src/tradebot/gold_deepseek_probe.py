@@ -99,6 +99,20 @@ def run_gold_deepseek_probe(routes, snapshot_loader,
             or GOLD_MODEL not in {entry.get("id") for entry in catalogue["data"]
                                   if isinstance(entry, dict)}):
         raise PlanError("Gold DeepSeek model route not available")
+    autonomous = scope.get("unattended_demo_mode") is True
+    if autonomous and scope.get("one_attempt_operator_supervision_required") is not False:
+        raise PlanError("Gold unattended scope not commissioned")
+    instruction = _GOLD_PROMPT + (
+        " In this isolated Gold DEMO experimental unattended mode, "
+        "a valid eligible snapshot requires one directional candidate. "
+        "Never return WAIT; choose the better supported LONG or SHORT. "
+        "For uncertain but verified conditions propose one exploratory "
+        "contract; for medium confidence two, for strong corroborated "
+        "conditions three to six, only within live broker affordability. "
+        "Chart-selected stop and target must be tick aligned. "
+        "Unknown or invalid market evidence is rejected by broker gates, "
+        "not guessed by the model."
+        if autonomous else "")
     start = monotonic()
     client = client_factory()
     stage = "provider_request"
@@ -106,7 +120,7 @@ def run_gold_deepseek_probe(routes, snapshot_loader,
         reply = client._call(TOPBILLING_CHAT_URL, body={
             "model": GOLD_MODEL,
             "messages": [
-                {"role": "system", "content": _GOLD_PROMPT},
+                {"role": "system", "content": instruction},
                 {"role": "user", "content": content},
             ],
         }, timeout=60)
@@ -115,6 +129,8 @@ def run_gold_deepseek_probe(routes, snapshot_loader,
         parsed = decision_payload(choice)
         stage = "validation"
         decision = validate(parsed, snapshot["core"], require_leverage=True)
+        if autonomous and decision["direction"] == "WAIT":
+            raise PlanError("Gold unattended WAIT prohibited")
         if decision["direction"] != "WAIT":
             if decision["contracts"] > scope["max_contracts_per_entry"]:
                 raise PlanError("Gold model exceeds verified contract limit")

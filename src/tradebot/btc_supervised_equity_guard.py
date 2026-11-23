@@ -34,13 +34,17 @@ class SupervisedSessionEquityGuard:
                  peak_reader=_read_original_high_watermark,
                  allow_daily_loss_warning=False,
                  allow_portfolio_loss_warnings=False,
-                 allow_initial_isolated_genesis=False):
+                 allow_initial_isolated_genesis=False,
+                 isolated_genesis_account="BTC"):
         self.path = Path(path)
         self.health_fn = health_fn
         self.peak_reader = peak_reader
         self.allow_daily_loss_warning = allow_daily_loss_warning
         self.allow_portfolio_loss_warnings = allow_portfolio_loss_warnings
         self.allow_initial_isolated_genesis = allow_initial_isolated_genesis
+        if isolated_genesis_account not in ("BTC", "GOLD"):
+            raise ValueError("Unsupported isolated DEMO genesis account")
+        self.isolated_genesis_account = isolated_genesis_account
         self._first = None
         self._first_receipt = None
         self._file_identity = None
@@ -58,7 +62,9 @@ class SupervisedSessionEquityGuard:
         conditions = health.get("blocking_conditions")
         provisional = (
             self.allow_initial_isolated_genesis
-            and isolated_btc_signed_genesis_window(self.path, health, instant))
+            and isolated_btc_signed_genesis_window(
+                self.path, health, instant,
+                account=self.isolated_genesis_account))
         if (health.get("database_integrity") != "verified"
                 or not (health.get("daily_checkpoint") == "verified"
                         or provisional)
