@@ -93,6 +93,62 @@
     return row;
   };
 
+  function signedProtectionChart(position) {
+    const panel=make("div","iso-protection-panel");
+    panel.append(make("div","iso-protection-title","Signed position & pending exit orders"));
+    const entry=Number(position.entry),mark=Number(position.mark);
+    const liq=Number(position.liquidation);
+    const protection=position.protection||{};
+    const sl=Number(protection.stop_loss),tp=Number(protection.take_profit);
+    const valid=protection.status==="signed_pending_bracket" &&
+      [entry,sl,tp].every(Number.isFinite) && sl>0 && tp>0 &&
+      entry>0 && sl!==tp && protection.source==="signed_pending_broker_orders";
+    if(valid){
+      const track=make("div","iso-bracket-track");
+      const low=Math.min(sl,tp), high=Math.max(sl,tp), span=high-low;
+      const markers=[
+        {value:sl,kind:"stop",label:"SL"},
+        {value:tp,kind:"target",label:"TP"},
+        {value:entry,kind:"entry",label:"Entry"}
+      ];
+      if(Number.isFinite(mark)&&mark>0)
+        markers.push({value:mark,kind:"mark",label:"Mark"});
+      const lane=make("div","iso-bracket-lane");
+      for(const marker of markers){
+        const percent=Math.max(0,Math.min(100,(marker.value-low)/span*100));
+        const node=make("span","iso-bracket-marker "+marker.kind);
+        node.style.left=percent+"%";
+        node.title=marker.label+" $"+fmt(marker.value);
+        lane.append(node);
+      }
+      track.append(lane);
+      const terms=make("div","iso-bracket-labels");
+      terms.append(
+        make("span","iso-stop-label","SL $"+fmt(sl)),
+        make("span","iso-entry-label","Entry $"+fmt(entry)),
+        make("span","iso-target-label","TP $"+fmt(tp)));
+      track.append(terms);
+      panel.append(track);
+      if(Number.isFinite(mark)&&mark>0)
+        panel.append(make("p","iso-protection-live",
+          "Broker mark $"+fmt(mark)+
+          ((mark<low||mark>high)?" · mark outside pending bracket":"")));
+      panel.append(make("p","iso-protection-disclaimer",
+        "Signed pending reduce-only SL/TP orders · not guaranteed execution"));
+    }else{
+      panel.append(make("p","iso-unavailable",
+        "Complete pending SL/TP broker bracket not verified. "+
+        "Order count and saved FIRE receipts do not prove live protection."));
+      if(Number.isFinite(mark)&&mark>0)
+        panel.append(make("p","iso-protection-live","Broker mark $"+fmt(mark)));
+    }
+    if(Number.isFinite(liq)&&liq>0)
+      panel.append(make("p","iso-protection-liquidation",
+        "Broker liquidation estimate: $"+fmt(liq)+
+        " · can change with margin and market conditions"));
+    return panel;
+  }
+
   function renderAccount(label, item) {
     const card=make("article","isolated-card "+(label==="BTC"?"iso-btc":"iso-gold"));
     const head=make("div","iso-account-head");
@@ -123,11 +179,14 @@
     if (item.status==="connected" && Array.isArray(item.positions)) {
       const positions=make("div","iso-positions");
       positions.append(make("h4","",item.positions.length?"Broker-reported positions":"Broker reports no open positions"));
-      item.positions.forEach(p => positions.append(infoRow(
-        p.side+" · "+p.size+" "+(p.symbol||"contracts"),
-        (p.entry!==null ? "Entry $"+fmt(p.entry) : "Entry —")+
-        (p.unrealized_pnl!==null && p.unrealized_pnl!==undefined
-          ? " · Unrealized $"+fmt(p.unrealized_pnl) : ""))));
+      item.positions.forEach(p => {
+        positions.append(infoRow(
+          p.side+" · "+p.size+" "+(p.symbol||"contracts"),
+          (p.entry!==null ? "Entry $"+fmt(p.entry) : "Entry —")+
+          (p.unrealized_pnl!==null && p.unrealized_pnl!==undefined
+            ? " · Unrealized $"+fmt(p.unrealized_pnl) : "")));
+        positions.append(signedProtectionChart(p));
+      });
       card.append(positions);
     } else card.append(make("p","iso-unavailable",
       "Signed child-account position data unavailable. Do not interpret as flat."));
