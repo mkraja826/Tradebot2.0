@@ -137,10 +137,84 @@ def _read_original_high_watermark(path):
     return peak, identity
 
 
+
+def isolated_btc_signed_genesis_window(path, health, instant):
+    """Truthful first UTC day exception for a newly provisioned DEMO ledger.
+
+    There was no opening snapshot before the child account began collecting
+    equity. Verify immutable first-day equity and authentic transport receipts
+    rather than relabelling a missed 00:00-00:05 UTC opening as verified.
+    The exception expires at the next midnight; normal daily requirements
+    apply automatically from then onward. Never applies to main/Gold FIRE.
+    """
+    if (os.environ.get("TRADEBOT_EXPECTED_DEMO_SUBACCOUNT") != "BTC"
+            or path.parent.name != "btc-isolated" or path.is_symlink()
+            or path.parent.is_symlink() or path.parent.parent.is_symlink()
+            or type(health) is not dict
+            or health.get("daily_checkpoint") != "missed_window"
+            or health.get("weekly_checkpoint") != "missed_window"
+            or health.get("database_integrity") != "verified"
+            or health.get("latest_receipt_status") != "verified"
+            or health.get("observation_status") != "fresh"
+            or not isinstance(instant, datetime) or instant.tzinfo is None):
+        return False
+    expected_conditions = {
+        "daily_checkpoint_missed_window", "weekly_checkpoint_missed_window"}
+    conditions = health.get("blocking_conditions")
+    if (type(conditions) is not list
+            or any(type(code) is not str for code in conditions)
+            or not expected_conditions.issubset(set(conditions))
+            or not set(conditions) <= (expected_conditions | {
+                DAILY_ONLY_WARNING, PORTFOLIO_LOSS_WARNING})):
+        return False
+    utc_day = instant.astimezone(timezone.utc).replace(
+        hour=0, minute=0, second=0, microsecond=0)
+    anchor_end = int(utc_day.timestamp() * 1_000_000) + 300_000_000
+    day_end = int((utc_day.timestamp() + 86400) * 1_000_000)
+    try:
+        identity = _identity(path)
+        with closing(sqlite3.connect(
+                path.absolute().as_uri() + "?mode=ro",
+                uri=True, timeout=3)) as db:
+            db.execute("PRAGMA query_only=ON")
+            db.execute("BEGIN")
+            if db.execute("PRAGMA quick_check(1)").fetchone() != ("ok",):
+                return False
+            first = db.execute(
+                "SELECT observed_us,equity_usd,origin FROM equity_evidence "
+                "ORDER BY observed_us ASC LIMIT 1").fetchone()
+            if (first is None or type(first[0]) is not int
+                    or not anchor_end <= first[0] < day_end
+                    or first[0] > int(instant.timestamp() * 1_000_000)
+                    or first[2] != "delta_demo_signed_wallet"):
+                return False
+            saved = db.execute(
+                "SELECT receipt FROM equity_read_receipts "
+                "WHERE observed_us=?", (first[0],)).fetchone()
+            if saved is None:
+                return False
+            receipt = json.loads(saved[0])
+            if (type(receipt) is not dict
+                    or receipt.get("received_us") != first[0]):
+                return False
+            first_at = datetime.fromtimestamp(
+                first[0] / 1_000_000, timezone.utc)
+            if int(validate_receipt(first[1], receipt, now=first_at).timestamp()
+                   * 1_000_000) != first[0]:
+                return False
+            validated_watermark(db)
+            db.rollback()
+        return _identity(path) == identity
+    except (OSError, sqlite3.Error, ValueError, TypeError,
+            OverflowError, EquityRiskError, EquityReadError, KeyError):
+        return False
+
+
 def inspect_btc_session_candidate(exchange, data_dir, *,
                                   now=None, health_fn=risk_health,
                                   allow_daily_loss_warning=False,
-                                  allow_portfolio_loss_warnings=False):
+                                  allow_portfolio_loss_warnings=False,
+                                  allow_initial_isolated_genesis=False):
     """Propose a genuine fresh session equity baseline without any writes.
 
     A missed weekly opening is tolerated. Only opted-in autonomous DEMO
@@ -157,6 +231,7 @@ def inspect_btc_session_candidate(exchange, data_dir, *,
         "reason": "not_checked",
         "standard_weekly_opening_missing": None,
         "daily_checkpoint_verified": False,
+        "provisional_first_day_signed_genesis": False,
         "latest_receipt_verified": False,
         "watchdog_and_collector_healthy": False,
         "original_equity_history_integrity_verified": False,
@@ -209,11 +284,15 @@ def inspect_btc_session_candidate(exchange, data_dir, *,
             raise ValueError("untrusted_equity_conditions")
         report["standard_weekly_opening_missing"] = (
             health.get("weekly_checkpoint") == "missed_window")
+        provisional = (allow_initial_isolated_genesis
+            and isolated_btc_signed_genesis_window(path, health, instant))
+        report["provisional_first_day_signed_genesis"] = bool(provisional)
         if (health.get("database_integrity") != "verified" or
-                not report["daily_checkpoint_verified"] or
+                not (report["daily_checkpoint_verified"] or provisional) or
                 not report["latest_receipt_verified"] or
                 not report["watchdog_and_collector_healthy"] or
                 not set(conditions) <= (ALLOWED_STANDARD_BLOCKERS |
+                    ({"daily_checkpoint_missed_window"} if provisional else set()) |
                     ({DAILY_ONLY_WARNING} if allow_daily_loss_warning else set()) |
                     ({PORTFOLIO_LOSS_WARNING} if allow_portfolio_loss_warnings
                      else set()))):
@@ -245,7 +324,8 @@ def inspect_btc_session_candidate(exchange, data_dir, *,
             allow_loss_warnings=allow_portfolio_loss_warnings)
         report["quality_warnings"] = sorted(set(limits["quality_warnings"]) |
             (set(conditions) & {
-                DAILY_ONLY_WARNING, PORTFOLIO_LOSS_WARNING}))
+                DAILY_ONLY_WARNING, PORTFOLIO_LOSS_WARNING}) |
+            ({"provisional_first_day_signed_genesis"} if provisional else set()))
         report["session_budget_within_limits"] = (
             limits["within_session_limits"] is True)
         if not report["session_budget_within_limits"]:

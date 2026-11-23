@@ -77,7 +77,9 @@ def readonly_btc_commission_preflight(
         s = (session_fn(
             exchange, data_dir,
             allow_daily_loss_warning=allow_daily_loss_warning,
-            allow_portfolio_loss_warnings=True)
+            allow_portfolio_loss_warnings=True,
+            **({"allow_initial_isolated_genesis": True}
+               if allow_signed_subaccount else {}))
              if allow_portfolio_loss_warnings else
              (session_fn(exchange, data_dir, allow_daily_loss_warning=True)
               if allow_daily_loss_warning else session_fn(exchange, data_dir)))

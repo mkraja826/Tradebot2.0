@@ -11,7 +11,7 @@ from decimal import Decimal
 
 from tradebot.btc_supervised_session import (
     ALLOWED_STANDARD_BLOCKERS, _read_original_high_watermark,
-    assess_supervised_session,
+    assess_supervised_session, isolated_btc_signed_genesis_window,
 )
 from tradebot.equity_monitor import (
     risk_health, demo_monitoring_operational, DAILY_ONLY_WARNING,
@@ -33,12 +33,14 @@ class SupervisedSessionEquityGuard:
     def __init__(self, path, *, health_fn=risk_health,
                  peak_reader=_read_original_high_watermark,
                  allow_daily_loss_warning=False,
-                 allow_portfolio_loss_warnings=False):
+                 allow_portfolio_loss_warnings=False,
+                 allow_initial_isolated_genesis=False):
         self.path = Path(path)
         self.health_fn = health_fn
         self.peak_reader = peak_reader
         self.allow_daily_loss_warning = allow_daily_loss_warning
         self.allow_portfolio_loss_warnings = allow_portfolio_loss_warnings
+        self.allow_initial_isolated_genesis = allow_initial_isolated_genesis
         self._first = None
         self._first_receipt = None
         self._file_identity = None
@@ -54,13 +56,18 @@ class SupervisedSessionEquityGuard:
             raise EquityRiskError("supervised_session_history_unverified")
         monitor = health.get("monitoring")
         conditions = health.get("blocking_conditions")
+        provisional = (
+            self.allow_initial_isolated_genesis
+            and isolated_btc_signed_genesis_window(self.path, health, instant))
         if (health.get("database_integrity") != "verified"
-                or health.get("daily_checkpoint") != "verified"
+                or not (health.get("daily_checkpoint") == "verified"
+                        or provisional)
                 or health.get("latest_receipt_status") != "verified"
                 or health.get("observation_status") != "fresh"
                 or type(conditions) is not list
                 or any(type(v) is not str for v in conditions)
                 or not set(conditions) <= (ALLOWED_STANDARD_BLOCKERS |
+                    ({"daily_checkpoint_missed_window"} if provisional else set()) |
                     ({DAILY_ONLY_WARNING} if self.allow_daily_loss_warning else set()) |
                     ({PORTFOLIO_LOSS_WARNING} if self.allow_portfolio_loss_warnings
                      else set()))
@@ -85,7 +92,8 @@ class SupervisedSessionEquityGuard:
             raise EquityRiskError(verdict["reason"])
         quality_warnings = sorted(set(verdict.get("quality_warnings", [])) |
             (set(conditions) & {
-                DAILY_ONLY_WARNING, PORTFOLIO_LOSS_WARNING}))
+                DAILY_ONLY_WARNING, PORTFOLIO_LOSS_WARNING}) |
+            ({"provisional_first_day_signed_genesis"} if provisional else set()))
         return {
             "policy": "btc-demo-supervised-session-v1",
             "approved": True,
@@ -94,5 +102,7 @@ class SupervisedSessionEquityGuard:
             "quality_warnings": quality_warnings,
             "session_elapsed_seconds": verdict["session_elapsed_seconds"],
             "normal_weekly_checkpoint_overridden": False,
+            "daily_checkpoint_verified": health.get("daily_checkpoint") == "verified",
+            "provisional_first_day_signed_genesis": bool(provisional),
             "separate_live_broker_protection_required": True,
         }
