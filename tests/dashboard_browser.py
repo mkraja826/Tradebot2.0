@@ -23,7 +23,15 @@ isolated = {
         label: {
             "status": "connected", "worker_active": True,
             "armed": True, "halted": False, "margin_mode":"isolated_verified",
-            "live_position_count": 0, "positions": [], "open_orders": 0,
+            "live_position_count": 1 if label=="BTC" else 0,
+            "positions": ([{
+                "symbol":"BTCUSD","size":"1","side":"LONG","entry":"61523",
+                "mark":"61477.56","liquidation":"49372.20","unrealized_pnl":"-0.2",
+                "protection":{"status":"signed_pending_bracket",
+                  "stop_loss":"61280","take_profit":"61840",
+                  "source":"signed_pending_broker_orders"}
+            }] if label=="BTC" else []),
+            "open_orders": 2 if label=="BTC" else 0,
             "net_equity": "123.45",
             "watchdog_active": True, "equity_collector_active": True,
             "alerts_active": True,
@@ -46,10 +54,37 @@ performance = {
             "unverified_or_open_trades":1, "verified_subset_net_usd":None,
             "verified_subset_win_rate_pct":None,
             "trade_rows":[{
-                "time":iso,"status":"flat_verified","direction":"LONG",
+                "time":iso,"status":"flat_verified" if label=="BTC"
+                     else "rejected_no_order",
+                "direction":"LONG" if label=="BTC" else "SHORT",
                 "contracts":2,"is_net_realized_pnl":False,
-                "reconciliation_status":"unverified",
-                "reason":"missing_broker_funding_total"}],
+                "reconciliation_status":"unverified" if label=="BTC" else "no_order",
+                "reason":"missing_broker_funding_total" if label=="BTC"
+                      else "broker_order_not_submitted"}],
+            "trade_distribution":{
+              "counts":{"verified_wins":0,"verified_losses":0,
+                "verified_breakeven":0,"no_order":0 if label=="BTC" else 1,
+                "open_or_unresolved":0,"unverified":1 if label=="BTC" else 0},
+              "total":1,"coverage":"complete_7d_receipts","is_win_rate":False},
+            "cashflow_series":{
+              "source":"complete_signed_wallet_postings",
+              "is_verified_trade_pnl":False,"is_strategy_attributed":False,
+              "last_24h":[{
+                "label":f"{i*2:02d}:00 UTC",
+                "start":iso,"status":"verified_posted_cashflow",
+                "posted_net_usd":"2.25" if i==11 else "0",
+                "fees_usd":"-0.75" if i==11 else "0",
+                "funding_usd":"0","included_postings":1 if i==11 else 0,
+                "unclassified_postings":0,"partial":i==11}
+                for i in range(12)],
+              "last_7d":[{
+                "label":f"{i+1:02d} Nov",
+                "start":iso,"status":"verified_posted_cashflow",
+                "posted_net_usd":"14.25" if i==6 else "0",
+                "fees_usd":"-1.75" if i==6 else "0",
+                "funding_usd":"0","included_postings":1 if i==6 else 0,
+                "unclassified_postings":0,"partial":i==6}
+                for i in range(7)]},
             "wallet":{
                 "last_24h":{"status":"verified_posted_cashflow",
                     "posted_net_usd":"2.25", "gross_cashflow_usd":"3.00",
@@ -107,14 +142,37 @@ with sync_playwright() as p:
         assert page.locator(".isolated-card").count() == 2
         assert page.locator("#isolated-grid").get_by_text("BTCUSD").is_visible()
         assert page.locator("#isolated-grid").get_by_text("XAUTUSD").is_visible()
+        page.locator("#isolated-grid .iso-bracket-lane").wait_for()
+        assert page.locator("#isolated-grid .iso-bracket-marker").count()==4
+        assert page.locator("#isolated-grid .iso-protection-panel").count()==1
         switch("analytics")
         page.locator("#performance-grid .performance-card").first.get_by_text("$2.25").wait_for()
-        assert page.locator("#performance-grid .perf-unverified").count()==2
+        page.locator("#analytics-cashflow-charts .viz-card").first.wait_for()
+        assert page.locator("#analytics-cashflow-charts .viz-bar-button").count()==24
+        assert page.locator("#analytics-distribution svg").count()==2
+        assert page.locator("#analytics-distribution .viz-legend-entry").count()==12
+        page.locator("#analytics-cashflow-charts .viz-bar-button").first.click()
+        assert "Posted net" in page.locator("#analytics-cashflow-charts .viz-inspect").first.inner_text()
+        assert page.locator("#viz-trade-list details.viz-trade-record").count()==2
+        page.locator("#viz-market").select_option("GOLD")
+        page.locator("#viz-outcome").select_option("no_order")
+        assert page.locator("#viz-trade-list details.viz-trade-record").count()==1
+        assert "Gold" not in page.locator("#viz-trade-list").inner_text() or "GOLD" in page.locator("#viz-trade-list").inner_text()
+        page.locator("#viz-trade-list summary").first.click()
+        assert "broker order not submitted" in page.locator("#viz-trade-list").inner_text().lower()
+        page.locator("#viz-outcome").select_option("verified")
+        assert page.locator("#viz-trade-list details.viz-trade-record").count()==0
+        page.locator("#viz-market").select_option("all")
+        page.locator("#viz-outcome").select_option("all")
+        assert page.locator("#performance-grid .perf-unverified").count()==1
         assert page.locator("#performance-grid .perf-verified").count()==0
         page.locator("#performance-7d").click()
         assert page.locator("#performance-7d").get_attribute("aria-pressed")=="true"
+        assert page.locator("#analytics-cashflow-charts .viz-bar-button").count()==14
         assert page.locator("#performance-grid .performance-card").first.get_by_text("$14.25").is_visible()
         page.locator("#performance-24h").click()
+        assert page.locator("#analytics-cashflow-charts .viz-bar-button").count()==24
+        assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
         switch("activity")
         page.get_by_text("7 similar WAIT observations",exact=True).wait_for()
         page.get_by_text("3 AI responses hit the completion limit",exact=True).wait_for()
