@@ -512,7 +512,18 @@ class FireDemoController:
                                   reason_code=decision_failure_code(raw.get("error"), stage=raw.get("error_stage")),
                                   orders_submitted=False, protection_verified=False)
                 return
-            plan = validate(raw["decision"], snapshot["core"], require_leverage=True)
+            try:
+                plan = validate(raw["decision"], snapshot["core"], require_leverage=True)
+            except PlanError as exc:
+                # A failed second validation must be classified, not silently
+                # collapsed into the ambiguous model_decision_failed reason.
+                # This is before any broker order intent or mutation.
+                self.store.update(
+                    press, "rejected_no_order",
+                    model_latency_ms=raw.get("latency_ms"),
+                    reason_code=decision_failure_code(str(exc), stage="validation"),
+                    orders_submitted=False, protection_verified=False)
+                return
             if plan["direction"] == "WAIT":
                 self.store.update(
                     press, "rejected_no_order", model_latency_ms=raw.get("latency_ms"),

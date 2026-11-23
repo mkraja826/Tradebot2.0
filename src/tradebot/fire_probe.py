@@ -139,8 +139,12 @@ def validate(decision, core, *, require_leverage=False):
                 or decision.get("leverage") is not None
                 or not isinstance(reason, str) or not reason.strip()):
             raise PlanError("Malformed WAIT decision")
+        # Keep the validated WAIT explanation so a second independent
+        # validation in FireDemoController remains idempotent. Dropping the
+        # thesis previously converted a valid WAIT into model_decision_failed.
         return dict(direction="WAIT", contracts=0,
-                    stop_loss=None, take_profit=None)
+                    stop_loss=None, take_profit=None, leverage=None,
+                    thesis=reason.strip())
     if side not in ("LONG", "SHORT") or type(size) is not int or size < 1:
         raise PlanError("Invalid direction or contract count")
     leverage = decision.get("leverage")
