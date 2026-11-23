@@ -115,7 +115,7 @@ class AutoGoldController(FireDemoController):
             "market_data_verified": self._gold_market_quality,
             "trade_authorized": False,
             "one_attempt_operator_supervision_required": False,
-            "max_new_order_attempts_per_utc_day": 48,
+            "daily_attempt_cap_enabled": False,
         }
 
     def _allow_wait_choice(self):
