@@ -203,7 +203,16 @@ def prior_fire_receipts_safe(root):
             if type(detail) is not dict:
                 return False
             if last[0]=="rejected_no_order":
-                return detail.get("reason_code")=="gpt6_wait_no_trade"
+                if detail.get("reason_code")=="gpt6_wait_no_trade":
+                    return True
+                # One precisely reviewed historical MODEL failure may be
+                # released only after fresh signed DEMO flatness and a durable
+                # no-order acknowledgement. Never rewrite FIRE history.
+                if (detail.get("reason_code")=="model_decision_failed"
+                        and detail.get("orders_submitted") is False):
+                    from tradebot.btc_auto_review import reviewed_receipt_matches
+                    return reviewed_receipt_matches(root)
+                return False
             return (last[0]=="flat_verified"
                     and detail.get("reason_code") not in (
                         "emergency_flat_verified","execution_or_protection_unverified"))
