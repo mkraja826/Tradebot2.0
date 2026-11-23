@@ -91,6 +91,30 @@ class DemoSizeTests(unittest.TestCase):
             assess_fire_plan({**plan,"contracts":4},base,quote,
                              limits=FireRiskLimits(max_contracts=2))
 
+    def test_autonomous_risk_budget_scales_with_independent_tier(self):
+        from decimal import Decimal
+        bot=AutoBTCController(self.root / "auto-risk.sqlite")
+        base={
+            "leverage":"5", "equity_usd":"173.81",
+            "contract_value":"0.001", "max_contracts_per_entry":3,
+            "taker_commission_rate":"0.0005",
+        }
+        quote={"best_bid":"63214", "best_ask":"63214.5"}
+        template={"direction":"LONG", "leverage":5,
+                  "stop_loss":"63205", "take_profit":"64000"}
+        for qty,risk_fraction in ((1,"0.0025"),(2,"0.0035"),(3,"0.005")):
+            with self.subTest(qty=qty):
+                assessed=bot._assess_risk({**template,"contracts":qty},base,quote)
+                self.assertTrue(assessed["approved"])
+                self.assertEqual(
+                    Decimal(assessed["max_allowed_loss_usd"]),
+                    Decimal("173.81")*Decimal(risk_fraction))
+        with self.assertRaises(RiskRejected):
+            bot._assess_risk({**template,"contracts":3,
+                              "stop_loss":"62800"},base,quote)
+        with self.assertRaises(RiskRejected):
+            bot._assess_risk({**template,"contracts":4},base,quote)
+
     def test_supervised_broker_cap_stays_one(self):
         ctrl=SupervisedBTCController(self.root / "supervised.sqlite")
         auto=AutoBTCController(self.root / "autonomous.sqlite")
