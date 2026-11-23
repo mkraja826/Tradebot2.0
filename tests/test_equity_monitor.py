@@ -23,6 +23,29 @@ class MonitorTests(unittest.TestCase):
         self.store = MonitorStore(self.path)
         self.now = datetime(2026, 11, 23, 0, 1, tzinfo=timezone.utc)
 
+    def test_loss_alerts_warning_only_do_not_hide_watchdog_failure(self):
+        from tradebot.equity_monitor import demo_monitoring_operational
+        monitor = {
+            "watchdog": "healthy", "equity_collector": "healthy",
+            "watchdog_age_seconds": 3, "equity_collector_age_seconds": 6,
+            "alert_codes": ["equity_loss_limit_breached",
+                            "equity_daily_loss_limit_breached"],
+        }
+        self.assertFalse(demo_monitoring_operational(
+            monitor, allow_daily_loss_warning=True))
+        self.assertTrue(demo_monitoring_operational(
+            monitor, allow_daily_loss_warning=True,
+            allow_portfolio_loss_warnings=True))
+        self.assertFalse(demo_monitoring_operational(
+            {**monitor, "alert_codes": monitor["alert_codes"] +
+             ["watchdog_protection_unverified"]},
+            allow_daily_loss_warning=True,
+            allow_portfolio_loss_warnings=True))
+        self.assertFalse(demo_monitoring_operational(
+            {**monitor, "watchdog": "stale"},
+            allow_daily_loss_warning=True,
+            allow_portfolio_loss_warnings=True))
+
     def seed_ledger(self):
         path = self.root / "fire-equity-risk.sqlite"
         guard = PortfolioEquityGuard(path)

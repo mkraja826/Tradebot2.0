@@ -160,6 +160,59 @@ class SupervisedSessionTests(unittest.TestCase):
         self.assertEqual(report["status"], "blocked")
         self.assertEqual(broker.calls, 0)
 
+    def test_autonomous_optional_loss_threshold_warnings_preserve_invalidity_checks(self):
+        first = receipt_for("1000", NOW - timedelta(minutes=5))
+        cases = (
+            ("994", "1000", "supervised_session_loss_limit"),
+            ("999", "1100", "historical_high_watermark_drawdown_limit"),
+        )
+        for current, peak, code in cases:
+            with self.subTest(code=code):
+                strict = assess_supervised_session(
+                    "1000", current, peak, first, receipt_for(current, NOW),
+                    now=NOW)
+                self.assertFalse(strict["within_session_limits"])
+                warning = assess_supervised_session(
+                    "1000", current, peak, first, receipt_for(current, NOW),
+                    now=NOW, allow_loss_warnings=True)
+                self.assertTrue(warning["within_session_limits"])
+                self.assertEqual(warning["quality_warnings"], [code])
+                self.assertFalse(warning["trade_authorized"])
+        unexplained = assess_supervised_session(
+            "1000", "1030", "1030", first, receipt_for("1030", NOW),
+            now=NOW, allow_loss_warnings=True)
+        self.assertFalse(unexplained["within_session_limits"])
+        expired = assess_supervised_session(
+            "1000", "994", "1000",
+            receipt_for("1000", NOW - timedelta(minutes=16)),
+            receipt_for("994", NOW), now=NOW, allow_loss_warnings=True)
+        self.assertFalse(expired["within_session_limits"])
+
+    def test_autonomous_warning_only_peak_does_not_bypass_broker_evidence(self):
+        with sqlite3.connect(self.path) as db:
+            db.execute("UPDATE equity_watermark SET high_usd='1200'")
+        strict = inspect_btc_session_candidate(
+            ReadOnlyDemo(), self.root, now=NOW,
+            health_fn=lambda path, at: healthy())
+        self.assertFalse(strict["session_budget_within_limits"])
+        candidate = inspect_btc_session_candidate(
+            ReadOnlyDemo(), self.root, now=NOW,
+            health_fn=lambda path, at: healthy(),
+            allow_daily_loss_warning=True,
+            allow_portfolio_loss_warnings=True)
+        self.assertTrue(candidate["session_budget_within_limits"])
+        self.assertEqual(candidate["status"], "baseline_candidate_review_only")
+        self.assertIn("historical_high_watermark_drawdown_limit",
+                      candidate["quality_warnings"])
+        self.assertFalse(candidate["trade_authorized"])
+        self.assertFalse(candidate["broker_order_mutations"])
+        degraded = inspect_btc_session_candidate(
+            ReadOnlyDemo(), self.root, now=NOW,
+            health_fn=lambda path, at: healthy(monitoring=False),
+            allow_daily_loss_warning=True,
+            allow_portfolio_loss_warnings=True)
+        self.assertEqual(degraded["status"], "blocked")
+
     def test_session_loss_ceiling_and_historical_peak_limit(self):
         start = receipt_for("1000", NOW - timedelta(minutes=5))
         for equity,peak,reason in (

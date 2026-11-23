@@ -13,7 +13,7 @@ class FakeBroker:
     allow_orders = False
 
 
-def good_preflight(_broker, _root):
+def good_preflight(_broker, _root, **kwargs):
     return {
         "status": "operator_review_candidate_only", "blockers": [],
         "supervised_session_verified": True,
@@ -75,8 +75,28 @@ class ReadinessTests(unittest.TestCase):
         self.assertFalse(r["order_authorized"])
         self.assertFalse(r["owner_margin_attestation_is_broker_proof"])
 
+    def test_loss_threshold_warning_report_does_not_grant_order_authority(self):
+        def warning_preflight(broker, root, **kwargs):
+            self.assertTrue(kwargs.get("allow_portfolio_loss_warnings"))
+            self.assertTrue(kwargs.get("allow_daily_loss_warning"))
+            return {
+                **good_preflight(broker, root),
+                "equity_quality_warnings": [
+                    "equity_loss_limit_breached",
+                    "supervised_session_loss_limit",
+                    "private-dangerous-string",
+                ],
+            }
+        result = self.check(
+            arm=True, receipts=True, preflight=warning_preflight)
+        self.assertEqual(result["status"], "eligible_read_only_no_order")
+        self.assertEqual(result["equity_quality_warnings"], [
+            "equity_loss_limit_breached", "supervised_session_loss_limit"])
+        self.assertFalse(result["order_authorized"])
+        self.assertNotIn("private-dangerous-string", str(result))
+
     def test_missing_live_broker_evidence_returns_specific_code(self):
-        def bad(broker, root):
+        def bad(broker, root, **kwargs):
             return {**good_preflight(broker, root),
                     "status": "blocked", "blockers": [
                         "account_wide_exposure_unverified"]}
@@ -85,7 +105,7 @@ class ReadinessTests(unittest.TestCase):
         self.assertEqual(r["blockers"], ["account_wide_exposure_unverified"])
 
     def test_unrecognized_broker_codes_fail_closed_without_leaking(self):
-        def bad(broker, root):
+        def bad(broker, root, **kwargs):
             return {**good_preflight(broker, root),
                     "status": "blocked", "blockers": [
                         "secret private upstream text"]}
@@ -94,7 +114,7 @@ class ReadinessTests(unittest.TestCase):
         self.assertNotIn("secret", str(r))
 
     def test_broker_exception_does_not_reveal_private_exception(self):
-        def bad(broker, root):
+        def bad(broker, root, **kwargs):
             raise RuntimeError("private upstream token must not leak")
         r = self.check(arm=True, receipts=True, preflight=bad)
         self.assertEqual(r["blockers"], ["broker_preflight_unavailable"])

@@ -30,11 +30,13 @@ def readonly_btc_commission_preflight(
         recent_fn=inspect_recent_btc_window,
         manual_mode_fn=read_manual_mode,
         flat_fn=require_flat_demo_account_for_configuration,
-        allow_daily_loss_warning=False):
+        allow_daily_loss_warning=False,
+        allow_portfolio_loss_warnings=False):
     report = {
         "mode": "supervised_btc_demo_read_only_preflight",
         "status": "blocked", "blockers": [],
         "supervised_session_verified": False,
+        "equity_quality_warnings": [],
         "recent_btc_history_local_quality_verified": False,
         "independent_btc_trade_price_verification": False,
         "signed_isolated_margin_verified": False,
@@ -53,12 +55,20 @@ def readonly_btc_commission_preflight(
         blocks.append("readonly_delta_demo_client_required")
         return report
     try:
-        s = (session_fn(exchange, data_dir, allow_daily_loss_warning=True)
-             if allow_daily_loss_warning else session_fn(exchange, data_dir))
+        s = (session_fn(
+            exchange, data_dir,
+            allow_daily_loss_warning=allow_daily_loss_warning,
+            allow_portfolio_loss_warnings=True)
+             if allow_portfolio_loss_warnings else
+             (session_fn(exchange, data_dir, allow_daily_loss_warning=True)
+              if allow_daily_loss_warning else session_fn(exchange, data_dir)))
         report["supervised_session_verified"] = (
             type(s) is dict and s.get("status") == "baseline_candidate_review_only"
             and s.get("session_budget_within_limits") is True
             and s.get("trade_authorized") is False)
+        if type(s) is dict and type(s.get("quality_warnings")) is list:
+            report["equity_quality_warnings"] = [
+                w for w in s["quality_warnings"] if type(w) is str][:8]
     except Exception:
         pass
     if not report["supervised_session_verified"]:

@@ -18,7 +18,10 @@ import sqlite3
 import stat
 
 from tradebot.delta import DEMO_API, DeltaDemo
-from tradebot.equity_monitor import risk_health, demo_monitoring_operational, DAILY_ONLY_WARNING
+from tradebot.equity_monitor import (
+    risk_health, demo_monitoring_operational, DAILY_ONLY_WARNING,
+    PORTFOLIO_LOSS_WARNING,
+)
 from tradebot.equity_receipt import validate_receipt, EquityReadError
 from tradebot.portfolio_equity_guard import amount, EquityRiskError, validated_watermark
 
@@ -27,6 +30,10 @@ MAX_SESSION_DECLINE = Decimal("0.005")
 MAX_OBSERVED_PEAK_DRAWDOWN = Decimal("0.08")
 MAX_UNEXPLAINED_EQUITY_INCREASE = Decimal("0.02")
 ALLOWED_STANDARD_BLOCKERS = frozenset({"weekly_checkpoint_missed_window"})
+LOSS_THRESHOLD_REASONS = frozenset({
+    "supervised_session_loss_limit",
+    "historical_high_watermark_drawdown_limit",
+})
 
 def _utc_now():
     return datetime.now(timezone.utc)
@@ -34,7 +41,8 @@ def _utc_now():
 
 
 def assess_supervised_session(baseline, current, observed_peak,
-                              baseline_receipt, current_receipt, *, now):
+                              baseline_receipt, current_receipt, *, now,
+                              allow_loss_warnings=False):
     """Pure, bounded session budget for later one-attempt pilot integration.
 
     Evidence here is authenticated HTTPS transport, not a broker-issued
@@ -52,6 +60,9 @@ def assess_supervised_session(baseline, current, observed_peak,
         "reason": "unverified_session_evidence",
         "session_elapsed_seconds": None,
         "within_session_limits": False,
+        "quality_warnings": [],
+        "loss_threshold_mode": (
+            "warnings_only" if allow_loss_warnings else "enforced"),
         "trade_authorized": False,
         "safe_to_enable_fire": False,
     }
@@ -92,6 +103,13 @@ def assess_supervised_session(baseline, current, observed_peak,
             result["status"] = "within_limits_review_only"
             result["reason"] = "requires_separate_broker_and_execution_release"
             result["within_session_limits"] = True
+        # Only deterministic financial loss thresholds are optional for
+        # BTC autonomous DEMO research. External balance changes, stale
+        # receipts, session expiry and integrity faults remain hard failures.
+        if allow_loss_warnings and result["reason"] in LOSS_THRESHOLD_REASONS:
+            result["quality_warnings"] = [result["reason"]]
+            result["status"] = "equity_loss_warning_review_only"
+            result["within_session_limits"] = True
     except (ValueError, TypeError, OverflowError, EquityReadError, EquityRiskError):
         result["reason"] = "unverified_session_evidence"
     return result
@@ -121,7 +139,8 @@ def _read_original_high_watermark(path):
 
 def inspect_btc_session_candidate(exchange, data_dir, *,
                                   now=None, health_fn=risk_health,
-                                  allow_daily_loss_warning=False):
+                                  allow_daily_loss_warning=False,
+                                  allow_portfolio_loss_warnings=False):
     """Propose a genuine fresh session equity baseline without any writes.
 
     A missed weekly opening is tolerated. Only opted-in autonomous DEMO
@@ -143,6 +162,7 @@ def inspect_btc_session_candidate(exchange, data_dir, *,
         "original_equity_history_integrity_verified": False,
         "fresh_session_wallet_baseline_verified": False,
         "session_budget_within_limits": False,
+        "quality_warnings": [],
         "max_contracts": 1,
         "max_attempts": 1,
         "max_session_seconds": MAX_SESSION_SECONDS,
@@ -181,7 +201,8 @@ def inspect_btc_session_candidate(exchange, data_dir, *,
             health.get("observation_status") == "fresh")
         monitor = health.get("monitoring")
         report["watchdog_and_collector_healthy"] = demo_monitoring_operational(
-            monitor, allow_daily_loss_warning=allow_daily_loss_warning)
+            monitor, allow_daily_loss_warning=allow_daily_loss_warning,
+            allow_portfolio_loss_warnings=allow_portfolio_loss_warnings)
         conditions = health.get("blocking_conditions")
         if (type(conditions) is not list or
                 any(type(x) is not str for x in conditions)):
@@ -193,7 +214,9 @@ def inspect_btc_session_candidate(exchange, data_dir, *,
                 not report["latest_receipt_verified"] or
                 not report["watchdog_and_collector_healthy"] or
                 not set(conditions) <= (ALLOWED_STANDARD_BLOCKERS |
-                    ({DAILY_ONLY_WARNING} if allow_daily_loss_warning else set()))):
+                    ({DAILY_ONLY_WARNING} if allow_daily_loss_warning else set()) |
+                    ({PORTFOLIO_LOSS_WARNING} if allow_portfolio_loss_warnings
+                     else set()))):
             report["reason"] = "original_daily_receipts_or_monitoring_unverified"
             return report
         peak, identity = _read_original_high_watermark(path)
@@ -218,7 +241,11 @@ def inspect_btc_session_candidate(exchange, data_dir, *,
             raise ValueError("original_equity_ledger_replaced")
         report["fresh_session_wallet_baseline_verified"] = True
         limits = assess_supervised_session(
-            equity, equity, peak, receipt, receipt, now=observed_at)
+            equity, equity, peak, receipt, receipt, now=observed_at,
+            allow_loss_warnings=allow_portfolio_loss_warnings)
+        report["quality_warnings"] = sorted(set(limits["quality_warnings"]) |
+            (set(conditions) & {
+                DAILY_ONLY_WARNING, PORTFOLIO_LOSS_WARNING}))
         report["session_budget_within_limits"] = (
             limits["within_session_limits"] is True)
         if not report["session_budget_within_limits"]:
