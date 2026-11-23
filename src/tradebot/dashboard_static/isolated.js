@@ -125,10 +125,14 @@
       positions.append(make("h4","",item.positions.length?"Broker-reported positions":"Broker reports no open positions"));
       item.positions.forEach(p => positions.append(infoRow(
         p.side+" · "+p.size+" "+(p.symbol||"contracts"),
-        p.entry!==null ? "Entry $"+fmt(p.entry) : "Entry —")));
+        (p.entry!==null ? "Entry $"+fmt(p.entry) : "Entry —")+
+        (p.unrealized_pnl!==null && p.unrealized_pnl!==undefined
+          ? " · Unrealized $"+fmt(p.unrealized_pnl) : ""))));
       card.append(positions);
     } else card.append(make("p","iso-unavailable",
       "Signed child-account position data unavailable. Do not interpret as flat."));
+    if (item.reconciliation_warning) card.append(
+      make("p","iso-unavailable",item.reconciliation_warning));
     card.append(sparkline(item.equity_points,label));
     const monitor=make("div","iso-monitor");
     monitor.append(infoRow("Watchdog",flag(item.watchdog_active)),
