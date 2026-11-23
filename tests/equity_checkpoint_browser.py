@@ -46,7 +46,7 @@ with sync_playwright() as pw:
         page.on("pageerror", lambda e:errors.append(str(e)))
         page.route("**/*", route)
         fixture = report()
-        page.goto("http://equity.local/")
+        page.goto("http://equity.local/#desk")
         banner = page.locator("#equity-risk-banner")
         page.wait_for_function("document.querySelector('#equity-risk-banner').dataset.state==='healthy'")
         assert "does not authorize a trade" in banner.inner_text()

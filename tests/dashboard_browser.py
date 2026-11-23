@@ -64,7 +64,12 @@ performance = {
 snapshot = {
     "live": {"checked_at": iso, "candles": bars, "market": {"status":"fresh","bid":"100","ask":"102"},
              "account":{"status":"connected","btc_open_positions":0,"account_open_orders":0}},
-    "events":[{"time":iso,"kind":"ai_decision","details":{"strategy":"WAIT","rationale":"Wide spread"}}],
+    "events":[
+      *[{"time":iso,"kind":"ai_decision",
+          "details":{"strategy":"WAIT","rationale":"Wide spread"}} for _ in range(7)],
+      *[{"time":iso,"kind":"ai_response_rejected",
+          "details":{"reason":"completion_limit"}} for _ in range(3)],
+    ],
     "runner":{"status":"running","mode":"observe","age_seconds":2},
 }
 with sync_playwright() as p:
@@ -85,9 +90,24 @@ with sync_playwright() as p:
                    lambda r: r.fulfill(json=performance))
         page.goto(f"http://127.0.0.1:{server.server_port}/")
         page.get_by_text("BTC + GOLD · ACTIVE",exact=True).wait_for()
+        assert page.locator("body").get_attribute("data-screen") == "home"
+        page.get_by_text("Your trading desk",exact=True).wait_for()
+        assert page.locator("#home-equity").inner_text() == "$246.90"
+        assert page.locator("#home-service-count").inner_text() == "8/8"
+        assert page.locator("#home-bots-running").inner_text() == "2/2"
+        assert page.locator("#home-equity-graph polyline").count()==0  # no invented trend
+        assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+        menu = ".dock" if width <= 850 else ".sidebar"
+        def switch(screen):
+            page.locator(menu).locator('a[data-workspace-link="' + screen + '"]').click()
+            page.wait_for_function(
+                "(expected) => document.body.dataset.screen === expected",
+                arg=screen)
+        switch("bots")
         assert page.locator(".isolated-card").count() == 2
         assert page.locator("#isolated-grid").get_by_text("BTCUSD").is_visible()
         assert page.locator("#isolated-grid").get_by_text("XAUTUSD").is_visible()
+        switch("analytics")
         page.locator("#performance-grid .performance-card").first.get_by_text("$2.25").wait_for()
         assert page.locator("#performance-grid .perf-unverified").count()==2
         assert page.locator("#performance-grid .perf-verified").count()==0
@@ -95,6 +115,13 @@ with sync_playwright() as p:
         assert page.locator("#performance-7d").get_attribute("aria-pressed")=="true"
         assert page.locator("#performance-grid .performance-card").first.get_by_text("$14.25").is_visible()
         page.locator("#performance-24h").click()
+        switch("activity")
+        page.get_by_text("7 similar WAIT observations",exact=True).wait_for()
+        page.get_by_text("3 AI responses hit the completion limit",exact=True).wait_for()
+        assert page.locator("#events > details.activity-group").count()==2
+        page.locator("#events > details.activity-group").first.locator("summary").click()
+        assert page.locator("#events > details.activity-group").first.locator(".event").count()==7
+        switch("desk")
         page.get_by_text("Bitcoin observer chart and activity", exact=True).click()
         assert page.locator("#mid").inner_text().replace("\n","")=="$101.00"
         assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
