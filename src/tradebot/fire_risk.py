@@ -19,9 +19,11 @@ class FireRiskLimits:
     minimum_net_reward_risk: Decimal = Decimal("1.5")
     slippage_reserve_each_side: Decimal = Decimal("0.0005")
     version: str = "fire-demo-risk-v2-dynamic-leverage"
+    max_contracts: int = 1
 
     def __post_init__(self):
-        if (not 0 < self.equity_risk_fraction <= Decimal("0.01")
+        if (type(self.max_contracts) is not int or not 1 <= self.max_contracts <= 2
+                or not 0 < self.equity_risk_fraction <= Decimal("0.01")
                 or not 0 < self.max_effective_leverage <= Decimal("20")
                 or not Decimal("1") <= self.minimum_net_reward_risk
                 or not 0 <= self.slippage_reserve_each_side <= Decimal("0.01")):
@@ -49,8 +51,8 @@ def assess_fire_plan(plan, budget, quote, *, limits=None):
     side, contracts = plan.get("direction"), plan.get("contracts")
     if side not in ("LONG", "SHORT") or type(contracts) is not int or contracts < 1:
         raise RiskRejected("Invalid proposal size or direction")
-    if contracts > 1:
-        raise RiskRejected("Supervised demo FIRE pilot permits only one contract")
+    if contracts > limits.max_contracts:
+        raise RiskRejected("Proposed size exceeds scoped BTC DEMO quantity policy")
     if contracts > budget.get("max_contracts_per_entry", -1):
         raise RiskRejected("Above verified margin limit")
     leverage_selected = plan.get("leverage")
