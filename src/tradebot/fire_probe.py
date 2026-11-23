@@ -43,12 +43,17 @@ RESTRICTED_BTC_INSTRUCTION = (
     "highs/lows. The supplied 24h history is provisionally validated locally "
     "but not independently trade-price authenticated; when evidence is "
     "inadequate, choose WAIT. Never invent monthly or weekly statistics. "
-    "Make no trade when spread, entry setup or risk is questionable. "
+    "In unattended DEMO, lower-confidence but defensible exploratory setups "
+    "can use one contract to collect performance evidence; strong corroborated "
+    "setups may request up to two only if permitted by broker limits. "
+    "Do not invent a side or unprotected trade solely to increase frequency. "
+    "WAIT when spread, price evidence, stop/target or risk is unsafe. "
     "Return only one JSON object with keys direction, leverage, contracts, "
     "stop_loss, take_profit, thesis. Direction must be WAIT, LONG or SHORT. "
     "For WAIT use contracts=0, leverage=null, stop_loss=null, "
-    "take_profit=null and explain why. For a trade choose exactly one "
-    "contract and integer leverage 1..20, tick-aligned stop_loss and "
+    "take_profit=null and explain why. For a trade choose a positive contract "
+    "count no greater than the verified max_contracts_per_entry and use "
+    "integer leverage 1..20, tick-aligned stop_loss and "
     "take_profit; LONG requires stop below best_bid and target above best_ask, "
     "SHORT the reverse. Evaluate 15-minute/hour EMA20, ATR5m, VWAP and the "
     "single true last_24h high/low only. Evaluate the optional completed-5m "
@@ -83,7 +88,8 @@ def instruction_for_snapshot(snapshot):
     if (snapshot.get("environment") != "delta-india-demo"
             or not isinstance(ticker, dict)
             or ticker.get("symbol") != "BTCUSD"
-            or scope.get("max_contracts_per_entry") != 1
+            or type(scope.get("max_contracts_per_entry")) is not int
+            or not 1 <= scope["max_contracts_per_entry"] <= 2
             or scope.get("attached_stop_loss_and_take_profit_required") is not True
             or not isinstance(levels, dict)
             or levels.get("strategy_history_version") != version
@@ -114,7 +120,11 @@ def instruction_for_snapshot(snapshot):
             raise PlanError("Unsupported autonomous demo FIRE scope")
         return (
             "BTCUSD Delta India DEMO unattended candidate, at most two "
-            "attempts per UTC day and one contract. Account isolated margin "
+            "attempts per UTC day and at most two contracts per attempt. "
+            "Prefer one small exploratory entry when market structure and "
+            "risk are acceptable even if conviction is modest; up to two "
+            "only for strong independently corroborated evidence. "
+            "Genuinely unsafe conditions still require WAIT. Account isolated margin "
             "is OPERATOR DECLARED, not independently broker-verified. "
             "Do not interpret this declaration as proof of broker leverage "
             "or risk protection. The exchange equity, position, live margin, "
@@ -123,6 +133,8 @@ def instruction_for_snapshot(snapshot):
         )
     if scope.get("unattended_demo_mode") is not None:
         raise PlanError("Unsupported autonomous demo FIRE scope")
+    if scope["max_contracts_per_entry"] != 1:
+        raise PlanError("Supervised FIRE cannot exceed one contract")
     return RESTRICTED_BTC_INSTRUCTION
 
 
