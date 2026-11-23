@@ -165,10 +165,14 @@ def _sanitized_positions(rows, symbol):
             continue
         # Account IDs, user IDs, broker product names, and other raw fields
         # must never be forwarded to browser clients.
+        reported_symbol = row.get("product_symbol")
+        shown_symbol = (reported_symbol if reported_symbol in
+                        ("BTCUSD", "XAUTUSD") else "OTHER DERIVATIVE")
         positions.append({
-            "symbol": symbol, "size": size,
+            "symbol": shown_symbol, "size": size,
             "side": "LONG" if Decimal(size) > 0 else "SHORT",
             "entry": _num(row.get("entry_price")),
+            "unrealized_pnl": _num(row.get("unrealized_pnl")),
         })
     return positions[:10]
 
@@ -191,11 +195,22 @@ class IsolatedAccountsDashboard:
         self._report = {
             "environment": "delta-india-demo",
             "mode": "read_only",
-            "checked_at": None,
+            "checked_at": datetime.now(timezone.utc).isoformat(),
             "source": "isolated_child_accounts",
             "accounts": {label: {"status": "loading"} for label in ACCOUNTS},
             "realized_pnl_verified": False,
         }
+
+    @staticmethod
+    def _armed(label, path):
+        try:
+            if label == "BTC":
+                from tradebot.btc_autonomous_demo import is_armed
+                return is_armed(path)
+            from tradebot.gold_autonomous_demo import is_gold_armed
+            return is_gold_armed(path)
+        except Exception:
+            return False
 
     def _account(self, label):
         dirname, symbol, model, ledger, attempts_db, attempt_table, halt, arm = ACCOUNTS[label]
@@ -220,12 +235,13 @@ class IsolatedAccountsDashboard:
             "alerts_active": _service(
                 "tradebot2-isolated-telegram@" + label, self.service_check),
             "halted": (root / halt).is_file(),
-            "armed": (self.keys / arm).is_file(),
+            "armed": self._armed(label, self.keys / arm),
             "fire": _fire_receipts(root, ledger),
             "attempts": _attempt_summary(root, attempts_db, attempt_table),
             "equity_points": _equity_series(root),
             "realized_pnl": None,
             "realized_pnl_verified": False,
+            "reconciliation_warning": None,
         }
         try:
             health = risk_health(root / "fire-equity-risk.sqlite")
@@ -286,6 +302,19 @@ class IsolatedAccountsDashboard:
                 "positions": view, "live_position_count": len(view),
                 "open_orders": len(orders), "net_equity": net,
             })
+            recent = info["fire"]["recent"]
+            if recent:
+                latest = recent[0]
+                if latest.get("status") == "protected_active" and not view:
+                    info["reconciliation_warning"] = (
+                        "The latest FIRE receipt is protected_active, but "
+                        "the signed broker now reports a flat account. "
+                        "Final trade settlement needs reconciliation.")
+                elif latest.get("status") == "flat_verified" and view:
+                    info["reconciliation_warning"] = (
+                        "The latest FIRE receipt is flat_verified, but "
+                        "the signed broker reports an open position. "
+                        "Inspect the watchdog and settlement ledger.")
         except Exception:
             # No stale/raw broker data or credential details exposed on error.
             info["status"] = "broker_unavailable"
