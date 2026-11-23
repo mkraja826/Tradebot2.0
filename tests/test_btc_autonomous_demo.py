@@ -159,6 +159,40 @@ class AutoTests(unittest.TestCase):
             broker_factory=lambda **kw:ReadOnly(),
             preflight=lambda broker,root:denied))
 
+    def test_autonomous_candidate_uses_signed_readonly_broker(self):
+        from unittest.mock import patch
+        from tradebot.btc_autonomous_demo import check_candidate
+        from tradebot.delta import DEMO_API
+        class Readonly:
+            base_url = DEMO_API
+            allow_orders = False
+        seen = []
+        def broker_factory(**kwargs):
+            seen.append(kwargs)
+            return Readonly()
+        candidate = {
+            "status": "operator_review_candidate_only", "blockers": [],
+            "supervised_session_verified": True,
+            "recent_btc_history_local_quality_verified": True,
+            "signed_isolated_margin_verified": False,
+            "owner_declared_main_isolated_accepted": True,
+            "account_wide_flatness_verified": True,
+            "watchdog_and_collector_active": True,
+            "both_dashboard_fire_endpoints_disabled": True,
+            "trade_authorized": False,
+        }
+        with patch.dict("os.environ", {
+                "DELTA_DEMO_API_KEY": "fake-id",
+                "DELTA_DEMO_API_SECRET": "fake-signature"}):
+            result = check_candidate(
+                self.root, broker_factory=broker_factory,
+                preflight=lambda b, p: candidate)
+        self.assertTrue(result)
+        self.assertEqual(len(seen), 1)
+        self.assertEqual(seen[0]["api_key"], "fake-id")
+        self.assertEqual(seen[0]["api_secret"], "fake-signature")
+        self.assertIs(seen[0]["allow_orders"], False)
+
     def test_prior_fire_receipt_rejects_invalid_model_and_unknown_exposure(self):
         from tradebot.btc_autonomous_demo import prior_fire_receipts_safe
         import sqlite3,json

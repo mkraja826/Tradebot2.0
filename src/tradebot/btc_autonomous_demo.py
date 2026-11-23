@@ -157,7 +157,12 @@ def set_attempt_status(data_dir, entry_id, status):
 def check_candidate(data_dir, *, broker_factory=DeltaDemo,
                     preflight=readonly_btc_commission_preflight):
     """Fresh authenticated read-only gate; no order authority by itself."""
-    broker = broker_factory(allow_orders=False)
+    # DeltaDemo does not read credentials from environment by itself.
+    # Supply them only to the readonly instance (never stored or reported).
+    broker = broker_factory(
+        api_key=os.getenv("DELTA_DEMO_API_KEY", ""),
+        api_secret=os.getenv("DELTA_DEMO_API_SECRET", ""),
+        allow_orders=False)
     if getattr(broker, "base_url", None) != DEMO_API or broker.allow_orders is not False:
         return False
     r = preflight(broker, Path(data_dir))
