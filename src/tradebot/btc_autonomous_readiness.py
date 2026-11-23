@@ -77,10 +77,12 @@ def inspect(data_dir, *, broker_factory=DeltaDemo,
                         "existing_dashboard_fire_not_disabled_or_unavailable",
                         "readonly_delta_demo_client_required",
                     }
+                    accepted_codes = []
                     for value in check.get("blockers") or []:
                         if type(value) is str and value in safe_names:
-                            blockers.append(value)
-                    if not check.get("blockers"):
+                            accepted_codes.append(value)
+                    blockers.extend(accepted_codes)
+                    if not accepted_codes:
                         blockers.append("broker_preflight_evidence_incomplete")
             else:
                 blockers.append("broker_preflight_unavailable")
