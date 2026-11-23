@@ -58,6 +58,8 @@
       second.append(elem("strong","perf-unverified","NOT VERIFIED"));
       const explanation=data.reason==="overlapping_external_postings"?
         "Overlapping broker postings; individual net P&L not verified":
+        data.reason==="unattributed_wallet_posting"?
+        "Wallet postings lack a unique trade reference; net P&L unknown":
         String(data.reason||"Pending broker evidence").replace(/_/g," ");
       second.append(elem("small","",explanation.slice(0,96)));
     }
@@ -128,6 +130,10 @@
     if(ambiguous)box.append(elem("p","perf-unavailable",
       ambiguous+" closed trades await independent broker wallet attribution. "+
       "No good/bad verdict or trade P&L has been inferred."));
+    const unlinked=trades.filter(v=>v.reason==="unattributed_wallet_posting").length;
+    if(unlinked)box.append(elem("p","perf-unavailable",
+      unlinked+" closed trades contain wallet postings without provable "+
+      "trade ownership. Net results remain unknown, never zero."));
     if(!trades.length)box.append(elem("div","perf-empty","No FIRE activity in the seven-day window"));
     else{
       const list=elem("div","perf-trade-list");
