@@ -270,7 +270,9 @@ class IsolatedAccountsDashboard:
                 parent_exchange=parent, expected_label=label)
             if mode != "isolated":
                 raise ValueError("Signed isolated margin mode unavailable")
-            positions = broker._request("GET", "/v2/positions", auth=True)
+            # Delta requires this signed account-wide inventory endpoint; the
+            # product-filtered /v2/positions route cannot prove other exposure.
+            positions = broker._request("GET", "/v2/positions/margined", auth=True)
             rows = positions.get("result")
             view = _sanitized_positions(rows, symbol)
             orders = broker.open_orders()
