@@ -109,6 +109,10 @@ class AutoBTCController(SupervisedBTCController):
             raise ValueError("autonomous_demo_disarmed")
         return super()._require_account_flat(exchange, product_id)
 
+    def _allow_wait_choice(self):
+        """Autonomous AI may propose only LONG/SHORT, not a neutral choice."""
+        return False
+
     def _hard_contract_cap(self):
         """Up to three DEMO contracts, never for dashboard/supervised FIRE."""
         return 3
