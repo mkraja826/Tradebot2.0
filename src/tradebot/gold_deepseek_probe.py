@@ -33,11 +33,14 @@ _GOLD_PROMPT = (
     "For autonomous Gold DEMO use fixed 20x leverage. YOU select size_tier "
     "and the actual whole-contract quantity using market confidence, ATR, "
     "stop distance and broker verified affordability. The small, medium, "
-    "large guidelines target 5%, 20%, 40% of equity as POSITION NOTIONAL; "
-    "they are NOT mandatory or hardcoded contract assignments. Use "
-    "fire_execution_scope.notional_per_contract_usd to estimate size. "
+    "large guidelines target 5%, 20%, 40% of account EQUITY USED AS "
+    "INITIAL MARGIN, not 5/20/40 percent of notional. At 20x, for $100 "
+    "equity: small $5 margin means $100 notional, medium $20 margin means "
+    "$400 notional, large $40 margin means $800 notional. "
+    "Use fire_execution_scope.notional_per_contract_usd and whole-contract "
+    "rounding to choose quantity yourself, with no hardcoded allocations. "
     "The engine does not adjust your chosen contracts. "
-    "Whole contracts, independent account exposure, max 20% equity as "
+    "Whole contracts, independent account exposure, max 40% equity as "
     "initial margin and exact attached SL/TP remain mandatory. "
     "Direction is WAIT, LONG or SHORT. "
     "For WAIT set contracts=0, leverage=null, stop_loss=null and "
@@ -77,7 +80,7 @@ def validate_gold_isolated_snapshot(snapshot, *, now=None):
             or scope.get("trade_authorized") is not False
             or type(scope.get("max_contracts_per_entry")) is not int
             or not 1 <= scope["max_contracts_per_entry"] <= (
-                64 if scope.get("fixed_leverage") == 20 else 6)):
+                1200 if scope.get("fixed_leverage") == 20 else 6)):
         raise PlanError("Gold isolated broker and market prerequisites unavailable")
     observed = snapshot.get("collected_at")
     if not isinstance(observed, str):
