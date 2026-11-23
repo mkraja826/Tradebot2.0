@@ -35,7 +35,8 @@ class AutoGoldController(FireDemoController):
         if "symbol" in kwargs:
             raise ValueError("Gold autonomous controller has a fixed XAUTUSD market")
         kwargs.setdefault("probe", gold_deepseek_adapter)
-        kwargs.setdefault("snapshot_loader", lambda: load_snapshot("XAUTUSD"))
+        # FIRE passes the symbol explicitly to non-BTC snapshot loaders.
+        kwargs.setdefault("snapshot_loader", load_snapshot)
         super().__init__(path, enabled=enabled, symbol="XAUTUSD", **kwargs)
         self.equity_guard = SupervisedSessionEquityGuard(
             self.path.parent / "fire-equity-risk.sqlite",
