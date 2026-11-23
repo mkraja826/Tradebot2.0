@@ -201,7 +201,10 @@ class GoldAutonomousTests(unittest.TestCase):
                         broker=Mock(base_url="https://cdn-ind.test")
                         from tradebot.delta import DEMO_API
                         broker.base_url=DEMO_API
-                        result=bot._require_account_flat(broker,908)
+                        with patch("tradebot.gold_autonomous_controller.require_entry_cooldown") as cooldown:
+                            result=bot._require_account_flat(broker,908)
+                            cooldown.assert_called_once_with(
+                                self.root,fire_filename="fire-xaut.sqlite")
                         self.assertTrue(result["account_flat_verified"])
                         self.assertEqual(flat.call_args.kwargs["selected_symbol"],"XAUTUSD")
                         self.assertEqual(flat.call_args.kwargs["selected_product_id"],908)

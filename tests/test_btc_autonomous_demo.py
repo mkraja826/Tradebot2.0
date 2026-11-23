@@ -68,7 +68,10 @@ class AutoTests(unittest.TestCase):
                            return_value={"account_flat_verified": True}) as signed:
                     with patch.dict("os.environ",
                                     {"TRADEBOT_EXPECTED_DEMO_SUBACCOUNT": "BTC"}):
-                        result = b._require_account_flat(object(), 84)
+                        with patch("tradebot.btc_autonomous_demo.require_entry_cooldown") as cooldown:
+                            result = b._require_account_flat(object(), 84)
+                            cooldown.assert_called_once_with(
+                                self.root, fire_filename="fire-ops.sqlite")
                     self.assertTrue(result["account_flat_verified"])
                     self.assertEqual(signed.call_args.kwargs["selected_symbol"], "BTCUSD")
                     self.assertEqual(signed.call_args.kwargs["selected_product_id"], 84)

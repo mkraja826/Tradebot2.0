@@ -4,14 +4,20 @@ Fake FIRE histories only; no API keys, no model calls and no broker orders.
 """
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import Mock, patch
+import os
 from tempfile import TemporaryDirectory
 import json
 import sqlite3
 import unittest
 
-from tradebot.autonomous_cooldown import post_close_cooldown, COOLDOWN_SECONDS
+from tradebot.autonomous_cooldown import (
+    post_close_cooldown, require_entry_cooldown, COOLDOWN_SECONDS)
 from tradebot.btc_autonomous_demo import run_once as btc_run
 from tradebot.gold_autonomous_demo import run_once as gold_run
+from tradebot.btc_autonomous_demo import AutoBTCController
+from tradebot.gold_autonomous_controller import AutoGoldController
+from tradebot.delta import DEMO_API
 
 T = datetime(2026,11,23,17,0,tzinfo=timezone.utc)
 
@@ -135,6 +141,70 @@ class CooldownTests(unittest.TestCase):
                 attempt_db=root/("btc-auto-demo.sqlite" if root==self.btc
                                  else "gold-auto-demo.sqlite")
                 self.assertFalse(attempt_db.exists())
+
+    def test_direct_controllers_cannot_bypass_post_close_five_minutes(self):
+        """Protect the real FIRE controller paths, not just worker run_once."""
+        fresh=datetime.now(timezone.utc)
+        for label,root,name,Controller in (
+                ("BTC",self.btc,"fire-ops.sqlite",AutoBTCController),
+                ("GOLD",self.gold,"fire-xaut.sqlite",AutoGoldController)):
+            with self.subTest(account=label):
+                bot=Controller(root/name,enabled=False)
+                # Use FireTradeStore's actual schema, preserving its tables.
+                with sqlite3.connect(root/name) as db:
+                    db.execute(
+                        "INSERT INTO fire_requests"
+                        "(press,created_at,updated_at,status,result) "
+                        "VALUES (?,?,?,?,?)",
+                        ("verified-close", (fresh-timedelta(hours=1)).isoformat(),
+                         (fresh-timedelta(minutes=1)).isoformat(),
+                         "flat_verified",json.dumps(self.closed())))
+                    db.commit()
+                if label=="BTC":
+                    with patch.dict(os.environ,
+                                    {"TRADEBOT_EXPECTED_DEMO_SUBACCOUNT":"BTC"}):
+                        with patch("tradebot.btc_autonomous_demo.is_armed",
+                                   return_value=True), patch(
+                             "tradebot.btc_autonomous_demo.signed_isolated_margin_proven",
+                             return_value=True), patch(
+                             "tradebot.btc_autonomous_demo.require_flat_demo_account",
+                             return_value={"account_flat_verified":True}) as flat:
+                            with self.assertRaisesRegex(
+                                  ValueError,"autonomous_post_trade_cooldown_active"):
+                                bot._require_account_flat(object(),17)
+                            flat.assert_not_called()
+                else:
+                    broker=Mock(base_url=DEMO_API)
+                    with patch.dict(os.environ,
+                                    {"TRADEBOT_EXPECTED_DEMO_SUBACCOUNT":"GOLD"}):
+                        with patch("tradebot.gold_autonomous_demo.is_gold_armed",
+                                   return_value=True), patch(
+                             "tradebot.gold_autonomous_controller.signed_account_margin_mode",
+                             return_value="isolated"), patch(
+                             "tradebot.gold_autonomous_controller.require_flat_demo_account",
+                             return_value={"account_flat_verified":True}) as flat:
+                            with self.assertRaisesRegex(
+                                  ValueError,"autonomous_post_trade_cooldown_active"):
+                                bot._require_account_flat(broker,19)
+                            flat.assert_not_called()
+
+    def test_shared_entry_guard_allows_after_five_minutes_and_fails_closed(self):
+        fresh=datetime.now(timezone.utc)
+        for root in (self.btc,self.gold):
+            name=self.pair(root)
+            with self.subTest(account=root.name):
+                write_db(root,name,[(fresh-timedelta(hours=1),
+                                     fresh-timedelta(minutes=6),
+                                     "flat_verified",self.closed())])
+                self.assertIsNone(require_entry_cooldown(root,fire_filename=name))
+                # Corrupt or missing close evidence must block the controller,
+                # not silently accept a new broker order.
+                with sqlite3.connect(root/name) as db:
+                    db.execute("UPDATE fire_requests SET result='{}'")
+                    db.commit()
+                with self.assertRaisesRegex(
+                        ValueError,"autonomous_trade_close_evidence_unavailable"):
+                    require_entry_cooldown(root,fire_filename=name)
 
     def test_worker_rejects_unreadable_close_record_without_model(self):
         root=self.gold

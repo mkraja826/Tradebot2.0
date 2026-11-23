@@ -64,3 +64,22 @@ def post_close_cooldown(root, *, fire_filename, now, seconds=COOLDOWN_SECONDS):
     except (sqlite3.Error, OSError, TypeError, ValueError, OverflowError,
             json.JSONDecodeError):
         return "unavailable", None
+
+
+
+def require_entry_cooldown(root, *, fire_filename, now=None):
+    """Mandatory pre-model AND pre-order gate for isolated autonomous bots.
+
+    Each autonomous controller invokes this from its signed account-flat
+    preflight, which the execution engine rechecks immediately before the
+    broker order-intent path. Prevents a direct controller start from
+    bypassing the scheduler's five-minute post-close check.
+    """
+    checked = now if now is not None else datetime.now(timezone.utc)
+    state, _ = post_close_cooldown(
+        root, fire_filename=fire_filename, now=checked)
+    if state == "ready":
+        return
+    if state == "cooling_down":
+        raise ValueError("autonomous_post_trade_cooldown_active")
+    raise ValueError("autonomous_trade_close_evidence_unavailable")

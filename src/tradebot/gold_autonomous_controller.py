@@ -8,6 +8,7 @@ import os
 from decimal import Decimal
 from pathlib import Path
 
+from tradebot.autonomous_cooldown import require_entry_cooldown
 from tradebot.btc_demo_size import MAX_AUTONOMOUS_LARGE_CONTRACTS
 from tradebot.btc_supervised_equity_guard import SupervisedSessionEquityGuard
 from tradebot.delta import DEMO_API
@@ -64,6 +65,9 @@ class AutoGoldController(FireDemoController):
         if (getattr(exchange, "base_url", None) != DEMO_API
                 or signed_account_margin_mode(exchange) != "isolated"):
             raise ValueError("gold_signed_isolated_margin_required")
+        # Shared with BTC; this preflight runs both before DeepSeek and
+        # immediately before the signed broker order-intent path.
+        require_entry_cooldown(self.path.parent, fire_filename="fire-xaut.sqlite")
         proof = require_flat_demo_account(
             exchange, selected_symbol=self.symbol,
             selected_product_id=product_id)
