@@ -118,7 +118,7 @@
       stat("OPEN POSITIONS",item.status==="connected"?item.live_position_count:"—","Signed broker read"),
       stat("PENDING / PROTECTIVE ORDERS",item.status==="connected"?item.open_orders:"—",
         "Does not distinguish stop and target"),
-      stat("FIRE EXECUTIONS",item.fire?.total??"—","Saved account-specific receipts"));
+      stat("FIRE RECEIPTS",item.fire?.total??"—","Includes rejected and closed attempts"));
     card.append(grid);
     if (item.status==="connected" && Array.isArray(item.positions)) {
       const positions=make("div","iso-positions");
@@ -170,25 +170,42 @@
         ? make("article","isolated-card","Waiting for "+label+" signed broker snapshot…")
         : renderAccount(label,item||{status:"unavailable"}));
     }
-    const connected=["BTC","GOLD"].filter(k=>report.accounts?.[k]?.status==="connected").length;
-    sync.textContent=connected+"/2 signed broker accounts · "+date(report.checked_at);
+    const accounts=["BTC","GOLD"].map(k=>report.accounts?.[k]);
+    const connected=accounts.filter(a=>a?.status==="connected").length;
+    const running=accounts.filter(a=>a?.worker_active===true && a?.halted===false).length;
+    const loading=accounts.some(a=>a?.status==="loading");
+    sync.textContent=loading ? "Checking signed broker accounts…" :
+      connected+"/2 signed broker accounts · "+date(report.checked_at);
     sync.dataset.state=connected===2?"ok":"warn";
+    const header=document.getElementById("runtime-status");
+    const pillHead=document.getElementById("runtime-pill");
+    if (header) header.textContent=loading?"VERIFYING TWO ACCOUNTS" :
+      (running===2 && connected===2 ? "BTC + GOLD · ACTIVE" :
+       running===2 ? "BOT DATA NEEDS VERIFICATION" : "AUTONOMOUS SERVICE NEEDS REVIEW");
+    if (pillHead) pillHead.dataset.state=running===2 && connected===2?"running":"stale";
   }
 
   async function updateIsolated() {
+    let retry=15000;
     try {
       const response=await fetch("/api/isolated/overview",{
         credentials:"same-origin",cache:"no-store",signal:AbortSignal.timeout(19000)});
       if (!response.ok) throw new Error("Isolated accounts endpoint failed");
       const data=await response.json();
       renderReport(data);
+      if (data.accounts?.BTC?.status==="loading"
+          || data.accounts?.GOLD?.status==="loading") retry=2500;
     } catch (_) {
       root.replaceChildren(make("div","iso-unavailable",
         "Isolated account data currently unavailable. Existing trading and protection services operate separately."));
       sync.textContent="Account monitoring data unavailable";
       sync.dataset.state="warn";
+      const header=document.getElementById("runtime-status");
+      const pillHead=document.getElementById("runtime-pill");
+      if (header) header.textContent="ACCOUNT DATA CONNECTION LOST";
+      if (pillHead) pillHead.dataset.state="stale";
     } finally {
-      setTimeout(updateIsolated,15000);
+      setTimeout(updateIsolated,retry);
     }
   }
   updateIsolated();
