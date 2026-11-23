@@ -105,14 +105,14 @@ class DemoSizeTests(unittest.TestCase):
         from decimal import Decimal
         bot = AutoBTCController(self.root / "auto-risk.sqlite")
         budget = {
-            "leverage": "5", "equity_usd": "173.81",
+            "leverage": "20", "equity_usd": "173.81",
             "contract_value": "0.001", "max_contracts_per_entry": 6,
             "taker_commission_rate": "0.0005",
         }
         quote = {"best_bid": "63214", "best_ask": "63214.5"}
         # A chart-selected stop 714.5 USD below entry exceeds every legacy
         # size-tier percent threshold, but preserves valid margin and R:R.
-        plan = {"direction": "LONG", "leverage": 5,
+        plan = {"direction": "LONG", "leverage": 20,
                 "stop_loss": "62500", "take_profit": "65000"}
         for size, prior_cap in ((1, "0.0025"), (2, "0.0035"), (3, "0.005"),
                                 (4, "0.005"), (6, "0.005")):
@@ -149,13 +149,13 @@ class DemoSizeTests(unittest.TestCase):
         from decimal import Decimal
         bot = AutoBTCController(self.root / "soft-risk-demo.sqlite")
         budget = {
-            "leverage": "5", "equity_usd": "173.81",
+            "leverage": "20", "equity_usd": "173.81",
             "contract_value": "0.001", "max_contracts_per_entry": 6,
             "taker_commission_rate": "0.0005",
         }
         quote = {"best_bid": "63214", "best_ask": "63214.5"}
         baseline = {
-            "direction": "LONG", "contracts": 1, "leverage": 5,
+            "direction": "LONG", "contracts": 1, "leverage": 20,
             "stop_loss": "62500", "take_profit": "63929",
         }
         evaluated = bot._assess_risk(baseline, budget, quote)
