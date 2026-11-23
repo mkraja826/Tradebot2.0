@@ -74,6 +74,39 @@ def safe_risk_rejection_detail(exc):
     return RISK_REJECTION_LABELS.get(str(exc), "unclassified_risk_rejection")
 
 
+def _pretrade_quote_distance_evidence(model_core, checked_quote, plan):
+    """Explain 1:1 reject across model versus signed pre-order broker quote.
+
+    Pure audit evidence: never modifies orders, stops, targets or admission.
+    """
+    try:
+        side = plan["direction"]
+        if side not in ("LONG", "SHORT"):
+            return {}
+        key = "best_ask" if side == "LONG" else "best_bid"
+        model_entry = _dec(model_core[key])
+        broker_entry = _dec(checked_quote[key])
+        stop = _dec(plan["stop_loss"])
+        target = _dec(plan["take_profit"])
+        if model_entry <= 0 or broker_entry <= 0:
+            return {}
+        def geometry(entry):
+            risk = entry-stop if side == "LONG" else stop-entry
+            reward = target-entry if side == "LONG" else entry-target
+            return {"stop_distance": str(risk), "target_distance": str(reward),
+                    "gross_reward_risk": str(reward/risk) if risk > 0 else None,
+                    "gross_1_to_1_satisfied": risk > 0 and reward >= risk}
+        return {"source": "snapshot_vs_signed_broker_quote",
+                "model_entry": str(model_entry),
+                "broker_entry": str(broker_entry),
+                "quote_change_bps": str(
+                    (broker_entry/model_entry-Decimal("1"))*Decimal("10000")),
+                "model": geometry(model_entry),
+                "broker": geometry(broker_entry)}
+    except (ValueError, TypeError, KeyError, FireTradeError):
+        return {}
+
+
 def _now():
     return datetime.now(timezone.utc)
 
@@ -271,7 +304,7 @@ class FireTradeStore:
         allowed = {"model", "direction", "contracts", "stop_loss",
                    "take_profit", "broker_order_id", "order_state",
                    "protection_verified", "orders_submitted",
-                   "model_latency_ms", "budget", "sizing_estimate", "sizing_evidence", "risk_assessment", "reason_code", "risk_rejection_detail", "snapshot_at", "thesis", "decision_at", "entry", "exit_order_ids", "protected_at", "decision_quote", "indicators", "selected_leverage", "liquidation_verified", "liquidation_price"}
+                   "model_latency_ms", "budget", "sizing_estimate", "sizing_evidence", "risk_assessment", "reason_code", "risk_rejection_detail", "risk_quote_diagnostics", "snapshot_at", "thesis", "decision_at", "entry", "exit_order_ids", "protected_at", "decision_quote", "indicators", "selected_leverage", "liquidation_verified", "liquidation_price"}
         if set(fields) - allowed:
             raise FireTradeError("Unexpected FIRE status data")
         with closing(self._connect()) as db:
@@ -695,6 +728,12 @@ class FireDemoController:
             if not submitted:
                 detail = ({"risk_rejection_detail": safe_risk_rejection_detail(exc)}
                           if stage == "risk_governor" else {})
+                if (self.symbol == "BTCUSD" and detail.get(
+                        "risk_rejection_detail") == "stop_distance_exceeds_target"):
+                    proof = _pretrade_quote_distance_evidence(
+                        snapshot["core"], exchange_quote, plan)
+                    if proof:
+                        detail["risk_quote_diagnostics"] = proof
                 self.store.update(press, "rejected_no_order",
                                   reason_code=stage + "_failed",
                                   protection_verified=False,
