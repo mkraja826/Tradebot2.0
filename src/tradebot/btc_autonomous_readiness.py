@@ -8,14 +8,17 @@ import json
 import os
 from pathlib import Path
 
-from tradebot.btc_autonomous_demo import is_armed, prior_fire_receipts_safe
+from tradebot.btc_autonomous_demo import (
+    is_armed, prior_fire_receipts_safe, signed_isolated_margin_proven,
+)
 from tradebot.delta import DeltaDemo, DEMO_API
 from tradebot.fire_btc_supervised_commission import readonly_btc_commission_preflight
 
 
 def inspect(data_dir, *, broker_factory=DeltaDemo,
             preflight=readonly_btc_commission_preflight,
-            armed=is_armed, receipts_safe=prior_fire_receipts_safe):
+            armed=is_armed, receipts_safe=prior_fire_receipts_safe,
+            margin_proof=signed_isolated_margin_proven):
     root = Path(data_dir)
     result = {
         "environment": "delta-india-demo",
@@ -25,6 +28,7 @@ def inspect(data_dir, *, broker_factory=DeltaDemo,
         "operator_arm_present": False,
         "previous_fire_receipts_safe": False,
         "demo_broker_preflight_verified": False,
+        "signed_postfill_margin_evidence_verified": False,
         "equity_quality_warnings": [],
         "owner_margin_attestation_is_broker_proof": False,
         "order_authorized": False,
@@ -59,6 +63,13 @@ def inspect(data_dir, *, broker_factory=DeltaDemo,
                 or getattr(broker, "allow_orders", None) is not False):
             blockers.append("readonly_delta_demo_client_required")
         else:
+            # The owner main/isolated declaration can allow a signed
+            # preflight yet fail the *mandatory* post-fill liquidation check.
+            # Distinguish this now, BEFORE any model or fee-incurring order.
+            result["signed_postfill_margin_evidence_verified"] = (
+                margin_proof(broker) is True)
+            if not result["signed_postfill_margin_evidence_verified"]:
+                blockers.append("signed_postfill_margin_mode_unavailable")
             check = preflight(
                 broker, root, allow_daily_loss_warning=True,
                 allow_portfolio_loss_warnings=True)
