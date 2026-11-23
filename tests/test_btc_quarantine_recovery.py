@@ -42,7 +42,8 @@ class BrokerSources:
 
 
 class RecoveryTests(unittest.TestCase):
-    def setUp(self):        self.temp=TemporaryDirectory()
+    def setUp(self):
+        self.temp=TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.path=Path(self.temp.name)/"delta-demo-candles.sqlite"
         with closing(sqlite3.connect(self.path)) as db:
@@ -86,6 +87,7 @@ class RecoveryTests(unittest.TestCase):
         out=recover(self.path,STAMPS,opener=BrokerSources())
         self.assertFalse(out["applied"])
         self.assertEqual(self.counts(),(2,0,False))
+
     def test_atomic_repair_keeps_original_quarantine_in_audit(self):
         out=recover(self.path,STAMPS,apply=True,opener=BrokerSources())
         self.assertTrue(out["applied"])
@@ -130,7 +132,8 @@ class RecoveryTests(unittest.TestCase):
             db.execute("UPDATE candle_quarantine SET reason='extreme_neighbor_dislocation'")
             db.commit()
         with self.assertRaisesRegex(ValueError,"conflict"):
-            recover(self.path,STAMPS,apply=True,opener=BrokerSources())        self.assertEqual(self.counts(),(2,0,False))
+            recover(self.path,STAMPS,apply=True,opener=BrokerSources())
+        self.assertEqual(self.counts(),(2,0,False))
 
     def test_source_failures_dont_create_audit(self):
         def failed(request,timeout):
@@ -148,3 +151,4 @@ class RecoveryTests(unittest.TestCase):
 
 if __name__=="__main__":
     unittest.main()
+
