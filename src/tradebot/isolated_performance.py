@@ -309,6 +309,58 @@ def _trade_result(symbol, row, product, broker, fills, postings, start, end):
         return dict(base,reason="broker_order_evidence_unavailable"),None
 
 
+def _signed_fill_uuid_alias_probe(raw_fills, raw_postings):
+    """Detect explicit broker fill UUID aliases; never expose identities."""
+    from uuid import UUID
+
+    def uuid_text(value):
+        if type(value) is not str or len(value) not in (32, 36):
+            return None
+        try:
+            return str(UUID(value))
+        except (ValueError, AttributeError):
+            return None
+
+    names = ("uuid", "fill_uuid", "trade_uuid", "fill_id")
+    by_name = {name: set() for name in names}
+    fill_uuid_ids = set()
+    rows_with_alias = 0
+    for raw in raw_fills:
+        if not isinstance(raw, dict):
+            continue
+        if (candidate := uuid_text(raw.get("id"))) is not None:
+            fill_uuid_ids.add(candidate)
+        sources = (raw, raw.get("meta_data") or {})
+        found = False
+        for source in sources:
+            if not isinstance(source, dict):
+                continue
+            for name in names:
+                if (candidate := uuid_text(source.get(name))) is not None:
+                    by_name[name].add(candidate)
+                    found = True
+        rows_with_alias += bool(found)
+
+    wallet_aliases = set()
+    for raw in raw_postings:
+        if not isinstance(raw, dict) or raw.get("transaction_type") != "commission":
+            continue
+        for source in (raw, raw.get("meta_data") or {}):
+            if isinstance(source, dict):
+                if (candidate := uuid_text(source.get("fill_uuid"))) is not None:
+                    wallet_aliases.add(candidate)
+    all_signed = fill_uuid_ids | set().union(*by_name.values())
+    return {"status": "identity_counts_only",
+            "signed_fill_count": len(raw_fills),
+            "signed_fill_id_is_uuid": len(fill_uuid_ids),
+            "signed_fill_rows_with_explicit_alias": rows_with_alias,
+            "signed_fill_alias_key_counts": {
+                k: len(v) for k, v in by_name.items()},
+            "wallet_commission_uuid_references": len(wallet_aliases),
+            "uuid_identity_intersection": len(wallet_aliases & all_signed),
+            "is_verified_trade_pnl": False}
+
+
 def collect_account_performance(broker, root, symbol, *, now=None):
     """Perform ONLY signed GETs, limited to a complete past seven-day window."""
     if (broker.base_url != DEMO_API or broker.allow_orders is not False
@@ -330,6 +382,7 @@ def collect_account_performance(broker, root, symbol, *, now=None):
     # account totals or 7-day strategy results are exposed.
     raw_fills=broker.product_fills(product["id"],start_time_us=start,end_time_us=end)
     raw_postings=broker.wallet_postings(start,end)
+    fill_identity_probe=_signed_fill_uuid_alias_probe(raw_fills,raw_postings)
     fills=unique([normalize_fill(f) for f in raw_fills])
     postings=unique([normalize_posting(p) for p in raw_postings])
     if any(not start <= r["at_us"] <= end for r in fills+postings):
@@ -372,6 +425,7 @@ def collect_account_performance(broker, root, symbol, *, now=None):
         "trade_distribution":_trade_distribution(trades,truncated=overflow),
         "signed_fill_count":len(fills),
         "signed_wallet_posting_count":len(postings),
+        "fill_identity_diagnostics":fill_identity_probe,
         "fire_trade_count_in_window":len(trades),
         "broker_reconciled_closed_trades":len(verified),
         "unverified_or_open_trades":len(trades)-len(verified),
