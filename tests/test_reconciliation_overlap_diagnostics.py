@@ -1,7 +1,9 @@
 """Privacy-safe evidence counts for ambiguous signed wallet postings."""
 import json
 import unittest
-from tradebot.isolated_performance import _overlap_evidence_summary
+from tradebot.isolated_performance import (
+    _overlap_evidence_summary, _signed_fill_uuid_alias_probe,
+)
 
 
 class OverlapEvidenceTests(unittest.TestCase):
@@ -46,6 +48,36 @@ class OverlapEvidenceTests(unittest.TestCase):
         result=_overlap_evidence_summary(
             self.trade,self.product,self.fills,[p1,p2])
         self.assertEqual(result["overlapping_same_product_postings"],0)
+
+    def test_signed_explicit_uuid_alias_links_wallet_commission(self):
+        alias = "123e4567-e89b-12d3-a456-426614174000"
+        report = _signed_fill_uuid_alias_probe(
+            [{"id": 100, "meta_data": {"fill_uuid": alias}}],
+            [{"transaction_type": "commission",
+              "meta_data": {"fill_uuid": alias}}])
+        self.assertEqual(report["signed_fill_id_is_uuid"], 0)
+        self.assertEqual(report["signed_fill_rows_with_explicit_alias"], 1)
+        self.assertEqual(report["uuid_identity_intersection"], 1)
+        self.assertNotIn(alias, json.dumps(report))
+        self.assertFalse(report["is_verified_trade_pnl"])
+
+    def test_unmatched_wallet_uuid_is_not_inferred(self):
+        report = _signed_fill_uuid_alias_probe(
+            [{"id": 100, "meta_data": {}}],
+            [{"transaction_type": "commission",
+              "meta_data": {"fill_uuid":
+                  "123e4567-e89b-12d3-a456-426614174000"}}])
+        self.assertEqual(report["wallet_commission_uuid_references"], 1)
+        self.assertEqual(report["uuid_identity_intersection"], 0)
+        self.assertEqual(report["signed_fill_rows_with_explicit_alias"], 0)
+
+    def test_unknown_uuid_is_not_a_valid_alias(self):
+        report = _signed_fill_uuid_alias_probe(
+            [{"id": "a", "uuid": "not-a-valid-id"}],
+            [{"transaction_type": "commission",
+              "fill_uuid": "not-a-valid-id"}])
+        self.assertEqual(report["uuid_identity_intersection"], 0)
+        self.assertEqual(report["wallet_commission_uuid_references"], 0)
 
     def test_report_does_not_disclose_identifiers_or_amounts(self):
         result=_overlap_evidence_summary(
