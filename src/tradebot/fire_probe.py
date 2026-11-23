@@ -85,10 +85,16 @@ AUTONOMOUS_BTC_DIRECTION_INSTRUCTION = (
     "not guessed or presented as strong evidence. "
     "On uncertain but eligible conditions choose the comparatively better "
     "supported side and propose ONE exploratory contract; medium confidence "
-    "may propose TWO, strong corroborated confidence at most THREE, all "
+    "may propose TWO. On genuinely strong corroborated evidence you "
+    "may choose a VARIABLE large size from THREE to SIX contracts, but "
+    "only if the live broker-affordability ceiling allows. All choices are "
     "subject to fire_execution_scope.max_contracts_per_entry, available "
     "broker margin, estimated stop-loss risk and independent policy limits. "
-    "Use a valid integer leverage 1..20, never targeting maximum leverage. "
+    "Choose the integer 1..20 leverage yourself based on stop distance, "
+    "volatility and available margin, never to maximize quantity alone. "
+    "The required margin is derived independently from your chosen "
+    "contract count and leverage at the broker; it is NOT a separate "
+    "unverified balance or an instruction to change account margin mode. "
     "Design tick_size-aligned entry-protective stop_loss and take_profit with "
     "a positive net reward-to-risk expectation after fees and reserve, based "
     "only on actual market evidence, without fabricating a price. "
@@ -127,7 +133,7 @@ def instruction_for_snapshot(snapshot):
             or not isinstance(ticker, dict)
             or ticker.get("symbol") != "BTCUSD"
             or type(scope.get("max_contracts_per_entry")) is not int
-            or not 1 <= scope["max_contracts_per_entry"] <= 3
+            or not 1 <= scope["max_contracts_per_entry"] <= 6
             or scope.get("attached_stop_loss_and_take_profit_required") is not True
             or not isinstance(levels, dict)
             or levels.get("strategy_history_version") != version
@@ -159,8 +165,10 @@ def instruction_for_snapshot(snapshot):
         return (
             "This is one BTCUSD Delta India DEMO autonomous candidate, "
             "bounded to at most 48 attempts per UTC day and no less than "
-            "30 minutes between attempted decisions, with at most three "
-            "contracts per attempt. " +
+            "30 minutes between attempted decisions. Up to six contracts "
+            "are model-selectable only in a strong, independently "
+            "corroborated setup and only within verified broker margin and "
+            "estimated loss budgets. " +
             AUTONOMOUS_BTC_DIRECTION_INSTRUCTION
         )
     if scope.get("unattended_demo_mode") is not None:

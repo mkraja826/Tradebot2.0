@@ -22,7 +22,7 @@ class FireRiskLimits:
     max_contracts: int = 1
 
     def __post_init__(self):
-        if (type(self.max_contracts) is not int or not 1 <= self.max_contracts <= 3
+        if (type(self.max_contracts) is not int or not 1 <= self.max_contracts <= 6
                 or not 0 < self.equity_risk_fraction <= Decimal("0.01")
                 or not 0 < self.max_effective_leverage <= Decimal("20")
                 or not Decimal("1") <= self.minimum_net_reward_risk

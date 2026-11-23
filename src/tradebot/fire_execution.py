@@ -246,7 +246,7 @@ class FireTradeStore:
         allowed = {"model", "direction", "contracts", "stop_loss",
                    "take_profit", "broker_order_id", "order_state",
                    "protection_verified", "orders_submitted",
-                   "model_latency_ms", "budget", "sizing_estimate", "risk_assessment", "reason_code", "snapshot_at", "thesis", "decision_at", "entry", "exit_order_ids", "protected_at", "decision_quote", "indicators", "selected_leverage", "liquidation_verified", "liquidation_price"}
+                   "model_latency_ms", "budget", "sizing_estimate", "sizing_evidence", "risk_assessment", "reason_code", "snapshot_at", "thesis", "decision_at", "entry", "exit_order_ids", "protected_at", "decision_quote", "indicators", "selected_leverage", "liquidation_verified", "liquidation_price"}
         if set(fields) - allowed:
             raise FireTradeError("Unexpected FIRE status data")
         with closing(self._connect()) as db:
@@ -419,6 +419,10 @@ class FireDemoController:
                             planned_leverage=planned_leverage,
                             max_contracts_limit=self._hard_contract_cap())
 
+    def _model_entry_budget(self, exchange, product_id, price):
+        """Default FIRE exposes current broker leverage, not a hypothetical."""
+        return self._entry_budget(exchange, product_id, price)
+
     def _assess_risk(self, plan, budget, quote):
         return assess_fire_plan(plan, budget, quote,
                                 limits=FireRiskLimits(max_contracts=self._hard_contract_cap()))
@@ -493,7 +497,7 @@ class FireDemoController:
             self._require_account_flat(exchange, product_id)
             stage = "margin_budget"
             price = max(_dec(snapshot["core"]["best_ask"]), _dec(snapshot["core"]["ticker"]["mark_price"]))
-            budget = self._entry_budget(exchange, product_id, price)
+            budget = self._model_entry_budget(exchange, product_id, price)
             self.store.update(press, "reasoning", budget=budget)
             if budget["max_contracts_per_entry"] < 1:
                 raise FireTradeError("Insufficient margin budget for one contract")
@@ -614,6 +618,12 @@ class FireDemoController:
             self.store.update(press, "submitting", sizing_estimate={
                 "notional_usd": str(units * estimated_entry),
                 "loss_at_stop_usd": str(units * abs(estimated_entry - _dec(plan["stop_loss"]))),
+                # A nominal estimate only: tiered broker initial margin and
+                # the actual wallet requirement are independently rechecked
+                # at the chosen leverage before any exchange order.
+                "nominal_initial_margin_usd": str(
+                    units * estimated_entry / _dec(plan["leverage"])),
+                "selected_leverage": plan["leverage"],
             })
             submitted = True  # Exchange outcome could become uncertain after call.
             entries = FireEntries(self.path, exchange)

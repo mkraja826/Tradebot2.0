@@ -98,6 +98,13 @@ class DiagnosticsTests(unittest.TestCase):
                          ["exploratory_one","medium_two","strong_three"])
         self.assertFalse(out["verified_statistics"]["sample_sufficient_for_strategy_change"])
 
+    def test_dynamic_large_tier_remains_visible_in_loss_report(self):
+        self.report(P1,reconciliation(P1,gross="-2",fee=".4"))
+        self.receipt(P1,tier="strong_dynamic",side="SHORT",contracts=5)
+        out=analyze(self.finance,self.fire)
+        self.assertEqual(out["by_tier"]["strong_dynamic"]["losses"],1)
+        self.assertEqual(out["recent_verified_trade_summaries"][0]["contracts_recorded"],5)
+
     def test_latest_unverified_replaces_older_verified(self):
         old=reconciliation(P1,gross="-2",fee=".2")
         self.report(P1,old)

@@ -1,4 +1,4 @@
-"""Offline policy tests for experimental one/two-contract Delta DEMO sizing."""
+"""Offline policy tests for small, medium, and dynamic large DEMO sizing."""
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -33,7 +33,7 @@ class DemoSizeTests(unittest.TestCase):
     def test_small_medium_big_evidence_tiers(self):
         c = strong_context()
         self.assertTrue(strong_directional_setup(c, "LONG"))
-        self.assertEqual(evidence_contract_ceiling(c, "LONG"), 3)
+        self.assertEqual(evidence_contract_ceiling(c, "LONG"), 6)
         self.assertEqual(evidence_contract_ceiling(c, "WAIT"), 0)
         self.assertEqual(evidence_contract_ceiling(c, "SHORT"), 1)
         c["technical_5m"]["adx14"]["adx14"] = 21
@@ -52,7 +52,7 @@ class DemoSizeTests(unittest.TestCase):
     def test_autonomous_normalize_never_converts_wait_or_upsizes(self):
         bot=AutoBTCController(self.root / "fire-ops.sqlite")
         strong=strong_context()
-        long_plan = {"direction": "LONG", "contracts": 3, "leverage": 5,
+        long_plan = {"direction": "LONG", "contracts": 6, "leverage": 5,
                      "stop_loss": "63205", "take_profit": "64000"}
         weak=strong_context()
         weak["technical_5m"]["adx14"]["adx14"] = 12
@@ -60,11 +60,14 @@ class DemoSizeTests(unittest.TestCase):
         medium["technical_5m"]["adx14"]["adx14"] = 21
         self.assertEqual(bot._normalize_plan(long_plan, weak)["contracts"], 1)
         self.assertEqual(bot._normalize_plan(long_plan, medium)["contracts"], 2)
-        self.assertEqual(bot._normalize_plan(long_plan, strong)["contracts"], 3)
+        self.assertEqual(bot._normalize_plan(long_plan, strong)["contracts"], 6)
+        self.assertEqual(bot._normalize_plan({**long_plan,"contracts": 4}, strong)["contracts"], 4)
+        self.assertEqual(bot._entry_sizing_record()["sizing_evidence"]["tier"], "strong_dynamic")
+        self.assertEqual(bot._entry_sizing_record()["sizing_evidence"]["model_selected_leverage"], 5)
         self.assertEqual(bot._normalize_plan({**long_plan, "contracts": 1}, strong)["contracts"], 1)
         self.assertEqual(bot._entry_sizing_record()["sizing_evidence"]["tier"], "exploratory_one")
-        oversized=bot._normalize_plan({**long_plan,"contracts":4}, strong)
-        self.assertEqual(oversized["contracts"],4)  # remains invalid: never cap into validity
+        oversized=bot._normalize_plan({**long_plan,"contracts":7}, strong)
+        self.assertEqual(oversized["contracts"],7)  # remains invalid: never cap into validity
         wait = {"direction":"WAIT", "contracts":0, "stop_loss":None,
                 "take_profit":None, "leverage":None,
                 "thesis":"No safe protected entry"}
@@ -96,13 +99,13 @@ class DemoSizeTests(unittest.TestCase):
         bot=AutoBTCController(self.root / "auto-risk.sqlite")
         base={
             "leverage":"5", "equity_usd":"173.81",
-            "contract_value":"0.001", "max_contracts_per_entry":3,
+            "contract_value":"0.001", "max_contracts_per_entry":6,
             "taker_commission_rate":"0.0005",
         }
         quote={"best_bid":"63214", "best_ask":"63214.5"}
         template={"direction":"LONG", "leverage":5,
                   "stop_loss":"63205", "take_profit":"64000"}
-        for qty,risk_fraction in ((1,"0.0025"),(2,"0.0035"),(3,"0.005")):
+        for qty,risk_fraction in ((1,"0.0025"),(2,"0.0035"),(3,"0.005"),(4,"0.005"),(6,"0.005")):
             with self.subTest(qty=qty):
                 assessed=bot._assess_risk({**template,"contracts":qty},base,quote)
                 self.assertTrue(assessed["approved"])
@@ -113,13 +116,13 @@ class DemoSizeTests(unittest.TestCase):
             bot._assess_risk({**template,"contracts":3,
                               "stop_loss":"62800"},base,quote)
         with self.assertRaises(RiskRejected):
-            bot._assess_risk({**template,"contracts":4},base,quote)
+            bot._assess_risk({**template,"contracts":7},base,quote)
 
     def test_supervised_broker_cap_stays_one(self):
         ctrl=SupervisedBTCController(self.root / "supervised.sqlite")
         auto=AutoBTCController(self.root / "autonomous.sqlite")
         self.assertEqual(ctrl._hard_contract_cap(),1)
-        self.assertEqual(auto._hard_contract_cap(),3)
+        self.assertEqual(auto._hard_contract_cap(),6)
         self.assertEqual(ctrl._normalize_plan({"direction":"LONG","contracts":3},strong_context())["contracts"],3)
 
     def test_three_contract_offline_broker_post_has_full_brackets(self):
@@ -174,6 +177,60 @@ class DemoSizeTests(unittest.TestCase):
         self.assertEqual(len(demo.active_orders),2)
         self.assertEqual([entry["size"] for entry in demo.active_orders],[3,3])
 
+    def test_six_contract_broker_order_keeps_dual_attached_protection(self):
+        from decimal import Decimal
+        from tradebot.fire_execution import FireDemoController
+        from test_fire_execution import FakeDemo, snapshot, seed_demo_equity
+
+        class SixContractMock(FireDemoController):
+            def _hard_contract_cap(self):
+                return 6
+            def _assess_risk(self, plan, budget, quote):
+                return assess_fire_plan(
+                    plan, budget, quote, limits=FireRiskLimits(
+                        max_contracts=6, equity_risk_fraction=Decimal("0.005")))
+            def _decision_context(self, exchange, collected, midpoint):
+                return {}
+            def _historical_levels(self, collected, midpoint):
+                return {"periods": {
+                    period: {"quality_status": "provisionally_valid"}
+                    for period in ("day", "previous_day", "week",
+                                   "previous_week", "month", "previous_month")}}
+
+        path=self.root/"six-contracts.sqlite"
+        demo=FakeDemo()
+        demo.leverage=20
+        seed_demo_equity(path,"173.81")
+        plan = {
+            "direction": "LONG", "contracts": 6, "leverage": 20,
+            "stop_loss": "63205", "take_profit": "64000",
+            "thesis": "Six-contract strong evidence offline fixture",
+        }
+        bot=SixContractMock(
+            path,enabled=True,exchange_factory=lambda:demo,
+            snapshot_loader=snapshot,
+            probe=lambda roles,load: {"results":{"fire":{"decision":plan}}},
+            spawn=lambda callback:callback(),pause=lambda seconds:None)
+        ok,_=bot.start()
+        self.assertTrue(ok)
+        receipt=bot.snapshot()
+        self.assertEqual(receipt["status"],"protected_active",
+                         receipt.get("reason_code"))
+        self.assertTrue(receipt["orders_submitted"])
+        self.assertTrue(receipt["protection_verified"])
+        self.assertTrue(receipt["liquidation_verified"])
+        self.assertEqual(len(demo.requests),1)
+        self.assertEqual(demo.requests[0][2]["size"],6)
+        self.assertEqual(demo.requests[0][2]["bracket_stop_loss_price"],"63205")
+        self.assertEqual(demo.requests[0][2]["bracket_take_profit_price"],"64000")
+        self.assertEqual(sorted(x["size"] for x in demo.active_orders),[6,6])
+        self.assertEqual(receipt["selected_leverage"],20)
+        self.assertGreater(
+            Decimal(receipt["sizing_estimate"]["nominal_initial_margin_usd"]),0)
+        self.assertLessEqual(
+            Decimal(receipt["risk_assessment"]["estimated_loss_including_costs_usd"]),
+            Decimal("173.81")*Decimal("0.005"))
+
     def test_scope_two_only_admitted_in_unattended_demo(self):
         from tradebot.ai import PlanError
         from tradebot.fire_probe import instruction_for_snapshot
@@ -197,7 +254,7 @@ class DemoSizeTests(unittest.TestCase):
         }
         scope = {
             "strategy_history_version":"btc-demo-recent24h-v1",
-            "max_contracts_per_entry":3,
+            "max_contracts_per_entry":6,
             "attached_stop_loss_and_take_profit_required":True,
             "unattended_demo_mode":True,
             "one_attempt_operator_supervision_required":False,
@@ -210,7 +267,7 @@ class DemoSizeTests(unittest.TestCase):
             "indicators":features,
         }
         prompt = instruction_for_snapshot(obj)
-        self.assertIn("at most three contracts per attempt",prompt)
+        self.assertIn("Up to six contracts",prompt)
         self.assertIn("Direction must be LONG or SHORT",prompt)
         self.assertNotIn("Direction must be WAIT, LONG or SHORT",prompt)
         with self.assertRaises(PlanError):
@@ -220,7 +277,61 @@ class DemoSizeTests(unittest.TestCase):
         with self.assertRaises(PlanError):
             instruction_for_snapshot({
                 **obj,"fire_execution_scope":{
-                    **scope,"max_contracts_per_entry":4}})
+                    **scope,"max_contracts_per_entry":7}})
+
+    def test_gpt6_leverage_changes_affordable_quantity_without_bypassing_broker(self):
+        class Broker:
+            def _request(self, method, path, *, auth=False):
+                if path == "/v2/products/BTCUSD":
+                    return {"result": {
+                        "symbol": "BTCUSD", "id": 27,
+                        "contract_type": "perpetual_futures",
+                        "settling_asset": {"symbol": "USD"},
+                        "notional_type": "vanilla", "initial_margin": "0.5",
+                        "contract_value": "0.001",
+                        "taker_commission_rate": "0.0005"}}
+                return {"result": {"leverage": 5, "product_id": 27}}
+            def wallet_balances(self):
+                return {"meta": {"net_equity": "200"},
+                        "balances": [{"asset_symbol": "USD",
+                                     "available_balance": "200"}]}
+        broker = Broker()
+        ctrl = AutoBTCController(self.root / "large-margin.sqlite")
+        preview = ctrl._model_entry_budget(broker, 27, "63214.5")
+        self.assertTrue(preview["capacity_preview_only"])
+        self.assertEqual(preview["capacity_preview_leverage"], 20)
+        self.assertEqual(preview["broker_leverage"], "5")
+        self.assertEqual(preview["max_contracts_per_entry"], 6)
+        actual_five = ctrl._entry_budget(broker, 27, "63214.5",
+                                        planned_leverage=5)
+        actual_ten = ctrl._entry_budget(broker, 27, "63214.5",
+                                       planned_leverage=10)
+        self.assertLess(actual_five["max_contracts_per_entry"], 6)
+        self.assertGreater(actual_ten["max_contracts_per_entry"],
+                           actual_five["max_contracts_per_entry"])
+        plan = {"direction": "LONG", "contracts": 6, "leverage": 5,
+                "stop_loss": "63205", "take_profit": "64000"}
+        quote = {"best_bid": "63214", "best_ask": "63214.5"}
+        with self.assertRaises(RiskRejected):
+            ctrl._assess_risk(plan, actual_five, quote)
+        # Even when the 20x preview advertises capacity, the final broker
+        # budget at GPT-6's chosen leverage is the authority.
+        with self.assertRaises(RiskRejected):
+            ctrl._assess_risk(plan, preview, quote)
+
+    def test_sizing_receipt_preserves_gpt6_choice_without_raw_model_output(self):
+        from tradebot.fire_execution import FireTradeStore
+        store = FireTradeStore(self.root / "size-receipt.sqlite")
+        press = store.reserve()
+        self.assertIsInstance(press, str)
+        record = {"tier": "strong_dynamic", "model_proposed_contracts": 5,
+                  "selected_contracts": 5, "model_selected_leverage": 12,
+                  "evidence_contract_ceiling": 6,
+                  "policy": "btc-demo-evidence-size-v3"}
+        saved = store.update(press, "preflight", sizing_evidence=record,
+                             selected_leverage=12)
+        self.assertEqual(saved["sizing_evidence"], record)
+        self.assertEqual(saved["selected_leverage"], 12)
 
     def test_budget_sizing_cannot_exceed_requested_cap(self):
         class Fake:
@@ -239,11 +350,13 @@ class DemoSizeTests(unittest.TestCase):
         one=entry_budget(broker,"BTCUSD",27,"63214.5",max_contracts_limit=1)
         two=entry_budget(broker,"BTCUSD",27,"63214.5",max_contracts_limit=2)
         three=entry_budget(broker,"BTCUSD",27,"63214.5",max_contracts_limit=3)
+        six=entry_budget(broker,"BTCUSD",27,"63214.5",max_contracts_limit=6)
         self.assertEqual(one["max_contracts_per_entry"],1)
         self.assertEqual(two["max_contracts_per_entry"],2)
         self.assertEqual(three["max_contracts_per_entry"],3)
+        self.assertEqual(six["max_contracts_per_entry"],6)
         with self.assertRaises(ValueError):
-            entry_budget(broker,"BTCUSD",27,"63214.5",max_contracts_limit=4)
+            entry_budget(broker,"BTCUSD",27,"63214.5",max_contracts_limit=7)
 
 
 if __name__ == "__main__":
