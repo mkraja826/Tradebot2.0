@@ -148,6 +148,51 @@ class GoldAutonomousTests(unittest.TestCase):
         self.assertFalse(response["orders_submitted"])
         self.assertFalse((self.root/"gold-auto-demo-halt").exists())
 
+    def test_provider_network_error_retry_requires_no_durable_order_intent(self):
+        db = self.root / "fire-xaut.sqlite"
+        with sqlite3.connect(db) as conn:
+            conn.execute("CREATE TABLE fire_requests("
+                         "press TEXT,status TEXT,result TEXT,created_at TEXT)")
+            conn.execute("CREATE TABLE fire_entries(press TEXT)")
+            conn.execute("INSERT INTO fire_requests VALUES(?,?,?,?)",
+                         ("id1", "rejected_no_order", json.dumps({
+                             "orders_submitted": False,
+                             "protection_verified": False,
+                             "reason_code": "provider_network_error"}), NOW.isoformat()))
+        self.assertTrue(receipts_safe(self.root))
+        with sqlite3.connect(db) as conn:
+            conn.execute("INSERT INTO fire_entries VALUES(?)", ("id1",))
+        self.assertFalse(receipts_safe(self.root))
+
+    def test_provider_network_error_without_intent_does_not_halt_worker(self):
+        db = self.root / "fire-xaut.sqlite"
+        with sqlite3.connect(db) as conn:
+            conn.execute("CREATE TABLE fire_entries(press TEXT)")
+        fake = Mock()
+        fake.start.return_value = (True, "accepted")
+        fake.snapshot.return_value = {
+            "status": "rejected_no_order", "orders_submitted": False,
+            "protection_verified": False, "reason_code": "provider_network_error"}
+        result = run_once(
+            self.root, instant=NOW, armed=lambda: True,
+            candidate=lambda x: True, receipt_check=lambda x: True,
+            controller_factory=lambda *a, **k: fake, do_execute=True,
+            cooldown_check=lambda *a, **k: ("ready", 0))
+        self.assertEqual(result["result"], "rejected_no_order")
+        self.assertFalse((self.root / "gold-auto-demo-halt").exists())
+
+    def test_unknown_intent_table_does_not_allow_provider_retry(self):
+        db = self.root / "fire-xaut.sqlite"
+        with sqlite3.connect(db) as conn:
+            conn.execute("CREATE TABLE fire_requests("
+                         "press TEXT,status TEXT,result TEXT,created_at TEXT)")
+            conn.execute("INSERT INTO fire_requests VALUES(?,?,?,?)",
+                         ("id2", "rejected_no_order", json.dumps({
+                             "orders_submitted": False,
+                             "protection_verified": False,
+                             "reason_code": "provider_network_error"}), NOW.isoformat()))
+        self.assertFalse(receipts_safe(self.root))
+
     def test_gold_prior_safe_no_order_receipt_may_retry_after_five_minutes(self):
         db=self.root/"fire-xaut.sqlite"
         with sqlite3.connect(db) as conn:
