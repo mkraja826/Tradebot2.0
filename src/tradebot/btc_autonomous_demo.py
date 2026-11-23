@@ -24,6 +24,7 @@ from tradebot.fire_account_guard import (
     AccountExposureRejected, require_flat_demo_account_for_configuration,
 )
 from tradebot.btc_demo_size import evidence_contract_ceiling
+from tradebot.fire_risk import FireRiskLimits, assess_fire_plan
 
 ARM_CONTENT = "DELTA-INDIA-DEMO:BTCUSD:UNATTENDED:30MIN-MAX48-UTC-DAY"
 MAX_DAILY_ATTEMPTS = 48
@@ -140,6 +141,23 @@ class AutoBTCController(SupervisedBTCController):
     def _entry_sizing_record(self):
         return {"sizing_evidence": self._sizing_record} if getattr(
             self, "_sizing_record", None) else {}
+
+    def _assess_risk(self, plan, budget, quote):
+        """Confidence tier also limits maximum DEMO dollar loss per trade.
+
+        Strong entries can risk up to the existing daily 0.5% equity limit;
+        every tier still fails closed on broker margin, liquidation and SL/TP.
+        """
+        fractions = {1: Decimal("0.0025"), 2: Decimal("0.0035"),
+                     3: MAX_DAILY_EQUITY_DECLINE}
+        size = plan.get("contracts")
+        if type(size) is not int or size not in fractions:
+            from tradebot.fire_risk import RiskRejected
+            raise RiskRejected("Unsupported autonomous BTC demo size")
+        return assess_fire_plan(
+            plan, budget, quote, limits=FireRiskLimits(
+                max_contracts=3, equity_risk_fraction=fractions[size],
+                version="btc-demo-evidence-size-v2"))
 
     def _additional_fire_scope(self):
         return {
