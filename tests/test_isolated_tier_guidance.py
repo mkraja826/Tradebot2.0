@@ -6,6 +6,7 @@ import unittest
 
 from tradebot.btc_autonomous_demo import AutoBTCController
 from tradebot.gold_autonomous_controller import AutoGoldController
+from tradebot.fire_risk import RiskRejected
 from tradebot.isolated_tier_sizing import (
     size_guideline_evidence, GOLD_DEMO_CAP, BTC_DEMO_CAP, FIXED_LEVERAGE)
 
@@ -51,6 +52,15 @@ class IndependentTierChoiceTests(unittest.TestCase):
                           {"contracts":1},self.preview,account="MAIN")
         self.assertEqual(size_guideline_evidence(
             {"contracts":0},self.preview,account="BTC"),{})
+
+    def test_non20_leverage_cannot_pass_either_model_risk_gate(self):
+        for cls, label in ((AutoBTCController, "btc"), (AutoGoldController, "gold")):
+            ctrl=cls(self.root / (label+"-isolated") / "risk.sqlite")
+            with self.subTest(label=label):
+                with self.assertRaisesRegex(RiskRejected, "fixed 20x"):
+                    ctrl._assess_risk(
+                        {"direction":"LONG","contracts":1,"leverage":10,
+                         "stop_loss":"100","take_profit":"150"}, {}, {})
 
     def test_model_quantity_caps_are_still_separate(self):
         self.assertEqual(FIXED_LEVERAGE,20)
