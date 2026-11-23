@@ -271,10 +271,13 @@ def prior_fire_receipts_safe(root):
             if last[0]=="rejected_no_order":
                 if detail.get("reason_code")=="gpt6_wait_no_trade":
                     return True
-                # One precisely reviewed historical MODEL failure may be
-                # released only after fresh signed DEMO flatness and a durable
-                # no-order acknowledgement. Never rewrite FIRE history.
-                if (detail.get("reason_code")=="model_decision_failed"
+                # Only precisely reviewed historical no-order incidents
+                # qualify. An old generic risk_governor_failed must reproduce
+                # the net reward/risk deficiency from immutable input+receipt;
+                # the signed incident review enforces this additional evidence.
+                # Never rewrite the FIRE history or guess at another failure.
+                if (detail.get("reason_code") in (
+                        "model_decision_failed", "risk_governor_failed")
                         and detail.get("orders_submitted") is False):
                     from tradebot.btc_auto_review import reviewed_receipt_matches
                     return reviewed_receipt_matches(root)
