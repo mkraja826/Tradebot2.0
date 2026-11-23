@@ -12,6 +12,7 @@
   <script defer src="/charts.js"></script>
   <script defer src="/isolated.js"></script>
   <script defer src="/performance.js"></script>
+  <script defer src="/analytics-visuals.js"></script>
   <script defer src="/workspace.js"></script>
 </head>
 <body>
@@ -124,6 +125,35 @@
             <div class="performance-card">BTC broker history loading…</div>
             <div class="performance-card">Gold broker history loading…</div>
           </div>
+          <section class="analytics-visuals" aria-labelledby="visuals-title">
+            <div class="viz-section-heading">
+              <div><div class="eyebrow">COMPLETE SIGNED BROKER POSTING WINDOWS</div><h3 id="visuals-title">Cash-flow timeline</h3></div>
+              <span class="viz-source">BTC and Gold · Independent demo accounts</span>
+            </div>
+            <div id="analytics-cashflow-charts" class="viz-columns" aria-live="polite">
+              <p class="viz-empty">Loading signed cash-flow charts…</p>
+            </div>
+            <div class="viz-section-heading">
+              <div><div class="eyebrow">FIRE RECEIPTS · SEVEN DAYS</div><h3>What happened to the trade decisions?</h3></div>
+              <span class="viz-source">Verified outcomes vs unresolved and no-order attempts</span>
+            </div>
+            <div id="analytics-distribution" class="viz-columns" aria-live="polite">
+              <p class="viz-empty">Loading trade distributions…</p>
+            </div>
+            <div class="viz-section-heading">
+              <div><div class="eyebrow">BROKER EVIDENCE EXPLORER</div><h3>Explore every recorded decision</h3></div>
+              <span class="viz-source">Latest seven-day FIRE receipts · up to 40 per account</span>
+            </div>
+            <div class="viz-filters" role="group" aria-label="Trade explorer filters">
+              <label>Market<select id="viz-market"><option value="all">BTC + Gold</option><option value="BTC">Bitcoin</option><option value="GOLD">Gold</option></select></label>
+              <label>Outcome<select id="viz-outcome"><option value="all">All outcomes</option><option value="verified">Verified P&amp;L</option><option value="open">Open / unresolved</option><option value="unverified">Not reconciled</option><option value="no_order">No order</option></select></label>
+              <label>Direction<select id="viz-direction"><option value="all">All directions</option><option value="LONG">Long</option><option value="SHORT">Short</option></select></label>
+            </div>
+            <div id="viz-trade-count" class="viz-count" role="status">Loading trade evidence…</div>
+            <div id="viz-trade-list" class="viz-trade-list"></div>
+            <button id="viz-show-more" class="viz-more" type="button" hidden>Show more trades</button>
+            <p class="isolated-disclosure">Signed wallet postings are not necessarily profit earned by the AI strategy. An empty chart bucket means zero eligible posted cash flow within a complete broker window; an unclassified bucket is shown as unavailable. A pending protective order is not a guaranteed fill.</p>
+          </section>
           <p class="isolated-disclosure">All monetary figures are USD on Delta India Demo. Wallet activity excludes transfers and deposits. “Unverified” is not zero profit or loss; P&amp;L and win rate are published only for completely reconciled closed trades.</p>
         </section>
         <div class="notice" id="halt-banner" hidden>◈ &nbsp;PERSISTENT EXECUTION HALT DETECTED — inspect exchange positions and orders before restarting.</div>
