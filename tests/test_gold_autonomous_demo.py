@@ -50,14 +50,17 @@ class GoldAutonomousTests(unittest.TestCase):
         arm.chmod(0o644)
         self.assertFalse(is_gold_armed(arm))
 
-    def test_same_5_minute_spacing_as_btc_with_48_daily_ceiling(self):
+    def test_same_5_minute_spacing_without_daily_count_cap(self):
         t=NOW
-        self.assertIsNotNone(claim_attempt(self.root,t))
-        self.assertIsNone(claim_attempt(self.root,t+timedelta(minutes=4)))
-        self.assertIsNotNone(claim_attempt(self.root,t+timedelta(minutes=5)))
+        for i in range(100):
+            when=t+timedelta(minutes=5*i)
+            self.assertIsNotNone(claim_attempt(self.root,when))
+            self.assertIsNone(claim_attempt(
+                self.root,when+timedelta(minutes=4)))
         with sqlite3.connect(self.root/"gold-auto-demo.sqlite") as db:
             self.assertEqual(db.execute(
-                "select count(*) from gold_auto_attempts").fetchone()[0],2)
+                "SELECT COUNT(*) FROM gold_auto_attempts WHERE utc_day=?",
+                (t.date().isoformat(),)).fetchone()[0],100)
         self.assertFalse((self.root/"btc-auto-demo.sqlite").exists())
 
     def test_btc_model_is_unmodified_and_gold_routes_deepseek_only(self):
