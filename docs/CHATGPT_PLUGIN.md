@@ -66,6 +66,7 @@ git status --short
 git pull --ff-only
 .venv/bin/python -m pip install -e '.[plugin]'
 bash ops/install_chat_root_bridge.sh --enable
+sudo bash ops/install_chat_root_socket.sh --enable
 ```
 
 **Important:** use the ordinary operating-system user whose private
@@ -79,9 +80,26 @@ permission. It installs a reviewed, root-owned executable at
 `/etc/tradebot2/root-bridge.enabled`. It does not enable FIRE, place a
 broker order, modify keys or restart the dashboard.
 
+The tunnel runs with Linux `NoNewPrivs=1`, so it cannot use `sudo` from its
+child MCP process. The separate **root-owned socket-activated adapter** is
+mandatory for this deployment. The installer checks the socket-enabled MCP
+handler, installs `ops/tb2_root_socket_server.py` root-owned and enables
+`tb2-root-admin.socket`; it verifies `id -u` through the socket. It does
+not modify trading services, broker settings or keys. Its service does not
+bind a TCP port. The adapter authenticates the peer's kernel-supplied UID
+via `SO_PEERCRED` against a root-owned 0600 user identity file. The existing
+root-only enable marker and audit log still apply.
+
+**Security limit:** Every local process running as that authorized Linux user
+can request unrestricted root commands through the 0600 socket, including
+processes unrelated to ChatGPT. Do not run untrusted workloads as that user;
+use a dedicated tunnel OS account for stronger isolation. `NoNewPrivileges`
+on the tunnel does **not** protect against requests to the separate root
+service. The command-log hashes are not tamper-proof.
+
 Restart **only the private tunnel-client/MCP stdio process** using the
-existing method employed on the VM; reconnect or refresh Tb2.0 in
-ChatGPT so that `admin_root_shell` appears. The pre-existing version of
+existing method employed on the VM when source changes; reconnect/refresh
+Tb2.0 in ChatGPT so that `admin_root_shell` appears. The pre-existing version of
 the plugin will not gain this tool until a new process loads the updated
 source. A GitHub merge alone changes neither the live dashboard nor plugin.
 
@@ -89,8 +107,9 @@ source. A GitHub merge alone changes neither the live dashboard nor plugin.
 
 - New tool: `admin_root_shell(command, timeout_seconds)`, with a 1–30
   second timeout and at most 4,096 characters of command text.
-- Executes the command through the installed immutable root-owned
-  `sudo -n /usr/local/sbin/tb2-root-bridge` only, as the tunnel OS identity.
+- The MCP process connects only to `/run/tb2-root-admin.sock` (0600). The
+  root-owned service validates the peer UID and request then invokes the
+  existing root-owned `/usr/local/sbin/tb2-root-bridge` with a fixed environment.
   Neither dashboard HTTP routes nor the public web app expose shell access.
 - Caller cannot select an arbitrary bridge path, hostname, sudo user,
   environment, working directory or command interpreter binary.
@@ -104,8 +123,8 @@ source. A GitHub merge alone changes neither the live dashboard nor plugin.
 - ChatGPT must request explicit permission for each destructive action,
   including broker mutations, service changes and deletes. The initial
   owner root-access grant is not permission to execute any particular trade.
-- Privileged execution is disabled by default and fails closed if there is
-  no root-only enable marker, secure sudoers configuration or private tunnel.
+- Privileged execution fails closed if the root-only enable marker or
+  authorized local socket is missing; the private tunnel must remain private.
   Do not add a generic HTTP shell endpoint.
 
 ### Immediate revocation and incident recovery
@@ -117,8 +136,14 @@ the trading dashboard**, run once via SSH:
 sudo rm -f /etc/tradebot2/root-bridge.enabled
 ```
 
-For permanent removal also delete the sudoers allowlist and root bridge
-executable, then revoke/rotate the tunnel credential. If the private plugin
+To also stop the root socket service (without affecting the dashboard):
+
+```bash
+sudo systemctl disable --now tb2-root-admin.socket tb2-root-admin.service
+```
+
+For permanent removal also delete the sudoers allowlist, root socket adapter
+and root bridge executable, then revoke/rotate the tunnel credential. If the private plugin
 was shared unintentionally, revoke the tunnel access immediately; do not
 assume disabling a process whose host is already compromised is sufficient.
 
