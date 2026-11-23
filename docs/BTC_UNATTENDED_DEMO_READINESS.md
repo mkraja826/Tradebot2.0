@@ -23,9 +23,19 @@ paid GPT-6 decision. New RSI/ADX/RVOL/MACD/Bollinger features are advisory.
   entries; a weekly or historical-peak breach still blocks as a separate safeguard.
   Original signed equity receipts, wallet integrity checks and the 15-minute
   authenticated session guard remain mandatory.
-- Per-entry stop-loss exposure remains independently limited: up to 0.25%,
-  0.35%, or 0.5% of verified equity for the selected size tier. This is a
-  **per-trade maximum estimated loss**, not an aggregate daily loss ceiling.
+- GPT-6 independently selects the entry stop-loss and take-profit from
+  available actual BTC chart evidence (last-24h support/resistance, completed
+  5m ATR, 15m/1h EMA20, VWAP, momentum and volatility), not from a fixed
+  percentage or a size-tier risk budget. **No per-trade estimated-equity-loss
+  percentage ceiling** applies to the autonomous BTC DEMO mode.
+- The engine continues to compute and journal estimated USD loss including
+  fees/slippage and the loss-to-equity fraction. Missing, crossed or invalid
+  SL/TP, poor reward-to-risk, broker margin exhaustion and liquidation risk
+  still reject orders. The protective stop price must be tick-aligned and
+  attached to the actual exchange order. Stops are not guaranteed fills.
+- The normal FIRE controller retains its original 0.25% per-trade loss cap;
+  the separate 15-minute supervised-session 0.5% drawdown check and
+  weekly/peak controls remain unchanged.
 - Broker-side SL/TP, liquidation clearance, order reconciliation and
   emergency closeout remain mandatory, with an independent active watchdog.
 - If the model fails, execution becomes ambiguous, a stop is unverified, or

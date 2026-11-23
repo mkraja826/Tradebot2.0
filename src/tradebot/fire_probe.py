@@ -89,15 +89,22 @@ AUTONOMOUS_BTC_DIRECTION_INSTRUCTION = (
     "may choose a VARIABLE large size from THREE to SIX contracts, but "
     "only if the live broker-affordability ceiling allows. All choices are "
     "subject to fire_execution_scope.max_contracts_per_entry, available "
-    "broker margin, estimated stop-loss risk and independent policy limits. "
+    "broker margin, liquidation clearance and reward-to-risk verification. "
     "Choose the integer 1..20 leverage yourself based on stop distance, "
     "volatility and available margin, never to maximize quantity alone. "
     "The required margin is derived independently from your chosen "
     "contract count and leverage at the broker; it is NOT a separate "
     "unverified balance or an instruction to change account margin mode. "
-    "Design tick_size-aligned entry-protective stop_loss and take_profit with "
-    "a positive net reward-to-risk expectation after fees and reserve, based "
-    "only on actual market evidence, without fabricating a price. "
+    "Choose stop_loss autonomously from the actual chart: recent confirmed swing "
+    "highs/lows, last-24h support/resistance, 5-minute ATR, 15-minute/hourly "
+    "EMA20, VWAP and volatility. Put the stop beyond a defensible chart "
+    "invalidation level, not at a fixed equity-loss percentage or arbitrary "
+    "distance. Select a tick_size-aligned take_profit using chart resistance "
+    "or support and a positive net reward-to-risk expectation after fees and "
+    "reserve. Do not fabricate price levels or widen stops solely to force "
+    "an entry. The engine computes the resulting estimated USD loss as "
+    "auditable evidence but imposes no fixed per-trade percentage-loss cap "
+    "in this DEMO autonomous mode. "
     "LONG requires stop_loss below best_bid and take_profit above best_ask; "
     "SHORT requires stop_loss above best_ask and take_profit below best_bid. "
     "Return exactly one JSON object with keys direction, leverage, contracts, "
@@ -167,8 +174,8 @@ def instruction_for_snapshot(snapshot):
             "bounded to at most 48 attempts per UTC day and no less than "
             "30 minutes between attempted decisions. Up to six contracts "
             "are model-selectable only in a strong, independently "
-            "corroborated setup and only within verified broker margin and "
-            "estimated loss budgets. " +
+            "corroborated setup and only within verified broker margin, "
+            "liquidation and attached bracket protections. " +
             AUTONOMOUS_BTC_DIRECTION_INSTRUCTION
         )
     if scope.get("unattended_demo_mode") is not None:

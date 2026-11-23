@@ -14,7 +14,7 @@ class RiskRejected(ValueError):
 
 @dataclass(frozen=True)
 class FireRiskLimits:
-    equity_risk_fraction: Decimal = Decimal("0.0025")
+    equity_risk_fraction: Decimal | None = Decimal("0.0025")
     max_effective_leverage: Decimal = Decimal("20")
     minimum_net_reward_risk: Decimal = Decimal("1.5")
     slippage_reserve_each_side: Decimal = Decimal("0.0005")
@@ -22,8 +22,17 @@ class FireRiskLimits:
     max_contracts: int = 1
 
     def __post_init__(self):
+        # A missing fractional loss ceiling is opt-in and scoped exclusively
+        # to the BTC autonomous Delta India DEMO chart-stop policy.
+        uncapped_demo = (self.equity_risk_fraction is None
+                         and self.version == "btc-demo-chart-stop-v4"
+                         and self.max_contracts == 6)
+        valid_risk_fraction = (
+            uncapped_demo or (
+                isinstance(self.equity_risk_fraction, Decimal)
+                and Decimal("0") < self.equity_risk_fraction <= Decimal("0.01")))
         if (type(self.max_contracts) is not int or not 1 <= self.max_contracts <= 6
-                or not 0 < self.equity_risk_fraction <= Decimal("0.01")
+                or not valid_risk_fraction
                 or not 0 < self.max_effective_leverage <= Decimal("20")
                 or not Decimal("1") <= self.minimum_net_reward_risk
                 or not 0 <= self.slippage_reserve_each_side <= Decimal("0.01")):
@@ -80,10 +89,11 @@ def assess_fire_plan(plan, budget, quote, *, limits=None):
     reward = gross_reward - qty * (entry + target) * fee_rate - reserve
     if reward <= 0 or loss <= 0:
         raise RiskRejected("Non-positive net reward or invalid risk")
-    maximum_loss = equity * limits.equity_risk_fraction
+    maximum_loss = (equity * limits.equity_risk_fraction
+                    if limits.equity_risk_fraction is not None else None)
     leverage = notional / equity
     ratio = reward / loss
-    if loss > maximum_loss:
+    if maximum_loss is not None and loss > maximum_loss:
         raise RiskRejected("Stop-loss exposure exceeds equity risk limit")
     if leverage > limits.max_effective_leverage:
         raise RiskRejected("Effective leverage exceeds policy")
@@ -101,7 +111,9 @@ def assess_fire_plan(plan, budget, quote, *, limits=None):
         "notional_usd": str(notional),
         "estimated_loss_including_costs_usd": str(loss),
         "estimated_net_target_reward_usd": str(reward),
-        "max_allowed_loss_usd": str(maximum_loss),
+        "max_allowed_loss_usd": str(maximum_loss) if maximum_loss is not None else None,
+        "estimated_loss_fraction_of_equity": str(loss / equity),
+        "equity_loss_ceiling_enabled": maximum_loss is not None,
         "expected_net_reward_risk": str(ratio),
         "effective_leverage": str(leverage),
         "slippage_assumption_each_side": str(limits.slippage_reserve_each_side),
