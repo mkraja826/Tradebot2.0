@@ -275,3 +275,40 @@ body{background:var(--bg)}.eyebrow{color:#ddb982}.panel,.metric.card{border-colo
 .isolated-disclosure{font-size:10px;color:#879caf;line-height:1.6;margin:11px 2px 0}
 @media(max-width:1110px){.isolated-grid{grid-template-columns:1fr}}
 @media(max-width:650px){.isolated-head{flex-direction:column;gap:11px}.isolated-head h2{font-size:18px}.isolated-sync{white-space:normal}.isolated-grid{gap:10px}.isolated-card{padding:18px 14px}.iso-stats{gap:7px}.iso-stat{padding:12px 10px;min-height:96px}.iso-stat strong{font-size:22px}.iso-account-name h3{font-size:21px}}
+
+
+/* Broker-account performance desk: posted cash flows vs audited FIRE P&L */
+.isolated-performance{margin:0 0 22px}
+.performance-switch{display:flex;gap:8px;margin:0 0 13px}
+.performance-switch button{cursor:pointer;background:#131e2b;color:#9eb4c5;border:1px solid #334558;border-radius:8px;padding:9px 14px;font-size:12px;font-weight:650}
+.performance-switch button[aria-pressed=true]{background:#1c403a;border-color:#3a806a;color:#b2f5d8}
+.performance-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.performance-card{background:#111d2b;border:1px solid #2a4051;border-radius:14px;padding:19px 19px 16px;min-width:0;color:#e1edf8}
+.performance-card.perf-gold{background:#1b1d22;border-color:#564434}
+.perf-card-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 15px}
+.perf-card-heading h3{font-size:16px;line-height:1.3;margin:0}
+.perf-label{color:#a6bdcc;border:1px solid #384959;border-radius:6px;padding:6px 7px;font-size:9px;font-weight:800;white-space:nowrap}
+.perf-stats,.perf-subset{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}
+.perf-stat{display:flex;flex-direction:column;gap:6px;min-width:0;min-height:98px;border-radius:9px;border:1px solid #2c3c4c;background:#0d1928;padding:12px 11px}
+.perf-gold .perf-stat{background:#221e1d;border-color:#4c3f35}
+.perf-stat small{font-size:9px;color:#92aab9;font-weight:750;line-height:1.45;letter-spacing:.55px}
+.perf-stat strong{font-size:22px;font-weight:760;font-variant-numeric:tabular-nums;letter-spacing:-.4px;overflow-wrap:anywhere}
+.perf-stat span{font-size:10px;color:#93a3b4;line-height:1.5;margin-top:auto}
+.perf-section-title{display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:6px;border-top:1px solid #2c3b4b;padding-top:17px;margin:17px 0 11px}
+.perf-section-title strong{font-size:12px;color:#d9e7f1}.perf-section-title span{font-size:10px;color:#8198ab}
+.perf-subset .perf-stat{min-height:87px}
+.perf-subset .perf-stat strong{font-size:19px}
+.perf-trade-list{display:flex;flex-direction:column}
+.perf-trade{display:flex;justify-content:space-between;gap:11px;padding:11px 0;border-bottom:1px solid #2c3c4d;min-width:0}
+.perf-trade-main,.perf-trade-outcome{display:flex;flex-direction:column;gap:5px;min-width:0}
+.perf-trade-main strong{font-size:11px;color:#e0edf6}
+.perf-trade-main span{font-size:10px;color:#91a3b5}
+.perf-trade-outcome{text-align:right;align-items:flex-end}
+.perf-trade-outcome strong{font-size:11px}
+.perf-trade-outcome small{font-size:9px;color:#a8b8c5;line-height:1.4;max-width:200px;overflow-wrap:anywhere}
+.perf-verified{color:#8be7be}.perf-unverified{color:#ffc794}.perf-no-order{color:#aac7db}
+.perf-more summary{cursor:pointer;font-size:11px;color:#92c7e2;padding:13px 0}
+.perf-empty,.perf-unavailable{color:#d8b7a3;border:1px solid #71523b;border-radius:8px;padding:15px;font-size:11px;line-height:1.5}
+.perf-footer{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;padding-top:13px;margin-top:12px;border-top:1px solid #2a3a49;color:#90a6b5;font-size:10px;line-height:1.5}
+@media(max-width:1110px){.performance-grid{grid-template-columns:1fr}}
+@media(max-width:650px){.performance-grid{gap:10px}.performance-card{padding:16px 13px}.perf-stat{padding:11px 9px}.perf-stat strong{font-size:19px}.perf-card-heading h3{font-size:14px}.perf-subset .perf-stat strong{font-size:17px}}
