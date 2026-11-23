@@ -23,7 +23,7 @@ from tradebot.fire_btc_supervised_commission import readonly_btc_commission_pref
 from tradebot.fire_account_guard import (
     AccountExposureRejected, require_flat_demo_account_for_configuration,
 )
-from tradebot.btc_demo_size import evidence_contract_ceiling
+from tradebot.btc_demo_size import evidence_contract_ceiling, MAX_AUTONOMOUS_LARGE_CONTRACTS
 from tradebot.fire_risk import FireRiskLimits, assess_fire_plan
 
 ARM_CONTENT = "DELTA-INDIA-DEMO:BTCUSD:UNATTENDED:30MIN-MAX48-UTC-DAY"
@@ -114,11 +114,11 @@ class AutoBTCController(SupervisedBTCController):
         return False
 
     def _hard_contract_cap(self):
-        """Up to three DEMO contracts, never for dashboard/supervised FIRE."""
-        return 3
+        """GPT-6 chooses strong-case quantity; DEMO backend enforces six max."""
+        return MAX_AUTONOMOUS_LARGE_CONTRACTS
 
     def _max_contracts_for_entry(self, budget):
-        return min(3, super()._max_contracts_for_entry(budget))
+        return min(MAX_AUTONOMOUS_LARGE_CONTRACTS, super()._max_contracts_for_entry(budget))
 
     def _normalize_plan(self, plan, context):
         """Downgrade model size to independently proven tier, never create an entry."""
@@ -132,13 +132,16 @@ class AutoBTCController(SupervisedBTCController):
         if type(proposed) is not int or not 1 <= proposed <= self._hard_contract_cap():
             return plan
         selected = min(proposed, cap)
+        tier = ("strong_dynamic" if selected >= 3 else
+                "medium_two" if selected == 2 else "exploratory_one")
         self._sizing_record = {
-            "tier": ("strong_three" if selected == 3 else
-                     "medium_two" if selected == 2 else "exploratory_one"),
-            "policy": "btc-demo-evidence-size-v2",
+            "tier": tier,
+            "policy": "btc-demo-evidence-size-v3",
             "evidence_contract_ceiling": cap,
             "model_proposed_contracts": proposed,
             "selected_contracts": selected,
+            "model_selected_leverage": plan["leverage"],
+            "margin_is_broker_budget_verified": False,
         }
         return {**plan, "contracts": selected}
 
@@ -152,22 +155,22 @@ class AutoBTCController(SupervisedBTCController):
         Strong entries can risk up to the existing daily 0.5% equity limit;
         every tier still fails closed on broker margin, liquidation and SL/TP.
         """
-        fractions = {1: Decimal("0.0025"), 2: Decimal("0.0035"),
-                     3: MAX_DAILY_EQUITY_DECLINE}
+        fractions = {1: Decimal("0.0025"), 2: Decimal("0.0035")}
         size = plan.get("contracts")
-        if type(size) is not int or size not in fractions:
+        if type(size) is not int or not 1 <= size <= self._hard_contract_cap():
             from tradebot.fire_risk import RiskRejected
             raise RiskRejected("Unsupported autonomous BTC demo size")
         return assess_fire_plan(
             plan, budget, quote, limits=FireRiskLimits(
-                max_contracts=3, equity_risk_fraction=fractions[size],
-                version="btc-demo-evidence-size-v2"))
+                max_contracts=self._hard_contract_cap(),
+                equity_risk_fraction=fractions.get(size, MAX_DAILY_EQUITY_DECLINE),
+                version="btc-demo-evidence-size-v3"))
 
     def _additional_fire_scope(self):
         return {
             "strategy_history_version": "btc-demo-recent24h-v1",
             "unattended_demo_mode": True,
-            "max_contracts_per_entry": 3,
+            "max_contracts_per_entry": MAX_AUTONOMOUS_LARGE_CONTRACTS,
             "one_attempt_operator_supervision_required": False,
             "max_new_order_attempts_per_utc_day": MAX_DAILY_ATTEMPTS,
         }
