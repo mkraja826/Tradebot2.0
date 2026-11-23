@@ -27,6 +27,18 @@ class GoldAutonomousTests(unittest.TestCase):
         self.root.mkdir()
         self.root.chmod(0o700)
 
+    def test_gold_fire_snapshot_loader_receives_gold_symbol(self):
+        with patch("tradebot.gold_autonomous_controller.load_snapshot",
+                   side_effect=lambda symbol: {"symbol": symbol}) as loader:
+            bot=AutoGoldController(self.root/"fire-xaut.sqlite",enabled=False)
+            self.assertEqual(bot.snapshot_loader("XAUTUSD"),{"symbol":"XAUTUSD"})
+            loader.assert_called_once_with("XAUTUSD")
+
+    def test_broker_leverage_at_20x_is_supported_by_gold_controller(self):
+        bot=AutoGoldController(self.root/"fire-xaut.sqlite",enabled=False)
+        self.assertEqual(bot._hard_contract_cap(),6)
+        self.assertEqual(bot._decision_model_id(),"tb-deepseek-v4-1-flash")
+
     def test_unique_gold_arm_cannot_be_btc_authorization(self):
         arm=self.root/"gold_arm"
         arm.write_text(ARM_CONTENT+"\n")
