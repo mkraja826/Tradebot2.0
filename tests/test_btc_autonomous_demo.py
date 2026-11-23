@@ -3,6 +3,7 @@ from datetime import datetime,timezone,timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+import sqlite3
 from tradebot.btc_autonomous_demo import is_armed,ARM_CONTENT,run_once,claim_attempt
 
 NOW=datetime(2026,11,23,1,tzinfo=timezone.utc)
