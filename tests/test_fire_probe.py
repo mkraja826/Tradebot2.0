@@ -78,7 +78,8 @@ class FireProbeTest(unittest.TestCase):
         from tradebot.fire_probe import (
             AUTONOMOUS_BTC_DIRECTION_INSTRUCTION, INSTRUCTION)
         prompt = AUTONOMOUS_BTC_DIRECTION_INSTRUCTION
-        self.assertIn("at least 1.5", prompt)
+        self.assertIn("quality threshold is 1.5", prompt)
+        self.assertIn("WARNING ONLY", prompt)
         self.assertIn("taker_commission_rate", prompt)
         self.assertIn("0.0005", prompt)
         self.assertIn("contract_value", prompt)
