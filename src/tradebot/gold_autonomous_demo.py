@@ -1,6 +1,6 @@
 """Independent DeepSeek XAUTUSD unattended Delta India DEMO worker.
 
-Checks eligibility every 5m, reserves <=48 independent attempts daily,
+Checks eligibility every 5m with no daily attempt-count cap,
 and waits at least five minutes after verified trade close before a new entry.
 Skips signed live exposure; never replays unresolved broker orders.
 Order authority belongs solely to the protected Gold FIRE controller.
@@ -24,7 +24,6 @@ from tradebot.gold_autonomous_readiness import gold_preflight
 # Historical arm token deliberately stays unchanged: rotating this secret
 # would unexpectedly disarm an already-approved isolated DEMO worker.
 ARM_CONTENT = "DELTA-INDIA-DEMO:XAUTUSD:DEEPSEEK:UNATTENDED:30MIN-MAX48-DYNAMIC6"
-MAX_DAILY_ATTEMPTS=48
 MIN_INTERVAL=5*60
 POLL_SECONDS=300
 TERMINAL_SAFE={"rejected_no_order","flat_verified"}
@@ -70,9 +69,9 @@ def claim_attempt(root, instant):
         db.execute("BEGIN IMMEDIATE")
         last=db.execute("SELECT requested_at FROM gold_auto_attempts "
                         "ORDER BY requested_at DESC LIMIT 1").fetchone()
-        n=db.execute("SELECT COUNT(*) FROM gold_auto_attempts "
-                     "WHERE utc_day=?",(day,)).fetchone()[0]
-        if n>=MAX_DAILY_ATTEMPTS or (last and ts-last[0]<MIN_INTERVAL):
+        # UTC-day is retained only for historical audit/reporting, not
+        # as a quota. No daily AI attempt-count allocation remains.
+        if last and ts-last[0]<MIN_INTERVAL:
             db.rollback()
             return None
         attempt=uuid4().hex
@@ -190,7 +189,7 @@ def run_once(data_dir,*,instant=None,armed=is_gold_armed,candidate=check_candida
                 "remaining_seconds":remaining}
     attempt=claim_attempt(root,now)
     if attempt is None:
-        return {"status":"daily_or_interval_budget_exhausted"}
+        return {"status":"interval_cooldown_active"}
     try:
         bot=controller_factory(root/"fire-xaut.sqlite",enabled=True,
                                spawn=lambda task:task())
