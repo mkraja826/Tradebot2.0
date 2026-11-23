@@ -163,7 +163,8 @@ def instruction_for_snapshot(snapshot):
             or not isinstance(ticker, dict)
             or ticker.get("symbol") != "BTCUSD"
             or type(scope.get("max_contracts_per_entry")) is not int
-            or not 1 <= scope["max_contracts_per_entry"] <= 6
+            or not 1 <= scope["max_contracts_per_entry"] <= (
+                96 if scope.get("fixed_leverage") == 20 else 6)
             or scope.get("attached_stop_loss_and_take_profit_required") is not True
             or not isinstance(levels, dict)
             or levels.get("strategy_history_version") != version
@@ -197,7 +198,7 @@ def instruction_for_snapshot(snapshot):
             "This is one BTCUSD Delta India DEMO autonomous candidate, "
             "with no daily model-attempt-count cap but at least "
             "five minutes between attempted decisions, plus a five-minute "
-            "cooldown after a broker-verified closed trade. Up to six contracts "
+            "cooldown after a broker-verified closed trade. Whole contracts "
             "are selected by GPT-6 using small/medium/large guidelines, "
             "but always within separately verified broker margin, "
             "liquidation and attached bracket protections. " +
@@ -205,16 +206,19 @@ def instruction_for_snapshot(snapshot):
             (" For this isolated demo, return leverage exactly 20 and "
              "optionally include size_tier as small, medium or large. "
              "YOU choose the size_tier AND integer contracts yourself, "
-             "guided by 5%, 20% or 40% of verified account equity as "
-             "position NOTIONAL for small, medium or large respectively. "
-             "Compute approximate contracts using verified "
-             "notional_per_contract_usd, then adjust to a whole-contract "
-             "count based on signal quality and evidence. These percentages "
+             "guided by 5%, 20% or 40% of verified equity USED AS INITIAL "
+             "MARGIN for small, medium or large respectively, NOT by "
+             "5/20/40 percent of position notional. At fixed 20x, $100 "
+             "equity implies targets: small $5 margin for $100 notional, "
+             "medium $20 margin for $400 notional, large $40 margin for "
+             "$800 notional. Use notional_per_contract_usd and the exact "
+             "20x initial-margin requirement to select a whole-contract "
+             "count yourself based on signal strength. These percentages "
              "are guidelines, NOT fixed contract allocations and no engine "
-             "automatically resizes your proposal. Signed broker margin "
-             "remains capped at 20% of equity. If one contract exceeds "
-             "a small target, choose one or a higher tier according to "
-             "your evidence without pretending an exact match. "
+             "automatically resizes your proposal. The separate signed "
+             "broker margin maximum is 40% of equity across these "
+             "isolated demo tiers. Broker margin scaling and fees can "
+             "lower affordable contracts. Do not pretend an exact match. "
              "Never exceed max_contracts_per_entry."
              if scope.get("fixed_leverage") == 20 else "")
         )
