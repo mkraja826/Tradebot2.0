@@ -25,7 +25,7 @@ from tradebot.gold_autonomous_readiness import gold_preflight
 # would unexpectedly disarm an already-approved isolated DEMO worker.
 ARM_CONTENT = "DELTA-INDIA-DEMO:XAUTUSD:DEEPSEEK:UNATTENDED:30MIN-MAX48-DYNAMIC6"
 MIN_INTERVAL=5*60
-POLL_SECONDS=300
+POLL_SECONDS=60
 TERMINAL_SAFE={"rejected_no_order","flat_verified"}
 SAFE_NO_ORDER_REASONS = frozenset((
     "risk_governor_failed", "autonomous_invalid_wait",
@@ -185,6 +185,17 @@ def run_once(data_dir,*,instant=None,armed=is_gold_armed,candidate=check_candida
         return {"status":"disarmed"}
     if (root/"gold-auto-demo-halt").exists():
         return {"status":"halted_pending_operator_review"}
+    # Cooldown is a cheap local-ledger read. Check it before expensive signed
+    # broker preflight calls so the worker can poll once per minute without
+    # extra model spending or repeated broker API traffic while cooling.
+    if do_execute:
+        cooldown, remaining = cooldown_check(
+            root, fire_filename="fire-xaut.sqlite", now=now)
+        if cooldown == "unavailable":
+            return {"status":"verified_trade_close_time_unavailable"}
+        if cooldown == "cooling_down":
+            return {"status":"post_trade_cooldown",
+                    "remaining_seconds":remaining}
     try:
         eligible=candidate(root)
     except Exception:
@@ -201,13 +212,6 @@ def run_once(data_dir,*,instant=None,armed=is_gold_armed,candidate=check_candida
         return {"status":"previous_gold_fire_unresolved"}
     if not do_execute:
         return {"status":"eligible_read_only_no_order"}
-    cooldown, remaining = cooldown_check(
-        root, fire_filename="fire-xaut.sqlite", now=now)
-    if cooldown == "unavailable":
-        return {"status":"verified_trade_close_time_unavailable"}
-    if cooldown == "cooling_down":
-        return {"status":"post_trade_cooldown",
-                "remaining_seconds":remaining}
     attempt=claim_attempt(root,now)
     if attempt is None:
         return {"status":"interval_cooldown_active"}
