@@ -138,7 +138,7 @@ def _read_original_high_watermark(path):
 
 
 
-def isolated_btc_signed_genesis_window(path, health, instant):
+def isolated_btc_signed_genesis_window(path, health, instant, *, account="BTC"):
     """Truthful first UTC day exception for a newly provisioned DEMO ledger.
 
     There was no opening snapshot before the child account began collecting
@@ -147,8 +147,10 @@ def isolated_btc_signed_genesis_window(path, health, instant):
     The exception expires at the next midnight; normal daily requirements
     apply automatically from then onward. Never applies to main/Gold FIRE.
     """
-    if (os.environ.get("TRADEBOT_EXPECTED_DEMO_SUBACCOUNT") != "BTC"
-            or path.parent.name != "btc-isolated" or path.is_symlink()
+    if (account not in ("BTC", "GOLD")
+            or os.environ.get("TRADEBOT_EXPECTED_DEMO_SUBACCOUNT") != account
+            or path.parent.name != account.lower() + "-isolated"
+            or path.is_symlink()
             or path.parent.is_symlink() or path.parent.parent.is_symlink()
             or type(health) is not dict
             or health.get("daily_checkpoint") != "missed_window"
@@ -214,7 +216,9 @@ def inspect_btc_session_candidate(exchange, data_dir, *,
                                   now=None, health_fn=risk_health,
                                   allow_daily_loss_warning=False,
                                   allow_portfolio_loss_warnings=False,
-                                  allow_initial_isolated_genesis=False):
+                                  allow_initial_isolated_genesis=False,
+                                  isolated_genesis_account="BTC",
+                                  expected_market_symbol="BTCUSD"):
     """Propose a genuine fresh session equity baseline without any writes.
 
     A missed weekly opening is tolerated. Only opted-in autonomous DEMO
@@ -226,7 +230,7 @@ def inspect_btc_session_candidate(exchange, data_dir, *,
     report = {
         "mode": "read_only_supervised_session_candidate",
         "environment": "delta-india-demo",
-        "symbol": "BTCUSD",
+        "symbol": expected_market_symbol,
         "status": "blocked",
         "reason": "not_checked",
         "standard_weekly_opening_missing": None,
@@ -285,7 +289,8 @@ def inspect_btc_session_candidate(exchange, data_dir, *,
         report["standard_weekly_opening_missing"] = (
             health.get("weekly_checkpoint") == "missed_window")
         provisional = (allow_initial_isolated_genesis
-            and isolated_btc_signed_genesis_window(path, health, instant))
+            and isolated_btc_signed_genesis_window(
+                path, health, instant, account=isolated_genesis_account))
         report["provisional_first_day_signed_genesis"] = bool(provisional)
         if (health.get("database_integrity") != "verified" or
                 not (report["daily_checkpoint_verified"] or provisional) or
