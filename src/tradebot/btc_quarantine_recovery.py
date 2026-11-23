@@ -42,7 +42,8 @@ def serialized(c):
     return dict(time=c[0], **{name:str(c[i]) for i,name in enumerate(KEYS,1)})
 
 
-def get_candles(host, resolution, first, last, *, opener=None):    if host not in HOSTS or resolution not in ("5m", "1m"):
+def get_candles(host, resolution, first, last, *, opener=None):
+    if host not in HOSTS or resolution not in ("5m", "1m"):
         raise ValueError("Untrusted public host or resolution")
     query = urllib.parse.urlencode(dict(
         symbol="BTCUSD", resolution=resolution,
@@ -86,7 +87,8 @@ def corroborate(stamps, *, opener=None):
             for res in ("5m","1m")}
     candidates={}
     hashes={}
-    for t in stamps:        expected=evidence[HOSTS[0]]["5m"].get(t)
+    for t in stamps:
+        expected=evidence[HOSTS[0]]["5m"].get(t)
         if expected is None:
             raise ValueError("Missing primary Delta five-minute candle")
         for host in HOSTS:
@@ -130,7 +132,8 @@ def originals(db,stamps,proposed):
     return before
 
 
-def recover(path, stamps=STAMPS, *, apply=False, opener=None):    stamps=tuple(sorted(stamps))
+def recover(path, stamps=STAMPS, *, apply=False, opener=None):
+    stamps=tuple(sorted(stamps))
     proposed, hashes=corroborate(stamps,opener=opener)
     with closing(database(path)) as db:
         old=originals(db,stamps,proposed)
@@ -174,7 +177,8 @@ def recover(path, stamps=STAMPS, *, apply=False, opener=None):    stamps=tuple(s
         if db.execute("PRAGMA quick_check(1)").fetchone()!=("ok",):
             raise ValueError("Post-recovery archive integrity failed")
         db.commit()
-    result["applied"]=True    return result
+    result["applied"]=True
+    return result
 
 
 def main():
@@ -195,3 +199,4 @@ def main():
 
 if __name__=="__main__":
     main()
+
