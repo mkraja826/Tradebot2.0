@@ -31,7 +31,8 @@ READ_FAILURES = {
 }
 ALERTS = READ_FAILURES | {
     "equity_database_integrity_failed", "equity_evidence_unavailable",
-    "equity_loss_limit_breached", "system_clock_unverified", "equity_ledger_unavailable",
+    "equity_loss_limit_breached", "equity_daily_loss_limit_breached",
+    "system_clock_unverified", "equity_ledger_unavailable",
     "missed_daily_checkpoint", "missed_weekly_checkpoint", "signed_equity_observation_stale",
     "equity_ledger_integrity_failed", "equity_clock_inconsistent",
     "operations_evidence_unavailable", "operations_clock_inconsistent",
@@ -40,6 +41,27 @@ ALERTS = READ_FAILURES | {
     "watchdog_emergency_flat_verified",
     "watchdog_protection_failure_flat_verified",
 }
+
+DAILY_ONLY_WARNING = "equity_daily_loss_limit_breached"
+
+
+def demo_monitoring_operational(monitor, *, allow_daily_loss_warning=False):
+    """Only a typed daily-only warning may be ignored by the autonomous demo."""
+    accepted = {DAILY_ONLY_WARNING} if allow_daily_loss_warning else set()
+    if not isinstance(monitor, dict):
+        return False
+    codes = monitor.get("alert_codes")
+    if type(codes) is not list or any(type(code) is not str for code in codes):
+        return False
+    return (
+        set(codes) <= accepted
+        and monitor.get("watchdog") == "healthy"
+        and monitor.get("equity_collector") in ({"healthy"} | accepted)
+        and all(type(monitor.get(key)) in (int, float)
+                and 0 <= monitor[key] <= maximum
+                for key, maximum in (("watchdog_age_seconds", 90),
+                                     ("equity_collector_age_seconds", 180)))
+    )
 
 
 class MonitorStore:
@@ -145,7 +167,8 @@ class MonitorStore:
                     continue
                 transition = "resolved" if not active else "opened" if changed else "reminder"
                 severity = "info" if not active else (
-                    "warning" if code.startswith("missed_") or code == "equity_boundary_ambiguous"
+                    "warning" if code.startswith("missed_") or code in ("equity_boundary_ambiguous",
+                                     DAILY_ONLY_WARNING)
                     else "critical")
                 db.execute("INSERT INTO monitor_alert_state VALUES (?,?,?) "
                            "ON CONFLICT(code) DO UPDATE SET active=excluded.active, "
@@ -234,7 +257,11 @@ def collect_once(exchange, data_dir, *, clock_check=clock_synchronized):
         if not clock_check():
             raise EquityReadError("system_clock_unverified")
         result = RuntimeEquityGuard(path).observe_signed_demo(exchange)
-        if result["reason"].startswith("loss_limit_"):
+        if result["reason"] == "loss_limit_daily":
+            # Only the daily threshold was breached; distinguish it from
+            # concurrent weekly/peak drawdown for demo-only admission.
+            status = DAILY_ONLY_WARNING
+        elif result["reason"].startswith("loss_limit_"):
             status = "equity_loss_limit_breached"
     except (EquityReadError, DeltaReadError) as exc:
         status = exc.code if exc.code in ALERTS else "equity_evidence_unavailable"
