@@ -9,7 +9,8 @@ from decimal import Decimal
 from pathlib import Path
 
 from tradebot.autonomous_cooldown import require_entry_cooldown
-from tradebot.isolated_tier_sizing import GOLD_DEMO_CAP, FIXED_LEVERAGE, size_guideline_evidence
+from tradebot.isolated_tier_sizing import GOLD_DEMO_CAP, FIXED_LEVERAGE, MAX_MARGIN_SHARE, size_guideline_evidence
+from tradebot.fire_budget import entry_budget
 from tradebot.btc_supervised_equity_guard import SupervisedSessionEquityGuard
 from tradebot.delta import DEMO_API
 from tradebot.fire_account_guard import require_flat_demo_account
@@ -121,9 +122,9 @@ class AutoGoldController(FireDemoController):
             "one_attempt_operator_supervision_required": False,
             "daily_attempt_cap_enabled": False,
             "fixed_leverage": FIXED_LEVERAGE,
-            "equity_notional_tiers": {"small": "0.05", "medium": "0.20",
+            "equity_margin_tiers": {"small": "0.05", "medium": "0.20",
                                       "large": "0.40"},
-            "broker_margin_cap_fraction": "0.20",
+            "broker_margin_cap_fraction": str(MAX_MARGIN_SHARE),
         }
 
     def _allow_wait_choice(self):
@@ -131,6 +132,12 @@ class AutoGoldController(FireDemoController):
 
     def _hard_contract_cap(self):
         return GOLD_DEMO_CAP
+
+    def _entry_budget(self, exchange, product_id, price, *, planned_leverage=None):
+        return entry_budget(exchange, self.symbol, product_id, price,
+            planned_leverage=planned_leverage,
+            max_contracts_limit=self._hard_contract_cap(),
+            margin_share=MAX_MARGIN_SHARE)
 
     def _max_contracts_for_entry(self, budget):
         return min(GOLD_DEMO_CAP,
