@@ -13,7 +13,10 @@ from tradebot.btc_supervised_session import (
     ALLOWED_STANDARD_BLOCKERS, _read_original_high_watermark,
     assess_supervised_session,
 )
-from tradebot.equity_monitor import risk_health, demo_monitoring_operational, DAILY_ONLY_WARNING
+from tradebot.equity_monitor import (
+    risk_health, demo_monitoring_operational, DAILY_ONLY_WARNING,
+    PORTFOLIO_LOSS_WARNING,
+)
 from tradebot.equity_receipt import validate_receipt
 from tradebot.portfolio_equity_guard import EquityRiskError, amount
 
@@ -29,11 +32,13 @@ class SupervisedSessionEquityGuard:
 
     def __init__(self, path, *, health_fn=risk_health,
                  peak_reader=_read_original_high_watermark,
-                 allow_daily_loss_warning=False):
+                 allow_daily_loss_warning=False,
+                 allow_portfolio_loss_warnings=False):
         self.path = Path(path)
         self.health_fn = health_fn
         self.peak_reader = peak_reader
         self.allow_daily_loss_warning = allow_daily_loss_warning
+        self.allow_portfolio_loss_warnings = allow_portfolio_loss_warnings
         self._first = None
         self._first_receipt = None
         self._file_identity = None
@@ -56,9 +61,12 @@ class SupervisedSessionEquityGuard:
                 or type(conditions) is not list
                 or any(type(v) is not str for v in conditions)
                 or not set(conditions) <= (ALLOWED_STANDARD_BLOCKERS |
-                    ({DAILY_ONLY_WARNING} if self.allow_daily_loss_warning else set()))
+                    ({DAILY_ONLY_WARNING} if self.allow_daily_loss_warning else set()) |
+                    ({PORTFOLIO_LOSS_WARNING} if self.allow_portfolio_loss_warnings
+                     else set()))
                 or not demo_monitoring_operational(
-                    monitor, allow_daily_loss_warning=self.allow_daily_loss_warning)):
+                    monitor, allow_daily_loss_warning=self.allow_daily_loss_warning,
+                    allow_portfolio_loss_warnings=self.allow_portfolio_loss_warnings)):
             raise EquityRiskError("supervised_session_history_or_monitor_unverified")
         peak, identity = self.peak_reader(self.path)
         if self._file_identity is not None and identity != self._file_identity:
@@ -71,13 +79,19 @@ class SupervisedSessionEquityGuard:
             self._file_identity = identity
         verdict = assess_supervised_session(
             self._first, current, peak, self._first_receipt,
-            receipt, now=instant)
+            receipt, now=instant,
+            allow_loss_warnings=self.allow_portfolio_loss_warnings)
         if not verdict["within_session_limits"]:
             raise EquityRiskError(verdict["reason"])
+        quality_warnings = sorted(set(verdict.get("quality_warnings", [])) |
+            (set(conditions) & {
+                DAILY_ONLY_WARNING, PORTFOLIO_LOSS_WARNING}))
         return {
             "policy": "btc-demo-supervised-session-v1",
             "approved": True,
-            "reason": "within_authenticated_short_session_limits",
+            "reason": ("loss_thresholds_warning_only" if quality_warnings
+                       else "within_authenticated_short_session_limits"),
+            "quality_warnings": quality_warnings,
             "session_elapsed_seconds": verdict["session_elapsed_seconds"],
             "normal_weekly_checkpoint_overridden": False,
             "separate_live_broker_protection_required": True,
