@@ -162,7 +162,10 @@ def isolated_btc_signed_genesis_window(path, health, instant):
         "daily_checkpoint_missed_window", "weekly_checkpoint_missed_window"}
     conditions = health.get("blocking_conditions")
     if (type(conditions) is not list
-            or not expected_conditions.issubset(set(conditions))):
+            or any(type(code) is not str for code in conditions)
+            or not expected_conditions.issubset(set(conditions))
+            or not set(conditions) <= (expected_conditions | {
+                DAILY_ONLY_WARNING, PORTFOLIO_LOSS_WARNING})):
         return False
     utc_day = instant.astimezone(timezone.utc).replace(
         hour=0, minute=0, second=0, microsecond=0)
