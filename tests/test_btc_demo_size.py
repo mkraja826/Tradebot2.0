@@ -349,7 +349,7 @@ class DemoSizeTests(unittest.TestCase):
             "attached_stop_loss_and_take_profit_required":True,
             "unattended_demo_mode":True,
             "one_attempt_operator_supervision_required":False,
-            "max_new_order_attempts_per_utc_day":48,
+            "daily_attempt_cap_enabled":False,
         }
         obj = {
             "environment":"delta-india-demo",
@@ -359,6 +359,8 @@ class DemoSizeTests(unittest.TestCase):
         }
         prompt = instruction_for_snapshot(obj)
         self.assertIn("Up to six contracts",prompt)
+        self.assertIn("no daily model-attempt-count cap",prompt)
+        self.assertNotIn("48 attempts",prompt)
         self.assertIn("chart", prompt)
         self.assertIn("stop_loss", prompt)
         self.assertIn("no fixed per-trade percentage-loss cap", prompt)
@@ -372,6 +374,14 @@ class DemoSizeTests(unittest.TestCase):
             instruction_for_snapshot({
                 **obj,"fire_execution_scope":{
                     **scope,"max_contracts_per_entry":7}})
+        with self.assertRaises(PlanError):
+            instruction_for_snapshot({
+                **obj,"fire_execution_scope":{
+                    **scope,"max_new_order_attempts_per_utc_day":48}})
+        with self.assertRaises(PlanError):
+            instruction_for_snapshot({
+                **obj,"fire_execution_scope":{
+                    **scope,"daily_attempt_cap_enabled":True}})
 
     def test_gpt6_leverage_changes_affordable_quantity_without_bypassing_broker(self):
         class Broker:

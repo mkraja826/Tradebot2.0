@@ -190,11 +190,12 @@ def instruction_for_snapshot(snapshot):
         raise PlanError("Unverified restricted BTC FIRE history")
     if scope.get("unattended_demo_mode") is True:
         if (scope.get("one_attempt_operator_supervision_required") is not False
-                or scope.get("max_new_order_attempts_per_utc_day") != 48):
+                or scope.get("daily_attempt_cap_enabled") is not False
+                or "max_new_order_attempts_per_utc_day" in scope):
             raise PlanError("Unsupported autonomous demo FIRE scope")
         return (
             "This is one BTCUSD Delta India DEMO autonomous candidate, "
-            "bounded to at most 48 attempts per UTC day and no less than "
+            "with no daily model-attempt-count cap but at least "
             "five minutes between attempted decisions, plus a five-minute "
             "cooldown after a broker-verified closed trade. Up to six contracts "
             "are model-selectable without confidence-tier allocation, "

@@ -3,6 +3,7 @@ from datetime import datetime,timezone,timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+import sqlite3
 from tradebot.btc_autonomous_demo import is_armed,ARM_CONTENT,run_once,claim_attempt
 
 NOW=datetime(2026,11,23,1,tzinfo=timezone.utc)
@@ -97,16 +98,18 @@ class AutoTests(unittest.TestCase):
                 another._decision_context(object(), NOW, 61_000)
             loader.assert_not_called()
 
-    def test_capped_daily_attempts_and_five_minute_gap(self):
+    def test_no_daily_count_cap_and_five_minute_spacing(self):
         start=NOW.replace(hour=0)
-        self.assertIsNotNone(claim_attempt(self.root,start))
-        self.assertIsNone(claim_attempt(self.root,start+timedelta(minutes=4)))
-        self.assertIsNotNone(claim_attempt(self.root,start+timedelta(minutes=5)))
-        for i in range(2,48):
-            self.assertIsNotNone(claim_attempt(
-                self.root,start+timedelta(minutes=5*i)))
-        self.assertIsNone(claim_attempt(
-            self.root,start+timedelta(minutes=239)))
+        for i in range(100):
+            when=start+timedelta(minutes=5*i)
+            self.assertIsNotNone(claim_attempt(self.root,when))
+            # Four minutes after any admitted attempt remains blocked,
+            # including after the old quota of 48 is exceeded.
+            self.assertIsNone(claim_attempt(self.root,when+timedelta(minutes=4)))
+        with sqlite3.connect(self.root/"btc-auto-demo.sqlite") as db:
+            self.assertEqual(db.execute(
+                "SELECT COUNT(*) FROM btc_auto_attempts WHERE utc_day=?",
+                (start.date().isoformat(),)).fetchone()[0],100)
         self.assertIsNotNone(claim_attempt(self.root,start+timedelta(days=1)))
 
     def test_dry_run_makes_no_reservation(self):
@@ -146,7 +149,7 @@ class AutoTests(unittest.TestCase):
         skipped=run_once(self.root,instant=NOW+timedelta(minutes=9),
                           armed=lambda:True,candidate=lambda x:True,receipts_safe=lambda x:True,
                           do_execute=True,cooldown_check=lambda *args,**kwargs:("ready",0),controller_factory=runner)
-        self.assertEqual(skipped["status"],"daily_or_interval_budget_exhausted")
+        self.assertEqual(skipped["status"],"interval_cooldown_active")
         self.assertEqual(runner.starts,2)
 
     def test_signed_active_position_skips_without_charging_or_model(self):
@@ -237,7 +240,8 @@ class AutoTests(unittest.TestCase):
         scope=bot._additional_fire_scope()
         self.assertEqual(scope["max_contracts_per_entry"],6)
         self.assertTrue(scope["unattended_demo_mode"])
-        self.assertEqual(scope["max_new_order_attempts_per_utc_day"],48)
+        self.assertIs(scope["daily_attempt_cap_enabled"],False)
+        self.assertNotIn("max_new_order_attempts_per_utc_day",scope)
 
     def test_missing_broker_signed_margin_blocks_even_healthy_owner_attestation(self):
         from tradebot.btc_autonomous_demo import (
