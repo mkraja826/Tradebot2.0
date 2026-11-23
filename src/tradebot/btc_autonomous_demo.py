@@ -25,6 +25,7 @@ from tradebot.fire_account_guard import (
     AccountExposureRejected, require_flat_demo_account_for_configuration,
 )
 from tradebot.btc_demo_size import MAX_AUTONOMOUS_LARGE_CONTRACTS
+from tradebot.isolated_tier_sizing import size_guideline_evidence, FIXED_LEVERAGE
 from tradebot.fire_risk import FireRiskLimits, assess_fire_plan
 from tradebot.signed_margin_mode import signed_account_margin_mode
 from tradebot.fire_account_guard import require_flat_demo_account
@@ -147,7 +148,8 @@ class AutoBTCController(SupervisedBTCController):
         and the existing 20%-of-equity margin share before any order.
         """
         preview = self._entry_budget(
-            exchange, product_id, price, planned_leverage=20)
+            exchange, product_id, price, planned_leverage=FIXED_LEVERAGE)
+        self._tier_preview = preview
         return {
             **preview,
             "capacity_preview_only": True,
@@ -156,23 +158,12 @@ class AutoBTCController(SupervisedBTCController):
         }
 
     def _normalize_plan(self, plan, context):
-        """Preserve the AI-selected quantity: no evidence-tier downgrading.
-
-        A malformed or unaffordable proposal is rejected by later independently
-        signed broker and risk checks; never silently turn it into another order.
-        Existing absolute demo cap remains a separate execution safety bound.
-        """
-        self._sizing_record = {}
+        """Keep GPT-6's quantity and tier unchanged; record guideline context."""
         proposed = plan.get("contracts")
-        if type(proposed) is not int or not 1 <= proposed <= self._hard_contract_cap():
-            return plan
-        self._sizing_record = {
-            "policy": "btc-demo-model-selected-size-v1",
-            "model_proposed_contracts": proposed,
-            "selected_contracts": proposed,
-            "model_selected_leverage": plan.get("leverage"),
-            "quantity_auto_reduced": False,
-        }
+        self._sizing_record = {}
+        if type(proposed) is int and 1 <= proposed <= self._hard_contract_cap():
+            self._sizing_record = size_guideline_evidence(
+                plan, getattr(self, "_tier_preview", None), account="BTC")
         return plan
 
     def _entry_sizing_record(self):
@@ -190,8 +181,10 @@ class AutoBTCController(SupervisedBTCController):
         if type(size) is not int or not 1 <= size <= self._hard_contract_cap():
             from tradebot.fire_risk import RiskRejected
             raise RiskRejected("Unsupported autonomous BTC demo size")
+        if plan.get("leverage") != FIXED_LEVERAGE:
+            from tradebot.fire_risk import RiskRejected
+            raise RiskRejected("Autonomous BTC requires owner-selected fixed 20x")
         return assess_fire_plan(
-            plan, budget, quote, limits=FireRiskLimits(
                 max_contracts=self._hard_contract_cap(),
                 equity_risk_fraction=None,
                 minimum_net_reward_risk=None,
@@ -205,6 +198,10 @@ class AutoBTCController(SupervisedBTCController):
             "max_contracts_per_entry": MAX_AUTONOMOUS_LARGE_CONTRACTS,
             "one_attempt_operator_supervision_required": False,
             "daily_attempt_cap_enabled": False,
+            "fixed_leverage": FIXED_LEVERAGE,
+            "equity_notional_tiers": {"small": "0.05", "medium": "0.20",
+                                      "large": "0.40"},
+            "broker_margin_cap_fraction": "0.20",
         }
 
 
