@@ -91,6 +91,56 @@ class ReconciliationTests(unittest.TestCase):
             self.assertEqual(report["reconciliation_reason"], reason)
         return report
 
+    def _add_signed_foreign_fill(self, *, oid=900, fill_id="foreign-fill", at=5):
+        foreign=deepcopy(self.broker.fills[0])
+        foreign.update(id=fill_id, order_id=oid,
+                       created_at=BASE+at*1_000_000)
+        self.broker.fills.append(foreign)
+
+    def test_foreign_signed_fee_posted_during_trade_does_not_corrupt_pnl(self):
+        self._add_signed_foreign_fill()
+        self.broker.postings.append(self.broker.posting(
+            "foreign-fee", "commission", "-0.3", 45,
+            order_id=900, fill_id="foreign-fill"))
+        report=self.run_report()
+        self.assertEqual(report["net_realized_pnl_usd"], "0.075")
+        self.assertTrue(report["is_net_realized_pnl"])
+        self.assertNotIn("foreign-fee", report["matched_posting_ids"])
+
+    def test_foreign_fill_identity_alias_alone_can_prove_foreign_fee(self):
+        self._add_signed_foreign_fill()
+        self.broker.postings.append(self.broker.posting(
+            "foreign-fee", "commission", "-0.3", 45,
+            fill_id="foreign-fill"))
+        self.assertEqual(self.run_report()["net_realized_pnl_usd"], "0.075")
+
+    def test_unknown_foreign_order_during_lifecycle_stays_unverified(self):
+        self.broker.postings.append(self.broker.posting(
+            "ambiguous", "commission", "-0.3", 45, order_id=900))
+        self.assert_unknown("overlapping_external_postings")
+
+    def test_cross_referenced_foreign_order_fill_mismatch_stays_blocked(self):
+        self._add_signed_foreign_fill()
+        self._add_signed_foreign_fill(oid=901,fill_id="foreign2",at=6)
+        self.broker.postings.append(self.broker.posting(
+            "ambiguous","commission","-0.3",45,
+            order_id=900,fill_id="foreign2"))
+        self.assert_unknown("overlapping_external_postings")
+
+    def test_foreign_signed_funding_during_lifecycle_is_not_ignored(self):
+        self._add_signed_foreign_fill()
+        self.broker.postings.append(self.broker.posting(
+            "foreign-funding", "funding", "-0.3", 45,
+            order_id=900, fill_id="foreign-fill"))
+        self.assert_unknown("overlapping_external_postings")
+
+    def test_signed_foreign_fill_inside_position_window_stays_blocked(self):
+        self._add_signed_foreign_fill(at=45)
+        self.broker.postings.append(self.broker.posting(
+            "foreign-fee","commission","-0.3",45,
+            order_id=900,fill_id="foreign-fill"))
+        self.assert_unknown("overlapping_external_fills")
+
     def test_long_round_trip_includes_partial_fills_fees_and_funding(self):
         report = self.run_report()
         self.assertEqual(report["net_realized_pnl_usd"], "0.075", report)
