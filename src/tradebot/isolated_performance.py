@@ -234,6 +234,14 @@ def _overlap_evidence_summary(trade, product, fills, postings):
             "overlapping_same_product_postings": len(overlap),
             "explicitly_referenced_unattributed": len(explicit),
             "unreferenced": len(overlap)-len(explicit),
+            "present_order_references": sum(
+                p["order_id"] is not None for p in explicit),
+            "present_fill_references": sum(
+                p["fill_id"] is not None for p in explicit),
+            "known_foreign_order_references": sum(
+                p["order_id"] in other_orders for p in explicit),
+            "known_foreign_fill_references": sum(
+                p["fill_id"] in other_fills for p in explicit),
             "unmatched_order_references": sum(
                 p["order_id"] is not None and p["order_id"] not in other_orders
                 for p in explicit),
