@@ -28,12 +28,23 @@ _GOLD_PROMPT = (
     "Use only supplied price, order book, volume, trend, ATR, VWAP and "
     "historical market data. Missing, stale or contradictory evidence is "
     "unknown, not bullish or bearish proof. "
-    "Return exactly one JSON object with keys direction, leverage, contracts, "
-    "stop_loss, take_profit and thesis. Direction is WAIT, LONG or SHORT. "
+    "Return exactly one JSON object with direction, leverage, contracts, "
+    "stop_loss, take_profit, thesis, and size_tier (small, medium, or large). "
+    "For autonomous Gold DEMO use fixed 20x leverage. YOU select size_tier "
+    "and the actual whole-contract quantity using market confidence, ATR, "
+    "stop distance and broker verified affordability. The small, medium, "
+    "large guidelines target 5%, 20%, 40% of equity as POSITION NOTIONAL; "
+    "they are NOT mandatory or hardcoded contract assignments. Use "
+    "fire_execution_scope.notional_per_contract_usd to estimate size. "
+    "The engine does not adjust your chosen contracts. "
+    "Whole contracts, independent account exposure, max 20% equity as "
+    "initial margin and exact attached SL/TP remain mandatory. "
+    "Direction is WAIT, LONG or SHORT. "
     "For WAIT set contracts=0, leverage=null, stop_loss=null and "
     "take_profit=null. For directional candidates use integer contracts "
     "no larger than fire_execution_scope.max_contracts_per_entry and "
-    "integer leverage 1..20. Stop-loss and take-profit must bracket current "
+    "integer leverage exactly 20 for this isolated autonomous worker. "
+    "Stop-loss and take-profit must bracket current "
     "bid/ask in the correct direction and use the broker product tick_size. "
     "Require absolute(executable_entry-stop_loss) <= "
     "absolute(take_profit-executable_entry): best_ask for LONG, "
@@ -65,7 +76,8 @@ def validate_gold_isolated_snapshot(snapshot, *, now=None):
             or scope.get("market_data_verified") is not True
             or scope.get("trade_authorized") is not False
             or type(scope.get("max_contracts_per_entry")) is not int
-            or not 1 <= scope["max_contracts_per_entry"] <= 6):
+            or not 1 <= scope["max_contracts_per_entry"] <= (
+                64 if scope.get("fixed_leverage") == 20 else 6)):
         raise PlanError("Gold isolated broker and market prerequisites unavailable")
     observed = snapshot.get("collected_at")
     if not isinstance(observed, str):
@@ -112,7 +124,8 @@ def run_gold_deepseek_probe(routes, snapshot_loader,
         "Never return WAIT; choose the better supported LONG or SHORT. "
         "Choose integer contract quantity independently from evidence, "
         "volatility and the supplied broker affordability limit. "
-        "No confidence-based contract allocation tiers or silent resizing. "
+        "Use the small/medium/large guidelines to select your own quantity; "
+        "no automatic allocation or silent resizing is applied. "
         "The demo safety cap and signed margin affordability still apply. "
         "Chart-selected stop and target must be tick aligned and the "
         "gross target distance must be >= stop distance from the "
