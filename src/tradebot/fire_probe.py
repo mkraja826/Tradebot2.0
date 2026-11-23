@@ -38,7 +38,7 @@ INSTRUCTION = (
 
 
 RESTRICTED_BTC_INSTRUCTION = (
-    "This is one supervised BTCUSD Delta India DEMO attempt using exactly "
+    "This is one restricted BTCUSD Delta India DEMO attempt using exactly "
     "the last 24 hours of 5-minute local market history, not month or week "
     "highs/lows. The supplied 24h history is provisionally validated locally "
     "but not independently trade-price authenticated; when evidence is "
