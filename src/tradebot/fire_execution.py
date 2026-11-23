@@ -509,7 +509,7 @@ class FireDemoController:
             stage = "model_decision"
             if "decision" not in raw:
                 self.store.update(press, "rejected_no_order", model_latency_ms=raw.get("latency_ms"),
-                                  reason_code=decision_failure_code(raw.get("error")),
+                                  reason_code=decision_failure_code(raw.get("error"), stage=raw.get("error_stage")),
                                   orders_submitted=False, protection_verified=False)
                 return
             plan = validate(raw["decision"], snapshot["core"], require_leverage=True)
