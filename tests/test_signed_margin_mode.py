@@ -35,6 +35,92 @@ class SignedMarginEvidenceTests(unittest.TestCase):
     def setUp(self):
         self.broker = FakeBroker()
 
+    def test_parent_signed_roster_proves_exact_child_only(self):
+        from unittest.mock import patch
+        parent = FakeBroker()
+        parent.user = 77
+        parent.preference_response = {"result": {"user_id": 77}}
+        parent.account_response = {"result": [
+            {"id": 501, "account_name": "BTC", "margin_mode": "isolated"},
+            {"id": 502, "account_name": "Gold", "margin_mode": "isolated"},
+        ]}
+        self.broker.account_response = {"result": []}
+        with patch.dict("os.environ",
+                        {"TRADEBOT_EXPECTED_DEMO_SUBACCOUNT": "BTC"}):
+            self.assertEqual(
+                signed_account_margin_mode(
+                    self.broker, parent_exchange=parent), "isolated")
+        self.assertEqual(len(self.broker.calls), 1)
+        self.assertEqual(len(parent.calls), 2)
+        self.assertTrue(all(row[0] == "GET" and row[2] is True
+                            for row in self.broker.calls + parent.calls))
+
+    def test_parent_other_subaccount_never_certifies_child(self):
+        from unittest.mock import patch
+        parent = FakeBroker()
+        parent.preference_response = {"result": {"user_id": 77}}
+        parent.account_response = {"result": [
+            {"id": 502, "account_name": "BTC", "margin_mode": "isolated"}]}
+        self.broker.account_response = {"result": []}
+        with patch.dict("os.environ",
+                        {"TRADEBOT_EXPECTED_DEMO_SUBACCOUNT": "BTC"}):
+            with self.assertRaisesRegex(
+                    MarginModeEvidenceError,
+                    "signed_child_not_in_parent_roster"):
+                signed_account_margin_mode(
+                    self.broker, parent_exchange=parent)
+
+    def test_parent_market_label_and_nonisolated_modes_rejected(self):
+        from unittest.mock import patch
+        parent = FakeBroker()
+        parent.preference_response = {"result": {"user_id": 77}}
+        self.broker.account_response = {"result": []}
+        for label, mode, reason in (
+            ("Gold", "isolated", "signed_subaccount_market_label_mismatch"),
+            ("BTC", "portfolio", None),
+            ("BTC", "cross", None),
+        ):
+            parent.account_response = {"result": [
+                {"id": 501, "account_name": label, "margin_mode": mode}]}
+            with self.subTest(label=label, mode=mode):
+                with patch.dict("os.environ",
+                                {"TRADEBOT_EXPECTED_DEMO_SUBACCOUNT": "BTC"}):
+                    if reason:
+                        with self.assertRaisesRegex(MarginModeEvidenceError, reason):
+                            signed_account_margin_mode(
+                                self.broker, parent_exchange=parent)
+                    else:
+                        self.assertEqual(signed_account_margin_mode(
+                            self.broker, parent_exchange=parent), mode)
+
+    def test_signed_child_direct_mode_must_match_parent(self):
+        parent = FakeBroker()
+        parent.preference_response = {"result": {"user_id": 77}}
+        parent.account_response = {"result": [
+            {"id": 501, "margin_mode": "isolated"}]}
+        self.broker.preference_response = {
+            "result": {"user_id": 501, "margin_mode": "cross"}}
+        with self.assertRaisesRegex(
+                MarginModeEvidenceError,
+                "signed_child_parent_margin_mode_conflict"):
+            signed_account_margin_mode(
+                self.broker, parent_exchange=parent)
+
+    def test_parent_must_be_distinct_readonly_demo(self):
+        parent = FakeBroker()
+        parent.preference_response = {"result": {"user_id": 501}}
+        self.broker.account_response = {"result": []}
+        with self.assertRaisesRegex(
+                MarginModeEvidenceError, "signed_parent_must_be_distinct"):
+            signed_account_margin_mode(
+                self.broker, parent_exchange=parent)
+        parent.preference_response = {"result": {"user_id": 77}}
+        parent.allow_orders = True
+        with self.assertRaisesRegex(
+                MarginModeEvidenceError, "signed_parent_readonly_demo_required"):
+            signed_account_margin_mode(
+                self.broker, parent_exchange=parent)
+
     def test_two_signed_reads_match_exact_user_id(self):
         result = signed_account_margin_mode(self.broker)
         self.assertEqual(result, "isolated")
