@@ -21,34 +21,12 @@ from tradebot.fire_account_guard import AccountExposureRejected
 from tradebot.btc_autonomous_demo import signed_active_trade_skip
 from tradebot.gold_autonomous_readiness import gold_preflight
 
-[redacted potentially sensitive output]
+# Historical arm token deliberately stays unchanged: rotating this secret
 # would unexpectedly disarm an already-approved isolated DEMO worker.
 ARM_CONTENT = "DELTA-INDIA-DEMO:XAUTUSD:DEEPSEEK:UNATTENDED:30MIN-MAX48-DYNAMIC6"
 MIN_INTERVAL=5*60
 POLL_SECONDS=300
 TERMINAL_SAFE={"rejected_no_order","flat_verified"}
-SAFE_NO_ORDER_REASONS = frozenset((
-    "risk_governor_failed", "autonomous_invalid_wait",
-    "market_quality_failed", "provider_network_error"))
-
-
-def _no_durable_intent(root, press):
-    """A retryable AI-provider failure must predate any durable broker POST."""
-    file = Path(root)/"fire-xaut.sqlite"
-    if type(press) is not str or not press or file.is_symlink() or not file.is_file():
-        return False
-    try:
-        with closing(sqlite3.connect(
-                file.absolute().as_uri()+"?mode=ro",uri=True,timeout=3)) as db:
-            db.execute("PRAGMA query_only=ON")
-            if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' "
-                              "AND name='fire_entries'").fetchone():
-                return False
-            return db.execute("SELECT 1 FROM fire_entries WHERE press=? LIMIT 1",
-                              (press,)).fetchone() is None
-    except (sqlite3.Error, ValueError, OSError, TypeError):
-        return False
-
 
 
 def gold_arm_path():
@@ -122,27 +100,29 @@ def receipts_safe(root):
                 "SELECT DISTINCT status FROM fire_requests").fetchall()
             if any(v[0] not in TERMINAL_SAFE for v in values):
                 return False
-            row=db.execute("SELECT press,status,result FROM fire_requests "
+            row=db.execute("SELECT status,result FROM fire_requests "
                 "ORDER BY created_at DESC,rowid DESC LIMIT 1").fetchone()
             if row is None:return True
-            detail=json.loads(row[2])
+            detail=json.loads(row[1])
             if not isinstance(detail,dict):return False
-            if row[1]=="rejected_no_order":
+            if row[0]=="rejected_no_order":
                 # A *documented* no-order rejection may be revisited on the
                 # next normal interval, after a fresh broker-wide flatness
                 # check. It is never treated as evidence of a protected fill.
                 # Unknown/ambiguous outcomes remain blocked.
                 return (detail.get("orders_submitted") is False
                     and detail.get("protection_verified") is False
-                    and detail.get("reason_code") in SAFE_NO_ORDER_REASONS
-                    and (detail.get("reason_code") != "provider_network_error"
-                         or _no_durable_intent(root,row[0])))
+                    and detail.get("reason_code") in (
+                        "risk_governor_failed",
+                        "autonomous_invalid_wait",
+                        "market_quality_failed"))
             # Broker-signed watchdog closed an ordinarily protected trade.
             # In a naturally flat terminal receipt, attached protection is
             # no longer active, so do not require protection_verified=True.
-            return (row[1]=="flat_verified"
+            return (row[0]=="flat_verified"
                 and detail.get("reason_code") not in (
-                    "emergency_flat_verified",                    "execution_or_protection_unverified"))
+                    "emergency_flat_verified",
+                    "execution_or_protection_unverified"))
     except (sqlite3.Error,OSError,ValueError,TypeError):
         return False
 
@@ -230,9 +210,9 @@ def run_once(data_dir,*,instant=None,armed=is_gold_armed,candidate=check_candida
             status == "rejected_no_order"
             and receipt.get("orders_submitted") is False
             and receipt.get("protection_verified") is False
-            and receipt.get("reason_code") in SAFE_NO_ORDER_REASONS
-            and (receipt.get("reason_code") != "provider_network_error"
-                 or _no_durable_intent(root,attempt)))
+            and receipt.get("reason_code") in (
+                "risk_governor_failed", "autonomous_invalid_wait",
+                "market_quality_failed"))
         if ((status not in TERMINAL_SAFE and not protected)
                 or (status=="rejected_no_order" and not safe_no_order)
                 or emergency):
