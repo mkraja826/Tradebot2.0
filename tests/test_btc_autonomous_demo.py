@@ -43,12 +43,17 @@ class AutoTests(unittest.TestCase):
         path.write_text("delta-live")
         self.assertFalse(is_armed(path))
 
-    def test_capped_daily_attempts_and_four_hour_gap(self):
-        self.assertIsNotNone(claim_attempt(self.root,NOW))
-        self.assertIsNone(claim_attempt(self.root,NOW+timedelta(hours=1)))
-        self.assertIsNotNone(claim_attempt(self.root,NOW+timedelta(hours=4)))
-        self.assertIsNone(claim_attempt(self.root,NOW+timedelta(hours=8)))
-        self.assertIsNotNone(claim_attempt(self.root,NOW+timedelta(days=1)))
+    def test_capped_daily_attempts_and_thirty_minute_gap(self):
+        start=NOW.replace(hour=0)
+        self.assertIsNotNone(claim_attempt(self.root,start))
+        self.assertIsNone(claim_attempt(self.root,start+timedelta(minutes=29)))
+        self.assertIsNotNone(claim_attempt(self.root,start+timedelta(minutes=30)))
+        for i in range(2,48):
+            self.assertIsNotNone(claim_attempt(
+                self.root,start+timedelta(minutes=30*i)))
+        self.assertIsNone(claim_attempt(
+            self.root,start+timedelta(hours=23,minutes=59)))
+        self.assertIsNotNone(claim_attempt(self.root,start+timedelta(days=1)))
 
     def test_dry_run_makes_no_reservation(self):
         value=run_once(self.root,instant=NOW,armed=lambda:True,
@@ -76,18 +81,48 @@ class AutoTests(unittest.TestCase):
         self.assertEqual(second["status"],"halted_pending_operator_review")
         self.assertEqual(runner.starts,1)
 
-    def test_wait_consumes_budget_without_forcing_trade(self):
+    def test_wait_consumes_slot_then_retries_after_thirty_minutes(self):
         runner=self.fake()
-        for instant in (NOW,NOW+timedelta(hours=4)):
+        for instant in (NOW,NOW+timedelta(minutes=30)):
             result=run_once(self.root,instant=instant,armed=lambda:True,
                             candidate=lambda x:True,receipts_safe=lambda x:True,do_execute=True,
                             controller_factory=runner)
             self.assertEqual(result["result"],"rejected_no_order")
-        last=run_once(self.root,instant=NOW+timedelta(hours=8),
-                      armed=lambda:True,candidate=lambda x:True,receipts_safe=lambda x:True,
-                      do_execute=True,controller_factory=runner)
-        self.assertEqual(last["status"],"daily_or_interval_budget_exhausted")
+            self.assertFalse(result["orders_submitted"])
+        skipped=run_once(self.root,instant=NOW+timedelta(minutes=59),
+                          armed=lambda:True,candidate=lambda x:True,receipts_safe=lambda x:True,
+                          do_execute=True,controller_factory=runner)
+        self.assertEqual(skipped["status"],"daily_or_interval_budget_exhausted")
         self.assertEqual(runner.starts,2)
+
+    def test_signed_active_position_skips_without_charging_or_model(self):
+        runner=self.fake()
+        skipped=run_once(self.root,instant=NOW,armed=lambda:True,
+                         candidate=lambda x:False,receipts_safe=lambda x:True,
+                         active_trade_probe=lambda x:True,
+                         do_execute=True,controller_factory=runner)
+        self.assertEqual(skipped["status"],"skipped_active_trade")
+        self.assertIsNotNone(claim_attempt(self.root,NOW))
+        self.assertEqual(runner.starts,0)
+
+    def test_unsigned_broker_error_not_misreported_as_open_trade(self):
+        from tradebot.btc_autonomous_demo import signed_active_trade_skip
+        from tradebot.fire_account_guard import AccountExposureRejected
+        from tradebot.delta import DEMO_API
+        class Client:
+            base_url=DEMO_API
+            allow_orders=False
+        broker=lambda **kwargs:Client()
+        def missing(client):
+            raise AccountExposureRejected("Account-wide positions unverified")
+        def opened(client):
+            raise AccountExposureRejected("Account has open exposure")
+        self.assertIsNone(signed_active_trade_skip(
+            self.root,broker_factory=broker,exposure_check=missing))
+        self.assertTrue(signed_active_trade_skip(
+            self.root,broker_factory=broker,exposure_check=opened))
+        self.assertFalse(signed_active_trade_skip(
+            self.root,broker_factory=broker,exposure_check=lambda b:None))
 
     def test_ambiguous_execution_halts_and_never_retries(self):
         class Uncertain:
@@ -120,22 +155,22 @@ class AutoTests(unittest.TestCase):
         p.symlink_to(other)
         self.assertFalse(is_armed(p))
 
-    def test_bounded_autonomous_two_contract_ceiling_preserves_supervised_one(self):
+    def test_bounded_autonomous_three_contract_ceiling_preserves_supervised_one(self):
         from tradebot.btc_autonomous_demo import AutoBTCController
         from tradebot.btc_supervised_execution import SupervisedBTCController
         bot=AutoBTCController(self.root/"fire-ops.sqlite")
         supervised=SupervisedBTCController(self.root/"supervised.sqlite")
         self.assertFalse(bot.enabled)
-        self.assertEqual(bot._hard_contract_cap(),2)
+        self.assertEqual(bot._hard_contract_cap(),3)
         self.assertEqual(supervised._hard_contract_cap(),1)
         self.assertEqual(bot._max_contracts_for_entry(
-            {"max_contracts_per_entry":40}),2)
+            {"max_contracts_per_entry":40}),3)
         self.assertEqual(bot._max_contracts_for_entry(
             {"max_contracts_per_entry":0}),0)
         scope=bot._additional_fire_scope()
-        self.assertEqual(scope["max_contracts_per_entry"],2)
+        self.assertEqual(scope["max_contracts_per_entry"],3)
         self.assertTrue(scope["unattended_demo_mode"])
-        self.assertEqual(scope["max_new_order_attempts_per_utc_day"],2)
+        self.assertEqual(scope["max_new_order_attempts_per_utc_day"],48)
 
     def test_client_preflight_rejects_missing_margin_owner_verification(self):
         from tradebot.btc_autonomous_demo import check_candidate
