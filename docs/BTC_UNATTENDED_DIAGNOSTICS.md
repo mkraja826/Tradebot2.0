@@ -112,3 +112,30 @@ policy string `DELTA-INDIA-DEMO:BTCUSD:UNATTENDED:30MIN-MAX48-UTC-DAY`.
 Replacing the old 2/day arm requires an archived, mode-0600 prior file and a
 fresh signed read-only preflight. Never delete attempt history or change
 broker settings to force eligibility.
+
+
+## Directional-only autonomous GPT-6 decisions
+
+For the BTCUSD Delta India DEMO 30-minute autonomous worker, GPT-6 must
+return a LONG or SHORT directional candidate and choose a confidence tier
+(1, 2, or 3 contracts). On mixed evidence it is asked to choose the
+comparatively better-supported side with one exploratory contract; it
+must not invent missing market readings or executable exit prices.
+The original model WAIT action remains supported in supervised FIRE.
+
+An autonomous GPT-6 response containing WAIT is a protocol error, not an
+entry or a substitute order: a bounded reason code, autonomous_invalid_wait,
+is stored with no broker POST. The worker halts on that unexpected response
+for review instead of retrying invalid model output or placing arbitrary
+directional orders.
+
+This does not guarantee a broker entry every 30 minutes. Signed
+flatness/account proof, daily equity guard, local 24h history, market
+quality, acceptable leverage, broker wallet/margin and risk budget,
+real-time tick-size stop/target, liquidation buffers and protective
+bracket verification can independently refuse execution. A known open
+position/order is skipped without consuming an AI attempt.
+
+The policy may increase the number of directional DEMO trades relative to
+a strategy that permits WAIT. This is an experimental risk choice, not
+an established statistical trading edge.

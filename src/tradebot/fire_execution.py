@@ -427,6 +427,10 @@ class FireDemoController:
         """Default FIRE never adjusts an independently validated model plan."""
         return plan
 
+    def _allow_wait_choice(self):
+        """Manual/supervised modes retain the legitimate no-entry model action."""
+        return True
+
     def _entry_sizing_record(self):
         """Normal/supervised FIRE receipts have no experimental sizing tier."""
         return {}
@@ -548,9 +552,13 @@ class FireDemoController:
                     orders_submitted=False, protection_verified=False)
                 return
             if plan["direction"] == "WAIT":
+                # The autonomous policy rejects a neutral model response even
+                # if a stub or replay bypassed the GPT-6 prompt validator.
+                # There is no fabricated broker entry or fallback order.
                 self.store.update(
                     press, "rejected_no_order", model_latency_ms=raw.get("latency_ms"),
-                    reason_code="gpt6_wait_no_trade",
+                    reason_code=("gpt6_wait_no_trade" if self._allow_wait_choice()
+                                 else "autonomous_invalid_wait"),
                     thesis=str(raw.get("thesis") or raw["decision"].get("thesis") or "")[:350],
                     orders_submitted=False, protection_verified=False)
                 return

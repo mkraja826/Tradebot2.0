@@ -194,6 +194,32 @@ class FireExecutionTests(unittest.TestCase):
         desk.archive = ValidArchive()
         return desk
 
+    def test_autonomous_wait_cannot_create_a_broker_order_even_if_probe_replayed(self):
+        wait = {"direction": "WAIT", "contracts": 0, "leverage": None,
+                "stop_loss": None, "take_profit": None,
+                "thesis": "Market evidence insufficient"}
+        fire = self.make(plan=wait)
+        fire._allow_wait_choice = lambda: False
+        accepted, _ = fire.start()
+        self.assertTrue(accepted)
+        receipt = fire.snapshot()
+        self.assertEqual(receipt["status"], "rejected_no_order")
+        self.assertEqual(receipt["reason_code"], "autonomous_invalid_wait")
+        self.assertFalse(receipt["orders_submitted"])
+        self.assertFalse(receipt["protection_verified"])
+        self.assertEqual(self.exchange.requests, [])
+
+    def test_supervised_wait_remains_a_valid_no_order_decision(self):
+        wait = {"direction": "WAIT", "contracts": 0, "leverage": None,
+                "stop_loss": None, "take_profit": None,
+                "thesis": "Market evidence insufficient"}
+        fire = self.make(plan=wait)
+        accepted, _ = fire.start()
+        self.assertTrue(accepted)
+        self.assertEqual(fire.snapshot()["reason_code"], "gpt6_wait_no_trade")
+        self.assertFalse(fire.snapshot()["orders_submitted"])
+        self.assertEqual(self.exchange.requests, [])
+
     def test_one_click_posts_one_order_and_verifies_both_protective_stops(self):
         fire = self.make()
         accepted, _ = fire.start()

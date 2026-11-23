@@ -74,6 +74,81 @@ class FireProbeTest(unittest.TestCase):
         self.assertEqual(second["contracts"], 0)
         self.assertEqual(second["thesis"], wait["thesis"])
 
+    def test_autonomous_direction_policy_rejects_wait_without_retry(self):
+        from tradebot.fire_probe import AUTONOMOUS_BTC_DIRECTION_INSTRUCTION
+        self.assertIn("Direction must be LONG or SHORT", AUTONOMOUS_BTC_DIRECTION_INSTRUCTION)
+        observed = []
+        response = {
+            "direction": "WAIT", "contracts": 0, "leverage": None,
+            "stop_loss": None, "take_profit": None,
+            "thesis": "No appropriate entry",
+        }
+
+        class Client:
+            last_request_id = None
+            def _call(self, url, *, body=None, timeout):
+                if body is None:
+                    return {"data": [{"id": ROLES["fire"]}]}
+                observed.append(body)
+                return {"choices": [{"message": {"content": json.dumps(response)},
+                                     "finish_reason": "stop"}]}
+
+        # Mock only the instruction's original-local-history prerequisite;
+        # production still validates the true signed historical context.
+        snap = {
+            "core": CORE, "collected_at": "example",
+            "fire_execution_scope": {
+                "unattended_demo_mode": True,
+                "dynamic_leverage_enabled": True,
+            },
+        }
+        with patch("tradebot.fire_probe.instruction_for_snapshot",
+                   return_value=AUTONOMOUS_BTC_DIRECTION_INSTRUCTION):
+            report = run_probe(ROLES, lambda: snap, Client)
+        self.assertEqual(len(observed), 1)
+        result = report["results"]["fire"]
+        self.assertNotIn("decision", result)
+        self.assertEqual(result["error_stage"], "validation")
+        self.assertEqual(decision_failure_code(
+            result["error"], stage=result["error_stage"]),
+            "autonomous_invalid_wait")
+        self.assertNotIn("No appropriate entry", str(result))
+
+    def test_autonomous_direction_policy_accepts_valid_long_and_short(self):
+        observed = []
+        class Client:
+            last_request_id = None
+            def _call(self, url, *, body=None, timeout):
+                if body is None:
+                    return {"data": [{"id": ROLES["fire"]}]}
+                observed.append(body)
+                return {"choices": [{"message": {"content": json.dumps(body_plan)},
+                                     "finish_reason": "stop"}]}
+
+        snap = {
+            "core": CORE, "collected_at": "example",
+            "fire_execution_scope": {
+                "unattended_demo_mode": True,
+                "dynamic_leverage_enabled": True,
+            },
+        }
+        for body_plan in (
+            {"direction": "LONG", "contracts": 1, "leverage": 3,
+             "stop_loss": 95, "take_profit": 109,
+             "thesis": "Test directional candidate"},
+            {"direction": "SHORT", "contracts": 1, "leverage": 3,
+             "stop_loss": 109, "take_profit": 95,
+             "thesis": "Test directional candidate"},
+        ):
+            with self.subTest(direction=body_plan["direction"]), patch(
+                    "tradebot.fire_probe.instruction_for_snapshot",
+                    return_value="long or short only"):
+                response = run_probe(ROLES, lambda: snap, Client)
+            self.assertEqual(
+                response["results"]["fire"]["decision"]["direction"],
+                body_plan["direction"])
+        self.assertEqual(len(observed), 2)
+
     def test_single_fenced_object_still_requires_valid_finished_decision(self):
         choice = {"message": {"content": "```json\n" + json.dumps(PLAN) + "\n```"}, "finish_reason":"stop"}
         self.assertEqual(validate(decision_payload(choice), CORE)["contracts"], 2)

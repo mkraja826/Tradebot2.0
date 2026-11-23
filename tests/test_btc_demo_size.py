@@ -211,7 +211,8 @@ class DemoSizeTests(unittest.TestCase):
         }
         prompt = instruction_for_snapshot(obj)
         self.assertIn("at most three contracts per attempt",prompt)
-        self.assertIn("still require WAIT",prompt)
+        self.assertIn("Direction must be LONG or SHORT",prompt)
+        self.assertNotIn("Direction must be WAIT, LONG or SHORT",prompt)
         with self.assertRaises(PlanError):
             instruction_for_snapshot({
                 **obj,"fire_execution_scope":{
