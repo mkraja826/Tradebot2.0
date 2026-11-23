@@ -43,6 +43,60 @@ class AutoTests(unittest.TestCase):
         path.write_text("delta-live")
         self.assertFalse(is_armed(path))
 
+    def test_main_arm_never_authorizes_isolated_btc(self):
+        from unittest.mock import patch
+        from tradebot.btc_autonomous_demo import arm_path
+        with patch.dict("os.environ", {}, clear=False):
+            with patch.dict("os.environ",
+                            {"TRADEBOT_EXPECTED_DEMO_SUBACCOUNT": "BTC"}):
+                self.assertEqual(arm_path().name,
+                                 "btc-isolated-autonomous-armed")
+            with patch.dict("os.environ",
+                            {"TRADEBOT_EXPECTED_DEMO_SUBACCOUNT": "GOLD"}):
+                self.assertEqual(arm_path().name, "btc-auto-demo-armed")
+
+    def test_isolated_account_uses_signed_flatness_not_main_owner_attestation(self):
+        from unittest.mock import patch
+        from tradebot.btc_autonomous_demo import AutoBTCController
+        b = AutoBTCController(self.root / "fire-ops.sqlite")
+        with patch("tradebot.btc_autonomous_demo.is_armed",
+                   return_value=True):
+            with patch("tradebot.btc_autonomous_demo.signed_isolated_margin_proven",
+                       return_value=True):
+                with patch("tradebot.btc_autonomous_demo.require_flat_demo_account",
+                           return_value={"account_flat_verified": True}) as signed:
+                    with patch.dict("os.environ",
+                                    {"TRADEBOT_EXPECTED_DEMO_SUBACCOUNT": "BTC"}):
+                        result = b._require_account_flat(object(), 84)
+                    self.assertTrue(result["account_flat_verified"])
+                    self.assertEqual(signed.call_args.kwargs["selected_symbol"], "BTCUSD")
+                    self.assertEqual(signed.call_args.kwargs["selected_product_id"], 84)
+                    with patch.dict("os.environ",
+                                    {"TRADEBOT_EXPECTED_DEMO_SUBACCOUNT": "GOLD"}):
+                        with self.assertRaisesRegex(ValueError, "isolated_scope_required"):
+                            b._require_account_flat(object(), 84)
+
+    def test_isolated_btc_candles_are_shared_not_equity_receipts(self):
+        from unittest.mock import patch
+        from tradebot.btc_autonomous_demo import AutoBTCController
+        private = self.root / "btc-isolated"
+        private.mkdir()
+        b = AutoBTCController(private / "fire-ops.sqlite")
+        context = {"technical_5m": {"ema": 1}}
+        levels = {"as_of": 42}
+        with patch("tradebot.btc_autonomous_demo.load_recent24h_strategy_context",
+                   return_value=(context, levels)) as loader:
+            self.assertEqual(
+                b._decision_context(object(), NOW, 61_000),
+                context)
+        self.assertEqual(loader.call_args.args[0], self.root)
+        self.assertEqual(b._restricted_levels, levels)
+        with patch("tradebot.btc_autonomous_demo.load_recent24h_strategy_context") as loader:
+            another = AutoBTCController(self.root / "fire-ops.sqlite")
+            with self.assertRaisesRegex(ValueError, "private_data_scope_required"):
+                another._decision_context(object(), NOW, 61_000)
+            loader.assert_not_called()
+
     def test_capped_daily_attempts_and_thirty_minute_gap(self):
         start=NOW.replace(hour=0)
         self.assertIsNotNone(claim_attempt(self.root,start))
