@@ -96,6 +96,7 @@ class NoOrderReviewTests(unittest.TestCase):
         self.assertTrue(halt.exists())
 
     def test_receipt_scoped_marker_rejects_mismatch_and_bad_permissions(self):
+        acknowledge(self.root, approval=APPROVAL, candidate=lambda root: True)
         self.insert("cccccccccccccccccccccccccccccccc")
         acknowledge(self.root, approval=APPROVAL, candidate=lambda root: True)
         marker = self.root / "btc-auto-reviewed-no-order-cccccccccccccccccccccccccccccccc.json"
