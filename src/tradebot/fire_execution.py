@@ -378,6 +378,10 @@ class FireDemoController:
         self.pause = pause
         self.spawn = spawn or (lambda f: Thread(target=f, daemon=True).start())
 
+    def _decision_model_id(self):
+        """Default BTC/manual FIRE remains GPT-6; only Gold overrides."""
+        return "tb-gpt-6"
+
     def _decision_context(self, exchange, collected, midpoint):
         """Normal FIRE uses its existing independent provider context."""
         return decision_context(exchange, self.store, self.symbol,
@@ -475,7 +479,7 @@ class FireDemoController:
         submitted = False
         exchange = None
         try:
-            self.store.update(press, "reasoning", model="tb-gpt-6",
+            self.store.update(press, "reasoning", model=self._decision_model_id(),
                               orders_submitted=False, protection_verified=False)
             stage = "portfolio_entry_reservation"
             if not self.portfolio_reservation.claim(self.symbol, press, self.path):
