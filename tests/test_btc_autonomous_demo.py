@@ -140,6 +140,7 @@ class AutoTests(unittest.TestCase):
         bot = AutoBTCController(self.root / "fire-ops.sqlite")
         self.assertIs(type(bot.equity_guard), SupervisedSessionEquityGuard)
         self.assertTrue(bot.equity_guard.allow_daily_loss_warning)
+        self.assertTrue(bot.equity_guard.allow_portfolio_loss_warnings)
         self.assertFalse((self.root / "btc-auto-demo.sqlite").exists())
 
     def test_daily_only_collector_warning_does_not_hide_broker_failure(self):
