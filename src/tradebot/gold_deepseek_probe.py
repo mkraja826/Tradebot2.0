@@ -117,6 +117,13 @@ def run_gold_deepseek_probe(routes, snapshot_loader,
         "Chart-selected stop and target must be tick aligned and the "
         "gross target distance must be >= stop distance from the "
         "executable ask for LONG or bid for SHORT. "
+        "Prefer a gross target distance at least 1.5 times the stop distance "
+        "when chart structure supports it, leaving buffer for quote movements "
+        "between decision and broker pre-order validation. Calculate both "
+        "distances explicitly using executable best_ask for LONG or "
+        "best_bid for SHORT and preserve correct tick alignment. "
+        "Do not invent distant chart targets merely to satisfy this "
+        "preference; broker's mandatory minimum 1:1 gate remains unchanged. "
         "Unknown or invalid market evidence is rejected by broker gates, "
         "not guessed by the model."
         if autonomous else "")
