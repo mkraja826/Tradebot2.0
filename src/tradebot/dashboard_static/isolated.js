@@ -92,7 +92,7 @@
     if (record.reason_code) row.append(make("small","iso-warning","Reason: "+record.reason_code));
     if (record.risk_rejection_detail)
       row.append(make("small","iso-warning","Risk detail: "+
-        String(record.risk_rejection_detail).replace(/_/g," "));
+        String(record.risk_rejection_detail).replace(/_/g," ")));
     return row;
   };
 
