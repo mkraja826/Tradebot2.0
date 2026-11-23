@@ -42,7 +42,34 @@ def dashboard(path, *, submit=False):
 def market_status(symbol: Market) -> dict:
     """Read the selected demo market quote, levels, account positions and latest FIRE receipt."""
     data = dashboard("/api/chart-desk?"+urlencode({"symbol":symbol,"period":"5m"}))
-    latest = dashboard("/api/fire" if symbol=="BTCUSD" else "/api/fire/XAUTUSD")
+    if symbol == "XAUTUSD":
+        # Gold autonomous orders belong to a separate signed DEMO child.
+        # Never display the parent/mixed-account Gold ledger as its history.
+        history = dashboard("/api/isolated/fire/XAUTUSD?page=0")
+        overview = dashboard("/api/isolated/overview")
+        if (history.get("source") != "gold_isolated_fire_receipts"
+                or overview.get("source") != "isolated_child_accounts"):
+            raise ValueError("Isolated Gold evidence unavailable")
+        account = (overview.get("accounts") or {}).get("GOLD")
+        if not isinstance(account, dict):
+            raise ValueError("Signed Gold subaccount unavailable")
+        rows = history.get("receipts")
+        if not isinstance(rows, list):
+            raise ValueError("Isolated Gold FIRE history unavailable")
+        return {
+            "symbol": symbol, "source": "gold_isolated_subaccount",
+            "quote": data.get("quote"),
+            "positions_and_exits": {"positions": account.get("positions"),
+                                    "exits": None},
+            "historical_levels": data.get("historical_levels"),
+            "latest_fire": rows[0] if rows else None,
+            "gold_worker_active": account.get("worker_active"),
+            "gold_halted": account.get("halted"),
+            "gold_account_status": account.get("status"),
+            "history_total": history.get("total"),
+            "account_checked_at": overview.get("checked_at"),
+        }
+    latest = dashboard("/api/fire")
     return {"symbol":symbol,"quote":data.get("quote"),"positions_and_exits":data.get("account"),
             "historical_levels":data.get("historical_levels"),"latest_fire":latest}
 
@@ -50,6 +77,11 @@ def market_status(symbol: Market) -> dict:
 @server.tool(annotations=READ)
 def fire_history(symbol: Market, page: Annotated[int, Field(ge=0,le=1000000)] = 0) -> dict:
     """List up to 40 historical Fire receipts, newest first, including rejected attempts."""
+    if symbol == "XAUTUSD":
+        data = dashboard("/api/isolated/fire/XAUTUSD?" + urlencode({"page": page}))
+        if data.get("source") != "gold_isolated_fire_receipts":
+            raise ValueError("Isolated Gold receipt source unavailable")
+        return data
     data = dashboard("/api/chart-desk?"+urlencode({"symbol":symbol,"page":page}))
     return {"symbol":symbol,"page":page,"receipts":data["trades"]}
 
@@ -93,6 +125,11 @@ def fire_demo(symbol: Market, fire_id: UUID) -> dict:
 def review_fire(symbol: Market, fire_id: UUID) -> dict:
     """Look up an exact Fire ID. Read its saved thesis, indicators, broker fill evidence and scorecard.
     A missing confirmed exit or net P&L means unknown. Compare trades by looking up both IDs."""
+    if symbol == "XAUTUSD":
+        report = dashboard(f"/api/isolated/review/XAUTUSD/{fire_id.hex}")
+        if report.get("source") != "gold_isolated_fire_receipts":
+            raise ValueError("Isolated Gold trade evidence unavailable")
+        return report
     return dashboard(f"/api/plugin/review/{symbol}/{fire_id.hex}")
 
 
