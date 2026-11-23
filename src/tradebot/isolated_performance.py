@@ -208,6 +208,47 @@ def _trade_distribution(trades, *, truncated=False):
     }
 
 
+def _overlap_evidence_summary(trade, product, fills, postings):
+    """Bounded reference counts only; never expose IDs, amounts or infer P&L."""
+    empty = {"status": "unavailable"}
+    try:
+        owned = {identifier(trade["broker_order_id"])} | {
+            identifier(x) for x in (trade.get("exit_order_ids") or {}).values()}
+        selected = [f for f in fills if f["order_id"] in owned]
+        if len(selected) < 2:
+            return empty
+        first, last = selected[0]["at_us"], selected[-1]["at_us"]
+        owned_fills = {f["id"] for f in selected}
+        other_orders = {f["order_id"] for f in fills if f["order_id"] not in owned}
+        other_fills = {f["id"] for f in fills if f["order_id"] not in owned}
+        pid = identifier(product["id"])
+        overlap = [p for p in postings if p["product_id"] == pid
+                   and first <= p["at_us"] <= last
+                   and p["type"] not in EXTERNAL_TYPES
+                   and p["order_id"] not in owned
+                   and p["fill_id"] not in owned_fills]
+        explicit = [p for p in overlap if p["order_id"] is not None
+                    or p["fill_id"] is not None]
+        return {
+            "status": "reference_counts_only",
+            "overlapping_same_product_postings": len(overlap),
+            "explicitly_referenced_unattributed": len(explicit),
+            "unreferenced": len(overlap)-len(explicit),
+            "unmatched_order_references": sum(
+                p["order_id"] is not None and p["order_id"] not in other_orders
+                for p in explicit),
+            "unmatched_fill_references": sum(
+                p["fill_id"] is not None and p["fill_id"] not in other_fills
+                for p in explicit),
+            "commission_postings": sum(p["type"] == "commission" for p in overlap),
+            "cashflow_postings": sum(p["type"] == "cashflow" for p in overlap),
+            "funding_postings": sum(p["type"] == "funding" for p in overlap),
+            "is_verified_trade_pnl": False,
+        }
+    except (KeyError, TypeError, ValueError, ReconciliationError):
+        return empty
+
+
 def _trade_result(symbol, row, product, broker, fills, postings, start, end):
     trade=row["body"]
     base={
@@ -250,7 +291,12 @@ def _trade_result(symbol, row, product, broker, fills, postings, start, end):
             reconciliation_status="broker_reconciled",
             reason="matched_order_fill_and_wallet_postings"),selected
     except ReconciliationError as exc:
-        return dict(base,reason=str(exc)[:75]),None
+        reason = str(exc)[:75]
+        if reason == "overlapping_external_postings":
+            return dict(base,reason=reason,
+                        overlap_evidence=_overlap_evidence_summary(
+                            trade, product, fills, postings)),None
+        return dict(base,reason=reason),None
     except Exception:
         return dict(base,reason="broker_order_evidence_unavailable"),None
 
