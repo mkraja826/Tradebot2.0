@@ -618,6 +618,12 @@ class FireDemoController:
             self.store.update(press, "submitting", sizing_estimate={
                 "notional_usd": str(units * estimated_entry),
                 "loss_at_stop_usd": str(units * abs(estimated_entry - _dec(plan["stop_loss"]))),
+                # A nominal estimate only: tiered broker initial margin and
+                # the actual wallet requirement are independently rechecked
+                # at the chosen leverage before any exchange order.
+                "nominal_initial_margin_usd": str(
+                    units * estimated_entry / _dec(plan["leverage"])),
+                "selected_leverage": plan["leverage"],
             })
             submitted = True  # Exchange outcome could become uncertain after call.
             entries = FireEntries(self.path, exchange)
