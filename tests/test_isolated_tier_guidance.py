@@ -36,6 +36,18 @@ class IndependentTierChoiceTests(unittest.TestCase):
                 self.assertFalse(record["quantity_auto_adjusted"])
                 self.assertTrue(record["tiers_are_guidance_only"])
 
+    def test_hundred_dollar_account_margin_math(self):
+        for tier, margin, notional in (
+            ("small", "5.00", "100.00"),
+            ("medium", "20.00", "400.00"),
+            ("large", "40.00", "800.00")):
+            e = size_guideline_evidence(
+                {"size_tier": tier, "contracts": 1, "leverage": 20},
+                {"equity_usd": "100", "notional_per_contract_usd": "100"},
+                account="BTC")
+            self.assertEqual(e["target_margin_usd"], margin)
+            self.assertEqual(e["target_notional_usd"], notional)
+
     def test_guideline_percentages_are_not_contract_assignment(self):
         for tier, fraction in (("small","0.05"),("medium","0.20"),
                                ("large","0.40")):
@@ -43,9 +55,11 @@ class IndependentTierChoiceTests(unittest.TestCase):
                 {"contracts":7,"leverage":20,"size_tier":tier},
                 self.preview,account="GOLD")
             self.assertEqual(evidence["selected_contracts"],7)
-            self.assertEqual(evidence["target_equity_notional_fraction"],fraction)
+            self.assertEqual(evidence["target_equity_margin_fraction"],fraction)
+            self.assertEqual(evidence["target_equity_notional_fraction"],
+                             str(__import__("decimal").Decimal(fraction)*20))
             self.assertEqual(evidence["estimated_notional_usd"],"25.55")
-            self.assertEqual(evidence["margin_cap_fraction"],"0.20")
+            self.assertEqual(evidence["margin_cap_fraction"],"0.40")
 
     def test_wrong_account_or_invalid_size_never_gets_evidence(self):
         self.assertRaises(ValueError,size_guideline_evidence,
@@ -64,8 +78,8 @@ class IndependentTierChoiceTests(unittest.TestCase):
 
     def test_model_quantity_caps_are_still_separate(self):
         self.assertEqual(FIXED_LEVERAGE,20)
-        self.assertEqual(BTC_DEMO_CAP,6)
-        self.assertEqual(GOLD_DEMO_CAP,64)
+        self.assertEqual(BTC_DEMO_CAP,96)
+        self.assertEqual(GOLD_DEMO_CAP,1200)
 
 
 if __name__=="__main__":
