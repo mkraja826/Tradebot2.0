@@ -3,6 +3,7 @@ import json
 import unittest
 from tradebot.isolated_performance import (
     _overlap_evidence_summary, _signed_fill_uuid_alias_probe,
+    _unattributed_evidence_summary,
 )
 
 
@@ -78,6 +79,26 @@ class OverlapEvidenceTests(unittest.TestCase):
               "fill_uuid": "not-a-valid-id"}])
         self.assertEqual(report["uuid_identity_intersection"], 0)
         self.assertEqual(report["wallet_commission_uuid_references"], 0)
+
+    def test_after_flat_unreferenced_funding_is_reported_without_pnl(self):
+        posting={**self.p,"at_us":100,"type":"funding",
+                 "order_id":None,"fill_id":None}
+        d=_unattributed_evidence_summary(
+            self.trade,self.product,self.fills,[posting])
+        self.assertEqual(d["status"],"timing_counts_only")
+        self.assertEqual(d["nonowned_after_flat_fill"],1)
+        self.assertEqual(d["after_flat_without_order_or_fill_ref"],1)
+        self.assertEqual(d["after_flat_funding"],1)
+        self.assertFalse(d["is_verified_trade_pnl"])
+[redacted potentially sensitive output]
+
+    def test_known_owned_posting_after_close_not_counted_as_foreign(self):
+        posting={**self.p,"at_us":101,
+[redacted potentially sensitive output]
+        d=_unattributed_evidence_summary(
+            self.trade,self.product,self.fills,[posting])
+        self.assertEqual(d["nonowned_since_entry"],0)
+        self.assertEqual(d["nonowned_after_flat_fill"],0)
 
     def test_report_does_not_disclose_identifiers_or_amounts(self):
         result=_overlap_evidence_summary(
