@@ -238,6 +238,36 @@ class WatchdogTests(unittest.TestCase):
         self.assertIn("watchdog_runtime_initialized", str(output.call_args_list))
         self.assertIn("watchdog-telemetry-v3-20261122", str(output.call_args_list))
 
+    def test_single_market_isolated_watchdog_never_opens_other_ledger(self):
+        class StopAfterFirstTick(BaseException):
+            pass
+        for symbol,expected_name,other_name in (
+                ("BTCUSD", "fire-ops.sqlite", "fire-xaut.sqlite"),
+                ("XAUTUSD", "fire-xaut.sqlite", "fire-ops.sqlite")):
+            with self.subTest(symbol=symbol):
+                # Use a unique directory for each account. The isolated
+                # service must not even instantiate the other symbol.
+                root = self.root / ("isolated-" + symbol)
+                root.mkdir()
+                seen = []
+                def observe(exchange, store):
+                    seen.append((exchange.symbol, store.path.name))
+                    raise StopAfterFirstTick()
+                with (
+                    patch("tradebot.fire_watchdog.FireMarket",
+                          side_effect=lambda market, **kwargs:
+                              SimpleNamespace(symbol=market)),
+                    patch("tradebot.fire_watchdog.watchdog_tick",
+                          side_effect=observe),
+                    patch("builtins.print"),
+                ):
+                    with self.assertRaises(StopAfterFirstTick):
+                        main(["--database", str(root / "fire-ops.sqlite"),
+                              "--symbol", symbol])
+                self.assertEqual(seen, [(symbol, expected_name)])
+                self.assertTrue((root / expected_name).exists())
+                self.assertFalse((root / other_name).exists())
+
     def test_emergency_flat_incident_survives_crash_and_is_emitted_once(self):
         # Simulate a process dying AFTER a verified emergency broker close but
         # BEFORE sending its monitor event. The next startup must replay it.
