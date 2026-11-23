@@ -119,8 +119,9 @@ def instruction_for_snapshot(snapshot):
                 or scope.get("max_new_order_attempts_per_utc_day") != 48):
             raise PlanError("Unsupported autonomous demo FIRE scope")
         return (
-            "BTCUSD Delta India DEMO unattended candidate, at most two "
-            "attempts per UTC day and at most three contracts per attempt. "
+            "BTCUSD Delta India DEMO unattended candidate, at most 48 "
+            "attempts per UTC day, at least 30 minutes apart, and at most "
+            "three contracts per attempt. "
             "Prefer one small exploratory entry when market structure and "
             "risk are acceptable even if conviction is modest; two for "
             "medium confidence and three only for strong independently " "corroborated evidence. "
