@@ -76,6 +76,36 @@ class IndependentTierChoiceTests(unittest.TestCase):
                         {"direction":"LONG","contracts":1,"leverage":10,
                          "stop_loss":"100","take_profit":"150"}, {}, {})
 
+    def test_signed_budget_40pct_opt_in_keeps_legacy_20pct(self):
+        from tradebot.fire_budget import entry_budget
+        class Broker:
+            def _request(self, method, path, *, auth=False):
+                if path == "/v2/products/BTCUSD":
+                    return {"result":{"symbol":"BTCUSD","id":27,
+                        "contract_type":"perpetual_futures",
+                        "settling_asset":{"symbol":"USD"},
+                        "notional_type":"vanilla","initial_margin":"0.5",
+                        "contract_value":"1",
+                        "taker_commission_rate":"0.0005"}}
+                return {"result":{"leverage":20,"product_id":27}}
+            def wallet_balances(self):
+                return {"meta":{"net_equity":"100"},
+                        "balances":[{"asset_symbol":"USD",
+                                     "available_balance":"100"}]}
+        broker = Broker()
+        legacy = entry_budget(broker,"BTCUSD",27,"100",
+                              planned_leverage=20,max_contracts_limit=96)
+        isolated = entry_budget(broker,"BTCUSD",27,"100",
+                              planned_leverage=20,max_contracts_limit=96,
+                              margin_share=Decimal("0.40"))
+        self.assertEqual(legacy["margin_budget_usd"],"20.00")
+        self.assertEqual(isolated["margin_budget_usd"],"40.00")
+        self.assertEqual(legacy["max_contracts_per_entry"],4)
+        self.assertEqual(isolated["max_contracts_per_entry"],8)
+        with self.assertRaises(ValueError):
+            entry_budget(broker,"BTCUSD",27,"100",max_contracts_limit=1,
+                         margin_share=Decimal("0.40"))
+
     def test_model_quantity_caps_are_still_separate(self):
         self.assertEqual(FIXED_LEVERAGE,20)
         self.assertEqual(BTC_DEMO_CAP,96)
