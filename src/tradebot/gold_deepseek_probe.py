@@ -7,6 +7,8 @@ BTC FIRE remains exclusively GPT-6.
 """
 import hashlib
 import json
+from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
 from time import monotonic
 
 from tradebot.ai import (
@@ -40,7 +42,7 @@ _GOLD_PROMPT = (
 )
 
 
-def validate_gold_isolated_snapshot(snapshot):
+def validate_gold_isolated_snapshot(snapshot, *, now=None):
     """Reject wrong account/market and unfinished broker evidence pre-AI."""
     if not isinstance(snapshot, dict):
         raise PlanError("Gold decision snapshot invalid")
@@ -61,8 +63,24 @@ def validate_gold_isolated_snapshot(snapshot):
             or type(scope.get("max_contracts_per_entry")) is not int
             or not 1 <= scope["max_contracts_per_entry"] <= 6):
         raise PlanError("Gold isolated broker and market prerequisites unavailable")
-    if not isinstance(snapshot.get("collected_at"), str):
+    observed = snapshot.get("collected_at")
+    if not isinstance(observed, str):
         raise PlanError("Gold price timestamp missing")
+    try:
+        at = datetime.fromisoformat(observed)
+        current = now or datetime.now(timezone.utc)
+        age = (current - at).total_seconds()
+        bid = Decimal(str(core["best_bid"]))
+        ask = Decimal(str(core["best_ask"]))
+        tick = Decimal(str(ticker["tick_size"]))
+    except (ValueError, TypeError, KeyError, InvalidOperation, OverflowError):
+        raise PlanError("Gold quote evidence malformed") from None
+    if (at.tzinfo is None or at.utcoffset() is None
+            or current.tzinfo is None or current.utcoffset() is None
+            or not -5 <= age <= 60
+            or not all(v.is_finite() and v > 0 for v in (bid, ask, tick))
+            or bid >= ask or (ask-bid)/bid > Decimal("0.005")):
+        raise PlanError("Gold broker quote stale or invalid")
     return scope
 
 
@@ -97,9 +115,13 @@ def run_gold_deepseek_probe(routes, snapshot_loader,
         parsed = decision_payload(choice)
         stage = "validation"
         decision = validate(parsed, snapshot["core"], require_leverage=True)
-        if (decision["direction"] != "WAIT"
-                and decision["contracts"] > scope["max_contracts_per_entry"]):
-            raise PlanError("Gold model exceeds verified contract limit")
+        if decision["direction"] != "WAIT":
+            if decision["contracts"] > scope["max_contracts_per_entry"]:
+                raise PlanError("Gold model exceeds verified contract limit")
+            tick = Decimal(str(snapshot["core"]["ticker"]["tick_size"]))
+            for key in ("stop_loss", "take_profit"):
+                if Decimal(decision[key]) % tick != 0:
+                    raise PlanError("Gold exit not aligned with broker tick")
         result = {
             "decision": decision,
             "usage": reply.get("usage"),
