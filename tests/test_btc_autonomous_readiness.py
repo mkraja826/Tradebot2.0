@@ -1,5 +1,6 @@
 """Offline read-only tests for precise autonomous BTC demo readiness."""
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -33,9 +34,9 @@ class ReadinessTests(unittest.TestCase):
         self.root = Path(self.tmp.name)
         self.calls = []
 
-    def broker(self, *, allow_orders=False):
-        self.calls.append(allow_orders)
-        assert allow_orders is False
+    def broker(self, **kwargs):
+        self.calls.append(kwargs)
+        assert kwargs.get("allow_orders") is False
         return FakeBroker()
 
     def check(self, *, arm=False, receipts=False, preflight=good_preflight,
@@ -52,10 +53,20 @@ class ReadinessTests(unittest.TestCase):
             "previous_fire_requires_operator_review",
         ])
         self.assertTrue(r["demo_broker_preflight_verified"])
-        self.assertEqual(self.calls, [False])
+        self.assertEqual([x["allow_orders"] for x in self.calls], [False])
         self.assertFalse(r["order_authorized"])
         self.assertFalse(r["broker_mutations"])
         self.assertEqual(r["ai_calls"], 0)
+
+    def test_credential_forwarding_never_allows_mutation(self):
+        values = {"DELTA_DEMO_API_KEY": "test-id", "DELTA_DEMO_API_SECRET": "fixture-only"}
+        with patch.dict("os.environ", values):
+            result = self.check(arm=True, receipts=True)
+        self.assertEqual(result["status"], "eligible_read_only_no_order")
+        self.assertEqual(self.calls[0]["api_key"], values["DELTA_DEMO_API_KEY"])
+        self.assertEqual(self.calls[0]["api_secret"], values["DELTA_DEMO_API_SECRET"])
+        self.assertIs(self.calls[0]["allow_orders"], False)
+        self.assertNotIn("fixture-only", str(result))
 
     def test_fully_eligible_diagnostic_still_cannot_authorize_orders(self):
         r = self.check(arm=True, receipts=True)
