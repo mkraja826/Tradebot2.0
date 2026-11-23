@@ -327,8 +327,7 @@ class DemoSizeTests(unittest.TestCase):
         record = {"tier": "strong_dynamic", "model_proposed_contracts": 5,
                   "selected_contracts": 5, "model_selected_leverage": 12,
                   "evidence_contract_ceiling": 6,
-                  "policy": "btc-demo-evidence-size-v3",
-                  "evidence_is_preview_only": True}
+                  "policy": "btc-demo-evidence-size-v3"}
         saved = store.update(press, "preflight", sizing_evidence=record,
                              selected_leverage=12)
         self.assertEqual(saved["sizing_evidence"], record)
