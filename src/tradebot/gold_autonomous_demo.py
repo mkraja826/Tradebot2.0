@@ -155,7 +155,7 @@ def _mark_halt(root):
 def run_once(data_dir,*,instant=None,armed=is_gold_armed,candidate=check_candidate,
              active_trade_probe=signed_active_trade_skip,
              controller_factory=AutoGoldController,receipt_check=receipts_safe,
-             do_execute=False):
+             cooldown_check=post_close_cooldown, do_execute=False):
     now=instant or datetime.now(timezone.utc)
     root=Path(data_dir)
     if (not root.is_dir() or root.is_symlink() or root.name!="gold-isolated"
@@ -181,7 +181,7 @@ def run_once(data_dir,*,instant=None,armed=is_gold_armed,candidate=check_candida
         return {"status":"previous_gold_fire_unresolved"}
     if not do_execute:
         return {"status":"eligible_read_only_no_order"}
-    cooldown, remaining = post_close_cooldown(
+    cooldown, remaining = cooldown_check(
         root, fire_filename="fire-xaut.sqlite", now=now)
     if cooldown == "unavailable":
         return {"status":"verified_trade_close_time_unavailable"}
