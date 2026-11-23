@@ -15,7 +15,8 @@ import sqlite3
 from tradebot.candle_archive import STEP
 from tradebot.market_integrity import suspect_candle_times
 from tradebot.fire_indicators import indicators
-from tradebot.gold_technical_indicators import compute_technical_5m
+# Indicator math is market-agnostic; BTC source contains no BTC prices.
+from tradebot.btc_technical_indicators import compute_technical_5m
 
 WINDOW_BARS = 288
 NEIGHBOR_BARS = 3
