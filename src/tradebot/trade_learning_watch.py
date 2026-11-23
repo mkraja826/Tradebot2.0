@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 import json
 import os
+import sqlite3
 from pathlib import Path
 import time
 from uuid import uuid4
@@ -18,6 +19,7 @@ from tradebot.fire_market import FireMarket, SYMBOLS, positions_for_fire
 from tradebot.kimi_learning import KimiLearningReviewer
 from tradebot.market import _age_seconds
 from tradebot.trade_memory import TradeMemory
+from tradebot.btc_loss_diagnostics import analyze as analyze_btc_losses, LossDiagnosticError
 
 
 class LearningWatchError(ValueError):
@@ -203,6 +205,7 @@ def main(argv=None):
                         api_key=os.environ.get("DELTA_DEMO_API_KEY", ""),
                         api_secret=os.environ.get("DELTA_DEMO_API_SECRET", "")),
                         memory, on_review=callback) for symbol in SYMBOLS]
+        last_diagnostic_bucket = None
         while True:
             statuses = {}
             for watcher in watchers:
@@ -215,6 +218,35 @@ def main(argv=None):
                 item["status"] == "broker_evidence_unavailable" for item in statuses.values())
                 else "observing", "markets": statuses, "orders_submitted": False}
             output["kimi_paid_enabled"] = args.paid_kimi
+            # Rebuild the free, broker-reconciled loss report at most once per
+            # 30-minute UTC bucket. A missing accounting ledger never becomes
+            # a fabricated win/loss, and this path cannot place orders or
+            # spend tokens. Do not replace a prior report on transient errors.
+            bucket = int(datetime.now(timezone.utc).timestamp()) // 1800
+            if bucket != last_diagnostic_bucket:
+                try:
+                    root = Path(args.database).resolve().parent
+                    review = analyze_btc_losses(
+                        root / "fire-reconciliation.sqlite",
+                        root / "fire-ops.sqlite")
+                    out_path = root / "btc-loss-diagnostics.json"
+                    temp_path = root / (
+                        "btc-loss-diagnostics.json." + str(os.getpid()) + ".tmp")
+                    with os.fdopen(os.open(
+                            str(temp_path),
+                            os.O_WRONLY | os.O_CREAT | os.O_EXCL
+                            | getattr(os, "O_NOFOLLOW", 0), 0o600),
+                            "w", encoding="utf-8") as report_handle:
+                        json.dump(review, report_handle,
+                                  separators=(",", ":"), sort_keys=True)
+                        report_handle.flush()
+                        os.fsync(report_handle.fileno())
+                    os.replace(temp_path, out_path)
+                    output["loss_diagnostic_status"] = review["status"]
+                    last_diagnostic_bucket = bucket
+                except (LossDiagnosticError, OSError, ValueError,
+                        TypeError, sqlite3.Error):
+                    output["loss_diagnostic_status"] = "evidence_unavailable"
             # Non-secret atomic heartbeat for dashboard visibility. A stale
             # heartbeat cannot be presented as evidence that Kimi is running.
             runtime_path = Path(args.database).resolve().parent / "learning-runtime.json"
