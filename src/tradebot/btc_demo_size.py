@@ -1,12 +1,14 @@
 """Evidence-based sizing ceiling for BTCUSD Delta India DEMO only.
 
-A weaker but still acceptable GPT-6 entry remains one contract. Medium and
-strong corroborated directional setups may request two and three contracts;
-this module
-cannot turn WAIT into a trade or authorize broker execution. Independent risk,
+A weaker but still acceptable GPT-6 entry remains one contract; medium
+is exactly two. For independently strong evidence, GPT-6 may propose three
+through six contracts, but the risk budget decides what is affordable.
+This module cannot authorize broker execution. Independent risk,
 equity, margin, liquidation and bracket gates still control actual execution.
 """
 from decimal import Decimal, InvalidOperation
+
+MAX_AUTONOMOUS_LARGE_CONTRACTS = 6
 
 
 def _number(value):
@@ -84,7 +86,7 @@ def strong_directional_setup(context, direction):
 
 
 def evidence_contract_ceiling(context, direction):
-    """Small=1, medium=2, strong=3; WAIT=0, never an entry authorization."""
+    """Small=1, medium=2, strong=3..6 AI choice; WAIT=0."""
     if direction == "WAIT":
         return 0
     score = _setup_score(context, direction)
@@ -92,7 +94,7 @@ def evidence_contract_ceiling(context, direction):
         return 1
     adx, confirmations = score
     if adx >= 25 and confirmations >= 3:
-        return 3
+        return MAX_AUTONOMOUS_LARGE_CONTRACTS
     if confirmations >= 1:
         return 2
     return 1
