@@ -234,14 +234,14 @@ class AutoTests(unittest.TestCase):
         bot=AutoBTCController(self.root/"fire-ops.sqlite")
         supervised=SupervisedBTCController(self.root/"supervised.sqlite")
         self.assertFalse(bot.enabled)
-        self.assertEqual(bot._hard_contract_cap(),6)
+        self.assertEqual(bot._hard_contract_cap(),96)
         self.assertEqual(supervised._hard_contract_cap(),1)
         self.assertEqual(bot._max_contracts_for_entry(
-            {"max_contracts_per_entry":40}),6)
+            {"max_contracts_per_entry":40}),40)
         self.assertEqual(bot._max_contracts_for_entry(
             {"max_contracts_per_entry":0}),0)
         scope=bot._additional_fire_scope()
-        self.assertEqual(scope["max_contracts_per_entry"],6)
+        self.assertEqual(scope["max_contracts_per_entry"],96)
         self.assertTrue(scope["unattended_demo_mode"])
         self.assertIs(scope["daily_attempt_cap_enabled"],False)
         self.assertNotIn("max_new_order_attempts_per_utc_day",scope)
