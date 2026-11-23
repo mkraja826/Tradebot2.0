@@ -113,11 +113,29 @@ class AutoBTCController(SupervisedBTCController):
         return min(2, super()._max_contracts_for_entry(budget))
 
     def _normalize_plan(self, plan, context):
-        """Downgrade oversized proposals; never turn GPT-6 WAIT into a trade."""
+        """Downgrade two to one on weaker evidence; never invent an entry."""
+        self._sizing_record = {}
         cap = evidence_contract_ceiling(context, plan.get("direction"))
         if cap == 0:
             return plan
-        return {**plan, "contracts": min(plan["contracts"], cap)}
+        # A malformed, oversized model proposal is rejected by the existing
+        # contract-size gate; do not silently transform it into a valid order.
+        proposed = plan["contracts"]
+        if type(proposed) is not int or not 1 <= proposed <= self._hard_contract_cap():
+            return plan
+        selected = min(proposed, cap)
+        self._sizing_record = {
+            "tier": "strong_two" if selected == 2 else "exploratory_one",
+            "policy": "btc-demo-evidence-size-v1",
+            "evidence_contract_ceiling": cap,
+            "model_proposed_contracts": proposed,
+            "selected_contracts": selected,
+        }
+        return {**plan, "contracts": selected}
+
+    def _entry_sizing_record(self):
+        return {"sizing_evidence": self._sizing_record} if getattr(
+            self, "_sizing_record", None) else {}
 
     def _additional_fire_scope(self):
         return {
