@@ -81,7 +81,16 @@ def normalize_fill(raw):
     require(isinstance(meta, dict), "invalid_fill_metadata")
     position = meta.get("new_position") or {}
     require(isinstance(product, dict) and isinstance(position, dict), "invalid_fill_metadata")
-    row = {"id": identifier(raw.get("id")), "order_id": identifier(raw.get("order_id")),
+    raw_fill_id = identifier(raw.get("id"))
+    # Delta's fills endpoint returns compact UUIDs while signed commission
+    # postings encode the same fill_uuid using the dashed RFC4122 form.
+    # Exact ID equality is mandatory; never time-match commissions by guess.
+    if len(raw_fill_id) in (32, 36):
+        try:
+            raw_fill_id = str(UUID(raw_fill_id))
+        except (ValueError, AttributeError):
+            raise ReconciliationError("invalid_broker_fill_uuid") from None
+    row = {"id": raw_fill_id, "order_id": identifier(raw.get("order_id")),
            "product_id": identifier(raw.get("product_id")), "symbol": raw.get("product_symbol"),
            "at_us": timestamp_us(raw.get("created_at")), "side": raw.get("side"),
            "size": decimal_text(raw.get("size")), "price": decimal_text(raw.get("price")),
