@@ -59,13 +59,12 @@ def evidence(root):
         return None
 
 
-def reviewed_receipt_matches(root):
-    """Compare private 0600 acknowledgement to current immutable receipt bytes."""
-    root = Path(root)
-    required = evidence(root)
-    if required is None:
-        return False
-    path = root / MARKER_NAME
+def _receipt_scoped_marker(root, required):
+    """Write-once marker avoids overwriting an earlier operator review."""
+    return root / ("btc-auto-reviewed-no-order-" + required["press"] + ".json")
+
+
+def _marker_matches(path, required):
     try:
         fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
         try:
@@ -81,6 +80,20 @@ def reviewed_receipt_matches(root):
         return type(obj) is dict and obj == required
     except (OSError, UnicodeError, ValueError, TypeError):
         return False
+
+
+def reviewed_receipt_matches(root):
+    """Require an exact private 0600 acknowledgment for the latest receipt.
+
+    The original legacy marker stays valid for its own immutable receipt.
+    Later receipts get independent write-once markers, preserving audit history.
+    """
+    root = Path(root)
+    required = evidence(root)
+    if required is None:
+        return False
+    return any(_marker_matches(path, required) for path in (
+        root / MARKER_NAME, _receipt_scoped_marker(root, required)))
 
 
 def _signed_candidate(root):
@@ -106,7 +119,12 @@ def acknowledge(root, *, approval, candidate=_signed_candidate):
     after = evidence(root)
     if after is None or after != before:
         raise ValueError("Prior receipt changed during broker preflight")
-    marker = root / MARKER_NAME
+    # Preserve the original review record unchanged: it might belong to a
+    # different historical no-order attempt. The latest review is write-once
+    # and bound to the exact latest immutable FIRE receipt and consent.
+    legacy = root / MARKER_NAME
+    marker = (legacy if not legacy.exists() and not legacy.is_symlink()
+              else _receipt_scoped_marker(root, before))
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
     fd = os.open(marker, flags, 0o600)
     try:

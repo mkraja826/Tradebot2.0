@@ -57,6 +57,57 @@ class NoOrderReviewTests(unittest.TestCase):
         self.assertFalse(reviewed_receipt_matches(self.root))
         self.assertFalse(prior_fire_receipts_safe(self.root))
 
+    def test_subsequent_review_keeps_earlier_marker_and_halt(self):
+        """An older reviewed failure must not prevent the next real review."""
+        original = acknowledge(self.root, approval=APPROVAL, candidate=lambda root: True)
+        self.assertEqual(original["status"], "reviewed_no_order")
+        old_marker = self.root / MARKER_NAME
+        original_bytes = old_marker.read_bytes()
+        halt = self.root / "btc-auto-demo-halt"
+        halt.touch()
+        next_press = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        self.insert(next_press)
+        self.assertFalse(reviewed_receipt_matches(self.root))
+        self.assertFalse(prior_fire_receipts_safe(self.root))
+        with self.assertRaises(ValueError):
+            acknowledge(self.root, approval=APPROVAL, candidate=lambda root: False)
+        scoped = self.root / f"btc-auto-reviewed-no-order-{next_press}.json"
+        self.assertFalse(scoped.exists())
+        report = acknowledge(self.root, approval=APPROVAL, candidate=lambda root: True)
+        self.assertEqual(report["status"], "reviewed_no_order")
+        self.assertEqual(old_marker.read_bytes(), original_bytes)
+        self.assertTrue(scoped.exists())
+        self.assertEqual(scoped.stat().st_mode & 0o777, 0o600)
+        self.assertTrue(reviewed_receipt_matches(self.root))
+        self.assertTrue(prior_fire_receipts_safe(self.root))
+        self.assertEqual(
+            acknowledge(self.root, approval=APPROVAL, candidate=lambda root: self.fail("broker called"))["status"],
+            "already_reviewed")
+        self.assertTrue(halt.exists())
+
+        # A third failure must require its own independent signed approval.
+        another_press = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        self.insert(another_press)
+        self.assertFalse(reviewed_receipt_matches(self.root))
+        acknowledge(self.root, approval=APPROVAL, candidate=lambda root: True)
+        self.assertTrue(reviewed_receipt_matches(self.root))
+        self.assertEqual(old_marker.read_bytes(), original_bytes)
+        self.assertTrue(scoped.exists())
+        self.assertTrue(halt.exists())
+
+    def test_receipt_scoped_marker_rejects_mismatch_and_bad_permissions(self):
+        acknowledge(self.root, approval=APPROVAL, candidate=lambda root: True)
+        self.insert("cccccccccccccccccccccccccccccccc")
+        acknowledge(self.root, approval=APPROVAL, candidate=lambda root: True)
+        marker = self.root / "btc-auto-reviewed-no-order-cccccccccccccccccccccccccccccccc.json"
+        self.assertTrue(reviewed_receipt_matches(self.root))
+        marker.chmod(0o644)
+        self.assertFalse(reviewed_receipt_matches(self.root))
+        marker.chmod(0o600)
+        self.assertTrue(reviewed_receipt_matches(self.root))
+        marker.write_text(json.dumps({"press": "cccccccccccccccccccccccccccccccc", "reason_code": "fake"}))
+        self.assertFalse(reviewed_receipt_matches(self.root))
+
     def test_review_rejects_any_order_intent_even_with_false_receipt_flag(self):
         with sqlite3.connect(self.dbpath) as db:
             db.execute("INSERT INTO fire_entries VALUES(?)", (PRESS,))
