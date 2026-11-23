@@ -22,9 +22,9 @@ class GoldWarningOnlyRiskTests(unittest.TestCase):
         }
         self.quote={"best_bid":"3599.99","best_ask":"3600.00"}
         self.plan={"direction":"LONG","contracts":6,"leverage":20,
-                   "stop_loss":"3570.00","take_profit":"3601.00"}
+                   "stop_loss":"3570.00","take_profit":"3630.00"}
 
-    def test_gold_20x_marginal_reward_and_over_old_loss_cap_are_warnings(self):
+    def test_gold_20x_equal_gross_target_and_stop_warns_on_net_quality(self):
         x=self.bot._assess_risk(self.plan,self.budget,self.quote)
         self.assertTrue(x["approved"])
         self.assertEqual(x["policy_version"],"gold-demo-chart-stop-v1")
@@ -33,9 +33,13 @@ class GoldWarningOnlyRiskTests(unittest.TestCase):
         self.assertIsNone(x["max_allowed_loss_usd"])
         self.assertGreater(Decimal(x["estimated_loss_fraction_of_equity"]),
                            Decimal("0.0025"))
-        self.assertLess(Decimal(x["estimated_net_target_reward_usd"]),0)
+        self.assertEqual(Decimal(x["gross_stop_distance"]),Decimal("30"))
+        self.assertEqual(Decimal(x["gross_target_distance"]),Decimal("30"))
+        self.assertEqual(x["minimum_gross_reward_risk"],"1")
+        self.assertGreater(Decimal(x["estimated_net_target_reward_usd"]),0)
+        self.assertLess(Decimal(x["expected_net_reward_risk"]),Decimal("1"))
         self.assertIn("net_reward_risk_below_1_5",x["quality_warnings"])
-        self.assertIn("net_target_reward_after_costs_nonpositive",x["quality_warnings"])
+        self.assertNotIn("net_target_reward_after_costs_nonpositive",x["quality_warnings"])
 
     def test_gold_small_medium_large_same_warning_policy(self):
         for contracts in (1,2,3,6):

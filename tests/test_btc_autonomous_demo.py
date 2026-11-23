@@ -29,7 +29,7 @@ class AutoTests(unittest.TestCase):
     def test_disarmed_never_calls_candidate(self):
         value=run_once(self.root,instant=NOW,armed=lambda:False,
                        candidate=lambda x:self.fail("candidate called"),
-                       do_execute=True)
+                       do_execute=True,cooldown_check=lambda *args,**kwargs:("ready",0))
         self.assertEqual(value["status"],"disarmed")
 
     def test_arming_private_and_exact(self):
@@ -97,16 +97,16 @@ class AutoTests(unittest.TestCase):
                 another._decision_context(object(), NOW, 61_000)
             loader.assert_not_called()
 
-    def test_capped_daily_attempts_and_thirty_minute_gap(self):
+    def test_capped_daily_attempts_and_five_minute_gap(self):
         start=NOW.replace(hour=0)
         self.assertIsNotNone(claim_attempt(self.root,start))
-        self.assertIsNone(claim_attempt(self.root,start+timedelta(minutes=29)))
-        self.assertIsNotNone(claim_attempt(self.root,start+timedelta(minutes=30)))
+        self.assertIsNone(claim_attempt(self.root,start+timedelta(minutes=4)))
+        self.assertIsNotNone(claim_attempt(self.root,start+timedelta(minutes=5)))
         for i in range(2,48):
             self.assertIsNotNone(claim_attempt(
-                self.root,start+timedelta(minutes=30*i)))
+                self.root,start+timedelta(minutes=5*i)))
         self.assertIsNone(claim_attempt(
-            self.root,start+timedelta(hours=23,minutes=59)))
+            self.root,start+timedelta(minutes=239)))
         self.assertIsNotNone(claim_attempt(self.root,start+timedelta(days=1)))
 
     def test_dry_run_makes_no_reservation(self):
@@ -117,7 +117,7 @@ class AutoTests(unittest.TestCase):
 
     def test_missing_signed_preflight_makes_no_reservation(self):
         value=run_once(self.root,instant=NOW,armed=lambda:True,
-                       candidate=lambda x:False,do_execute=True,
+                       candidate=lambda x:False,do_execute=True,cooldown_check=lambda *args,**kwargs:("ready",0),
                        controller_factory=self.fake())
         self.assertEqual(value["status"],"read_only_preflight_unavailable")
         self.assertIsNotNone(claim_attempt(self.root,NOW))
@@ -125,27 +125,27 @@ class AutoTests(unittest.TestCase):
     def test_model_failure_halts_automatic_retries(self):
         runner=self.fake("model_decision_failed")
         first=run_once(self.root,instant=NOW,armed=lambda:True,
-                       candidate=lambda x:True,receipts_safe=lambda x:True,do_execute=True,
+                       candidate=lambda x:True,receipts_safe=lambda x:True,do_execute=True,cooldown_check=lambda *args,**kwargs:("ready",0),
                        controller_factory=runner)
         self.assertEqual(first["result"],"rejected_no_order")
         self.assertTrue((self.root/"btc-auto-demo-halt").exists())
         second=run_once(self.root,instant=NOW+timedelta(hours=4),
                         armed=lambda:True,candidate=lambda x:True,receipts_safe=lambda x:True,
-                        do_execute=True,controller_factory=runner)
+                        do_execute=True,cooldown_check=lambda *args,**kwargs:("ready",0),controller_factory=runner)
         self.assertEqual(second["status"],"halted_pending_operator_review")
         self.assertEqual(runner.starts,1)
 
-    def test_wait_consumes_slot_then_retries_after_thirty_minutes(self):
+    def test_wait_consumes_slot_then_retries_after_five_minutes(self):
         runner=self.fake()
-        for instant in (NOW,NOW+timedelta(minutes=30)):
+        for instant in (NOW,NOW+timedelta(minutes=5)):
             result=run_once(self.root,instant=instant,armed=lambda:True,
-                            candidate=lambda x:True,receipts_safe=lambda x:True,do_execute=True,
+                            candidate=lambda x:True,receipts_safe=lambda x:True,do_execute=True,cooldown_check=lambda *args,**kwargs:("ready",0),
                             controller_factory=runner)
             self.assertEqual(result["result"],"rejected_no_order")
             self.assertFalse(result["orders_submitted"])
-        skipped=run_once(self.root,instant=NOW+timedelta(minutes=59),
+        skipped=run_once(self.root,instant=NOW+timedelta(minutes=9),
                           armed=lambda:True,candidate=lambda x:True,receipts_safe=lambda x:True,
-                          do_execute=True,controller_factory=runner)
+                          do_execute=True,cooldown_check=lambda *args,**kwargs:("ready",0),controller_factory=runner)
         self.assertEqual(skipped["status"],"daily_or_interval_budget_exhausted")
         self.assertEqual(runner.starts,2)
 
@@ -154,7 +154,7 @@ class AutoTests(unittest.TestCase):
         skipped=run_once(self.root,instant=NOW,armed=lambda:True,
                          candidate=lambda x:False,receipts_safe=lambda x:True,
                          active_trade_probe=lambda x:True,
-                         do_execute=True,controller_factory=runner)
+                         do_execute=True,cooldown_check=lambda *args,**kwargs:("ready",0),controller_factory=runner)
         self.assertEqual(skipped["status"],"skipped_active_trade")
         self.assertIsNotNone(claim_attempt(self.root,NOW))
         self.assertEqual(runner.starts,0)
@@ -183,7 +183,7 @@ class AutoTests(unittest.TestCase):
             def __init__(inner,*args,**kwargs): pass
             def start(inner,**kwargs): raise RuntimeError("could have filled")
         result=run_once(self.root,instant=NOW,armed=lambda:True,
-                        candidate=lambda x:True,receipts_safe=lambda x:True,do_execute=True,
+                        candidate=lambda x:True,receipts_safe=lambda x:True,do_execute=True,cooldown_check=lambda *args,**kwargs:("ready",0),
                         controller_factory=Uncertain)
         self.assertEqual(result["status"],"halted_pending_operator_review")
         self.assertTrue((self.root/"btc-auto-demo-halt").exists())

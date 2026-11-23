@@ -17,6 +17,9 @@ class FireRiskLimits:
     equity_risk_fraction: Decimal | None = Decimal("0.0025")
     max_effective_leverage: Decimal = Decimal("20")
     minimum_net_reward_risk: Decimal | None = Decimal("1.5")
+    # An additional gross exit-distance rule; independent of fee-adjusted
+    # discretionary quality warnings and checked against executable quote.
+    minimum_gross_reward_risk: Decimal | None = None
     slippage_reserve_each_side: Decimal = Decimal("0.0005")
     version: str = "fire-demo-risk-v2-dynamic-leverage"
     max_contracts: int = 1
@@ -41,6 +44,10 @@ class FireRiskLimits:
                 or not ((self.minimum_net_reward_risk is None and uncapped_demo)
                         or (isinstance(self.minimum_net_reward_risk, Decimal)
                             and Decimal("1") <= self.minimum_net_reward_risk))
+                or (self.minimum_gross_reward_risk is not None and
+                    (not isinstance(self.minimum_gross_reward_risk, Decimal)
+                     or not self.minimum_gross_reward_risk.is_finite()
+                     or self.minimum_gross_reward_risk < Decimal("1")))
                 or not 0 <= self.slippage_reserve_each_side <= Decimal("0.01")):
             raise ValueError("Invalid demo risk policy")
 
@@ -86,6 +93,16 @@ def assess_fire_plan(plan, budget, quote, *, limits=None):
     if not (stop < entry < target if side == "LONG" else target < entry < stop):
         raise RiskRejected("Invalid stop or target against executable quote")
 
+    # Enforce user-selected distance rule on the actual executable best
+    # ask/bid. This is repeated at the final quote recheck before a POST.
+    # LONG: SL < ask < TP; SHORT: TP < bid < SL. Gross target distance must
+    # not be smaller than stop distance; fees are still shown separately.
+    gross_stop_distance = abs(entry - stop)
+    gross_target_distance = abs(target - entry)
+    if (limits.minimum_gross_reward_risk is not None and
+            gross_target_distance <
+            gross_stop_distance * limits.minimum_gross_reward_risk):
+        raise RiskRejected("Stop distance exceeds allowed reward distance")
     qty = multiplier * contracts
     notional = qty * entry
     gross_loss = qty * abs(entry - stop)
@@ -133,6 +150,10 @@ def assess_fire_plan(plan, budget, quote, *, limits=None):
         "estimated_loss_fraction_of_equity": str(loss / equity),
         "equity_loss_ceiling_enabled": maximum_loss is not None,
         "expected_net_reward_risk": str(ratio),
+        "gross_stop_distance": str(gross_stop_distance),
+        "gross_target_distance": str(gross_target_distance),
+        "minimum_gross_reward_risk": (str(limits.minimum_gross_reward_risk)
+                                      if limits.minimum_gross_reward_risk is not None else None),
         "trade_quality_policy": (
             "warnings_only_autonomous_demo" if soft_quality_demo
             else "minimum_net_reward_risk_enforced"),
