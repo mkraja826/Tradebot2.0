@@ -220,6 +220,32 @@ class FireExecutionTests(unittest.TestCase):
         self.assertFalse(fire.snapshot()["orders_submitted"])
         self.assertEqual(self.exchange.requests, [])
 
+    def test_autonomous_demo_soft_reward_warning_still_executes_protected_order(self):
+        """Low expected net reward is recorded, never used as entry veto."""
+        from tradebot.fire_risk import FireRiskLimits, assess_fire_plan
+        low_reward = PLAN | {"take_profit": "63220"}
+        fire = self.make(plan=low_reward)
+        fire._assess_risk = lambda plan, budget, quote: assess_fire_plan(
+            plan, budget, quote, limits=FireRiskLimits(
+                equity_risk_fraction=None, minimum_net_reward_risk=None,
+                max_contracts=6, version="btc-demo-chart-stop-v4"))
+        ok, why = fire.start()
+        self.assertTrue(ok, why)
+        result = fire.snapshot()
+        self.assertEqual(result["status"], "protected_active",
+                         result.get("reason_code"))
+        self.assertTrue(result["orders_submitted"])
+        self.assertTrue(result["protection_verified"])
+        self.assertTrue(result["liquidation_verified"])
+        self.assertEqual(len(self.exchange.requests), 1)
+        self.assertEqual(len(self.exchange.active_orders), 2)
+        self.assertEqual(result["risk_assessment"]["trade_quality_policy"],
+                         "warnings_only_autonomous_demo")
+        self.assertIn("net_reward_risk_below_1_5",
+                      result["risk_assessment"]["quality_warnings"])
+        self.assertIn("net_target_reward_after_costs_nonpositive",
+                      result["risk_assessment"]["quality_warnings"])
+
     def test_one_click_posts_one_order_and_verifies_both_protective_stops(self):
         fire = self.make()
         accepted, _ = fire.start()
