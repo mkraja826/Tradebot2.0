@@ -18,8 +18,9 @@ def good_preflight(_broker, _root, **kwargs):
         "status": "operator_review_candidate_only", "blockers": [],
         "supervised_session_verified": True,
         "recent_btc_history_local_quality_verified": True,
-        "owner_declared_main_isolated_accepted": True,
-        "signed_isolated_margin_verified": False,
+        "owner_declared_main_isolated_accepted": False,
+        "signed_isolated_margin_verified": True,
+        "margin_evidence_source": "signed_parent_subaccount",
         "account_wide_flatness_verified": True,
         "watchdog_and_collector_active": True,
         "both_dashboard_fire_endpoints_disabled": True,
@@ -79,6 +80,7 @@ class ReadinessTests(unittest.TestCase):
         def warning_preflight(broker, root, **kwargs):
             self.assertTrue(kwargs.get("allow_portfolio_loss_warnings"))
             self.assertTrue(kwargs.get("allow_daily_loss_warning"))
+            self.assertTrue(kwargs.get("allow_signed_subaccount"))
             return {
                 **good_preflight(broker, root),
                 "equity_quality_warnings": [

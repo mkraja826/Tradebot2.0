@@ -72,7 +72,8 @@ def inspect(data_dir, *, broker_factory=DeltaDemo,
                 blockers.append("signed_postfill_margin_mode_unavailable")
             check = preflight(
                 broker, root, allow_daily_loss_warning=True,
-                allow_portfolio_loss_warnings=True)
+                allow_portfolio_loss_warnings=True,
+                allow_signed_subaccount=True)
             if type(check) is dict:
                 allowed_warnings = {
                     "supervised_session_loss_limit",
@@ -89,11 +90,12 @@ def inspect(data_dir, *, broker_factory=DeltaDemo,
                       and check.get("blockers") == []
                       and check.get("supervised_session_verified") is True
                       and check.get("recent_btc_history_local_quality_verified") is True
-                      and check.get("owner_declared_main_isolated_accepted") is True
+                      and check.get("owner_declared_main_isolated_accepted") is False
+                      and check.get("margin_evidence_source") == "signed_parent_subaccount"
                       and check.get("account_wide_flatness_verified") is True
                       and check.get("watchdog_and_collector_active") is True
                       and check.get("both_dashboard_fire_endpoints_disabled") is True
-                      and check.get("signed_isolated_margin_verified") is False
+                      and check.get("signed_isolated_margin_verified") is True
                       and check.get("trade_authorized") is False)
                 result["demo_broker_preflight_verified"] = bool(ok)
                 if not ok:
@@ -101,6 +103,7 @@ def inspect(data_dir, *, broker_factory=DeltaDemo,
                         "fresh_session_equity_unverified",
                         "restricted_btc_recent24h_history_unverified",
                         "owner_main_isolated_declaration_missing_or_expired",
+                        "signed_subaccount_margin_evidence_unavailable",
                         "account_wide_exposure_unverified",
                         "independent_protection_services_unverified",
                         "existing_dashboard_fire_not_disabled_or_unavailable",
