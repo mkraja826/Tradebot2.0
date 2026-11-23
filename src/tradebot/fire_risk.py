@@ -22,10 +22,14 @@ class FireRiskLimits:
     max_contracts: int = 1
 
     def __post_init__(self):
-        # A missing fractional loss ceiling is opt-in and scoped exclusively
-        # to the BTC autonomous Delta India DEMO chart-stop policy.
+        # Discretionary risk/R:R thresholds are warnings-only only for
+        # explicitly named, contract-capped isolated BTC/Gold DEMO policies.
+        # Broker affordability, effective leverage, liquidation cushion,
+        # position/price validity and exact protective orders still gate.
+        warning_only_versions = frozenset((
+            "btc-demo-chart-stop-v4", "gold-demo-chart-stop-v1"))
         uncapped_demo = (self.equity_risk_fraction is None
-                         and self.version == "btc-demo-chart-stop-v4"
+                         and self.version in warning_only_versions
                          and self.max_contracts == 6)
         valid_risk_fraction = (
             uncapped_demo or (
@@ -92,7 +96,8 @@ def assess_fire_plan(plan, budget, quote, *, limits=None):
     soft_quality_demo = (
         limits.equity_risk_fraction is None
         and limits.minimum_net_reward_risk is None
-        and limits.version == "btc-demo-chart-stop-v4"
+        and limits.version in (
+            "btc-demo-chart-stop-v4", "gold-demo-chart-stop-v1")
         and limits.max_contracts == 6)
     if loss <= 0 or (reward <= 0 and not soft_quality_demo):
         raise RiskRejected("Non-positive net reward or invalid risk")
