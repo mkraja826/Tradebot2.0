@@ -25,7 +25,7 @@ from tradebot.fire_budget import entry_budget
 from tradebot.fire_leverage import synchronize_leverage, verify_liquidation_clearance, LeverageRejected, LiquidationUnsafe
 from tradebot.fire_account_guard import require_flat_demo_account
 from tradebot.fire_portfolio_reservation import FirePortfolioReservation
-from tradebot.fire_risk import assess_fire_plan, FireRiskLimits, RiskRejected
+from tradebot.fire_risk import assess_fire_plan, FireRiskLimits
 from tradebot.portfolio_equity_guard import RuntimeEquityGuard
 from tradebot.fire_indicators import decision_context
 from tradebot.fire_entry import FireEntries
@@ -378,10 +378,6 @@ class FireDemoController:
         self.pause = pause
         self.spawn = spawn or (lambda f: Thread(target=f, daemon=True).start())
 
-    def _allow_clean_reward_risk_rejection(self):
-        """Normal FIRE never auto-classifies a risk rejection as retryable."""
-        return False
-
     def _decision_context(self, exchange, collected, midpoint):
         """Normal FIRE uses its existing independent provider context."""
         return decision_context(exchange, self.store, self.symbol,
@@ -595,22 +591,7 @@ class FireDemoController:
             equity_recheck = self.equity_guard.require_verified_read(
                 current_budget["equity_usd"], current_budget.get("equity_read_receipt"))
             stage = "risk_governor"
-            try:
-                risk_assessment = self._assess_risk(plan, current_budget, exchange_quote)
-            except RiskRejected as exc:
-                # The first independent risk assessment runs before any
-                # durable broker-order intent or leverage change. For the
-                # opt-in autonomous DEMO policy ONLY, a known unfavorable
-                # net reward/risk is a clean rejected candidate, not an
-                # ambiguous execution incident. Other errors still halt.
-                if (self._allow_clean_reward_risk_rejection()
-                        and str(exc) == "Expected net reward-to-risk below policy"):
-                    self.store.update(
-                        press, "rejected_no_order",
-                        reason_code="btc_demo_net_reward_risk_below_minimum",
-                        orders_submitted=False, protection_verified=False)
-                    return
-                raise
+            risk_assessment = self._assess_risk(plan, current_budget, exchange_quote)
             self.store.update(press, "preflight", risk_assessment={
                 **risk_assessment, "equity_monitor": equity_recheck})
             stage = "account_exposure_recheck"
