@@ -87,7 +87,8 @@ class AutoBTCController(SupervisedBTCController):
         self.equity_guard = SupervisedSessionEquityGuard(
             self.path.parent/"fire-equity-risk.sqlite",
             allow_daily_loss_warning=True,
-            allow_portfolio_loss_warnings=True)
+            allow_portfolio_loss_warnings=True,
+            allow_initial_isolated_genesis=True)
 
     def _require_account_flat(self, exchange, product_id):
         if not is_armed():
