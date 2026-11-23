@@ -113,10 +113,6 @@ class GoldDeepSeekTests(unittest.TestCase):
         self.assertNotIn("response_format",paid[0])
         self.assertIn("XAUTUSD",paid[0]["messages"][0]["content"])
         self.assertIn("Gold",paid[0]["messages"][0]["content"])
-        self.assertIn("at least 1.5 times the stop distance",
-                      paid[0]["messages"][0]["content"])
-        self.assertIn("broker's mandatory minimum 1:1 gate remains unchanged",
-                      paid[0]["messages"][0]["content"])
         self.assertEqual(report["results"]["fire"]["model"],GOLD_MODEL)
         self.assertEqual(report["results"]["fire"]["decision"]["direction"],"LONG")
         self.assertFalse(report["trade_authorized"])
@@ -166,6 +162,10 @@ class GoldDeepSeekTests(unittest.TestCase):
                 if body is None:
                     return {"data":[{"id":GOLD_MODEL}]}
                 self_outer.assertIn("Never return WAIT",body["messages"][0]["content"])
+                self_outer.assertIn("at least 1.5 times the stop distance",
+                                    body["messages"][0]["content"])
+                self_outer.assertIn("broker's mandatory minimum 1:1 gate remains unchanged",
+                                    body["messages"][0]["content"])
                 return {"choices":[{"finish_reason":"stop",
                     "message":{"content":json.dumps({
                         "direction":"WAIT","contracts":0,"leverage":None,
