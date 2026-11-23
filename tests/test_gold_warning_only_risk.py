@@ -27,7 +27,7 @@ class GoldWarningOnlyRiskTests(unittest.TestCase):
     def test_gold_20x_equal_gross_target_and_stop_warns_on_net_quality(self):
         x=self.bot._assess_risk(self.plan,self.budget,self.quote)
         self.assertTrue(x["approved"])
-        self.assertEqual(x["policy_version"],"gold-demo-chart-stop-v1")
+        self.assertEqual(x["policy_version"],"gold-demo-tiered-fixed20-v2")
         self.assertEqual(x["trade_quality_policy"],"warnings_only_autonomous_demo")
         self.assertFalse(x["equity_loss_ceiling_enabled"])
         self.assertIsNone(x["max_allowed_loss_usd"])
