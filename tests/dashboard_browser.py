@@ -100,7 +100,9 @@ with sync_playwright() as p:
         menu = ".dock" if width <= 850 else ".sidebar"
         def switch(screen):
             page.locator(menu).locator('a[data-workspace-link="' + screen + '"]').click()
-            assert page.locator("body").get_attribute("data-screen") == screen
+            page.wait_for_function(
+                "(expected) => document.body.dataset.screen === expected",
+                arg=screen)
         switch("bots")
         assert page.locator(".isolated-card").count() == 2
         assert page.locator("#isolated-grid").get_by_text("BTCUSD").is_visible()
