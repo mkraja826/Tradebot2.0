@@ -137,6 +137,48 @@ class DemoSizeTests(unittest.TestCase):
             bot._assess_risk({**plan, "contracts": 6, "take_profit": "63400"},
                              budget, quote)
 
+    def test_autonomous_demo_weak_net_reward_risk_is_warning_only(self):
+        from decimal import Decimal
+        bot = AutoBTCController(self.root / "soft-risk-demo.sqlite")
+        budget = {
+            "leverage": "5", "equity_usd": "173.81",
+            "contract_value": "0.001", "max_contracts_per_entry": 6,
+            "taker_commission_rate": "0.0005",
+        }
+        quote = {"best_bid": "63214", "best_ask": "63214.5"}
+        baseline = {
+            "direction": "LONG", "contracts": 1, "leverage": 5,
+            "stop_loss": "62500", "take_profit": "63400",
+        }
+        evaluated = bot._assess_risk(baseline, budget, quote)
+        self.assertTrue(evaluated["approved"])
+        self.assertEqual(evaluated["trade_quality_policy"],
+                         "warnings_only_autonomous_demo")
+        self.assertIn("net_reward_risk_below_1_5", evaluated["quality_warnings"])
+        self.assertLess(Decimal(evaluated["expected_net_reward_risk"]), Decimal("1.5"))
+        self.assertIsNone(evaluated["max_allowed_loss_usd"])
+        # An economically negative after-cost target is still a documented
+        # small DEMO experiment: never hide the warning from the record.
+        poor = bot._assess_risk({**baseline, "take_profit": "63225"}, budget, quote)
+        self.assertTrue(poor["approved"])
+        self.assertLess(Decimal(poor["estimated_net_target_reward_usd"]), 0)
+        self.assertEqual(
+            poor["quality_warnings"],
+            ["net_reward_risk_below_1_5",
+             "net_target_reward_after_costs_nonpositive"])
+        # Unlike experimental DEMO, normal FIRE still enforces its own
+        # minimum net reward/risk and cannot opt into warning-only.
+        with self.assertRaises(RiskRejected):
+            assess_fire_plan(
+                baseline, budget, quote,
+                limits=FireRiskLimits(max_contracts=6))
+        with self.assertRaises(ValueError):
+            FireRiskLimits(minimum_net_reward_risk=None)
+        with self.assertRaises(ValueError):
+            FireRiskLimits(equity_risk_fraction=Decimal("0.0025"),
+                           minimum_net_reward_risk=None,
+                           version="btc-demo-chart-stop-v4", max_contracts=6)
+
     def test_chart_stop_policy_opt_in_does_not_undercut_normal_fire(self):
         from decimal import Decimal
         with self.assertRaises(ValueError):
