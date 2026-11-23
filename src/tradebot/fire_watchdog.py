@@ -89,7 +89,10 @@ def watchdog_tick(exchange, store, *, pause=None):
         # Do not convert the incident into an ordinary no-exposure receipt.
         prior_protection_failure = (
             status == "exposure_unknown"
-            and latest.get("reason_code") == "bracket_missing_or_position_changed"
+            and latest.get("reason_code") in (
+                "bracket_missing_or_position_changed",
+                "execution_or_protection_unverified",
+            )
         )
         reason = ("watchdog_protection_failure_flat_verified"
                   if prior_protection_failure else "verified_no_position_or_orders")
