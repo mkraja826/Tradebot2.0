@@ -126,7 +126,7 @@ class DemoSizeTests(unittest.TestCase):
             "indicators":features,
         }
         prompt = instruction_for_snapshot(obj)
-        self.assertIn("up to two contracts",prompt)
+        self.assertIn("at most two contracts per attempt",prompt)
         self.assertIn("WAIT remains valid",prompt)
         with self.assertRaises(PlanError):
             instruction_for_snapshot({
