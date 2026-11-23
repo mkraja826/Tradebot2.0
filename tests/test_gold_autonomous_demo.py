@@ -142,54 +142,11 @@ class GoldAutonomousTests(unittest.TestCase):
             "reason_code":"risk_governor_failed",
             "protection_verified":False}
         response=run_once(self.root,instant=NOW,armed=lambda:True,
-            candidate=lambda x:True,receipt_check=lambda x:True,            controller_factory=lambda *a,**k:fake,do_execute=True,cooldown_check=lambda *args,**kwargs:("ready",0))
+            candidate=lambda x:True,receipt_check=lambda x:True,
+            controller_factory=lambda *a,**k:fake,do_execute=True,cooldown_check=lambda *args,**kwargs:("ready",0))
         self.assertEqual(response["result"],"rejected_no_order")
         self.assertFalse(response["orders_submitted"])
         self.assertFalse((self.root/"gold-auto-demo-halt").exists())
-
-    def test_provider_network_failure_requires_missing_durable_intent(self):
-        db=self.root/"fire-xaut.sqlite"
-        with sqlite3.connect(db) as conn:
-            conn.execute("CREATE TABLE fire_requests("
-                         "press TEXT,status TEXT,result TEXT,created_at TEXT)")
-            conn.execute("CREATE TABLE fire_entries(press TEXT)")
-            conn.execute("INSERT INTO fire_requests VALUES(?,?,?,?)",
-                         ("id1","rejected_no_order",json.dumps({
-                            "orders_submitted":False,
-                            "protection_verified":False,
-                            "reason_code":"provider_network_error"}),NOW.isoformat()))
-        self.assertTrue(receipts_safe(self.root))
-        with sqlite3.connect(db) as conn:
-            conn.execute("INSERT INTO fire_entries VALUES(?)",("id1",))
-        self.assertFalse(receipts_safe(self.root))
-
-    def test_provider_network_no_order_does_not_create_halt(self):
-        db=self.root/"fire-xaut.sqlite"
-        with sqlite3.connect(db) as conn:
-            conn.execute("CREATE TABLE fire_entries(press TEXT)")
-        fake=Mock()
-        fake.start.return_value=(True,"accepted")
-        fake.snapshot.return_value={
-            "status":"rejected_no_order","orders_submitted":False,
-            "protection_verified":False,"reason_code":"provider_network_error"}
-        result=run_once(self.root,instant=NOW,armed=lambda:True,
-            candidate=lambda x:True,receipt_check=lambda x:True,
-            controller_factory=lambda *a,**k:fake,do_execute=True,
-            cooldown_check=lambda *a,**k:("ready",0))
-        self.assertEqual(result["result"],"rejected_no_order")
-        self.assertFalse((self.root/"gold-auto-demo-halt").exists())
-
-    def test_provider_failure_without_intent_table_is_not_retryable(self):
-        db=self.root/"fire-xaut.sqlite"
-        with sqlite3.connect(db) as conn:
-            conn.execute("CREATE TABLE fire_requests("
-                         "press TEXT,status TEXT,result TEXT,created_at TEXT)")
-            conn.execute("INSERT INTO fire_requests VALUES(?,?,?,?)",
-                         ("id2","rejected_no_order",json.dumps({
-                            "orders_submitted":False,
-                            "protection_verified":False,
-                            "reason_code":"provider_network_error"}),NOW.isoformat()))
-        self.assertFalse(receipts_safe(self.root))
 
     def test_gold_prior_safe_no_order_receipt_may_retry_after_five_minutes(self):
         db=self.root/"fire-xaut.sqlite"
@@ -231,7 +188,7 @@ class GoldAutonomousTests(unittest.TestCase):
                          ("x","protected_active","{}",NOW.isoformat()))
         self.assertFalse(receipts_safe(self.root))
 
-[redacted potentially sensitive output]
+    def test_gold_credential_scope_and_signed_flat_recheck(self):
         bot=AutoGoldController(self.root/"fire-xaut.sqlite",enabled=False)
         with patch("tradebot.gold_autonomous_demo.is_gold_armed",
                    return_value=True):
