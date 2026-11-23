@@ -224,8 +224,12 @@ def run_probe(routes, snapshot_loader, client_factory=TopBillingClient):
         stage = "provider_request"
         try:
             reply = client._call(TOPBILLING_CHAT_URL, body={
-                "model": model, "messages": [{"role": "system", "content": instruction},
-                                             {"role": "user", "content": content}]}, timeout=60)
+                "model": model,
+                # Provider supports this bound; GPT-6 route does not advertise
+                # structured-output, so do not request response_format.
+                "max_completion_tokens": 1024,
+                "messages": [{"role": "system", "content": instruction},
+                             {"role": "user", "content": content}]}, timeout=60)
             stage = "completion"
             choice = reply["choices"][0]
             if not isinstance(choice, dict):
