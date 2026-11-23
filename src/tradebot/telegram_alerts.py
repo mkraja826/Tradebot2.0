@@ -106,9 +106,13 @@ def telegram_send(token, chat_id, message):
 def _message_for(rows):
     """One bounded digest per delivery cycle, avoiding Telegram flood."""
     first, last = rows[0][0], rows[-1][0]
+    account = os.environ.get("TRADEBOT_ALERT_ACCOUNT")
+    if account not in (None, "", "BTC", "GOLD"):
+        raise AlertRelayError("telegram_account_scope_unverified")
     lines = [
         "🚨 Tradebot 2.0 safety events",
         "Environment: Delta India DEMO",
+        *((["Isolated subaccount: " + account]) if account else []),
         "Count: " + str(len(rows)),
         "Event IDs: " + str(first) + "–" + str(last),
         "",
