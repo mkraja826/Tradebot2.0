@@ -22,12 +22,28 @@ from tradebot.signed_margin_mode import (
     signed_account_margin_mode, MarginModeEvidenceError,
 )
 
+def _isolated_btc_services_active():
+    """Confirm the watchdog and wallet collector for this exact BTC child."""
+    import subprocess
+    import os
+    if os.environ.get("TRADEBOT_EXPECTED_DEMO_SUBACCOUNT") != "BTC":
+        return False
+    services = (
+        "tradebot2-isolated-demo-monitor@BTC-watchdog.service",
+        "tradebot2-isolated-demo-monitor@BTC-equity.service",
+        "tradebot2-dashboard.service",
+    )
+    return all(subprocess.run(
+        ["systemctl", "is-active", "--quiet", service],
+        check=False, timeout=3).returncode == 0 for service in services)
+
+
 APPROVAL_PHRASE = "EXECUTE ONE BTC DEMO FIRE"
 ATTEMPT_FILE = "btc-demo-supervised-attempt.lock"
 
 
 def readonly_btc_commission_preflight(
-        exchange, data_dir, *, services=_services_active,
+        exchange, data_dir, *, services=None,
         dashboard_disabled=_fire_disabled,
         session_fn=inspect_btc_session_candidate,
         recent_fn=inspect_recent_btc_window,
@@ -78,7 +94,15 @@ def readonly_btc_commission_preflight(
     if not report["supervised_session_verified"]:
         blocks.append("fresh_session_equity_unverified")
     try:
-        h = recent_fn(data_dir)
+        root = Path(data_dir)
+        if allow_signed_subaccount:
+            # Only the public market archive is shared across accounts.
+            # Signed equity, FIRE and monitoring ledgers remain child-local.
+            if root.name != "btc-isolated" or root.is_symlink() or root.parent.is_symlink():
+                raise ValueError("isolated_btc_data_scope_unverified")
+            h = recent_fn(root.parent)
+        else:
+            h = recent_fn(root)
         report["recent_btc_history_local_quality_verified"] = (
             type(h) is dict and h.get("status") == "recent24h_local_candidate_only"
             and h.get("complete_contiguous_24h") is True
@@ -134,7 +158,10 @@ def readonly_btc_commission_preflight(
         if not report["account_wide_flatness_verified"]:
             blocks.append("account_wide_exposure_unverified")
     try:
-        report["watchdog_and_collector_active"] = services() is True
+        services_check = services if services is not None else (
+            _isolated_btc_services_active
+            if allow_signed_subaccount else _services_active)
+        report["watchdog_and_collector_active"] = services_check() is True
     except Exception:
         pass
     if not report["watchdog_and_collector_active"]:
