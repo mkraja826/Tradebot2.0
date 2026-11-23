@@ -141,6 +141,41 @@ class ReconciliationTests(unittest.TestCase):
             order_id=900,fill_id="foreign-fill"))
         self.assert_unknown("overlapping_external_fills")
 
+    def test_uppercase_signed_uuid_matches_lowercase_wallet_alias(self):
+        identity = "123e4567-e89b-12d3-a456-426614174000"
+        self.broker.fills[0]["id"] = identity.upper()
+        meta = self.broker.postings[0]["meta_data"]
+        meta.pop("fill_id")
+        meta["fill_uuid"] = identity
+        report = self.run_report()
+        self.assertTrue(report["is_net_realized_pnl"], report)
+        self.assertEqual(report["net_realized_pnl_usd"], "0.075")
+        self.assertIn(identity, report["matched_fill_ids"])
+
+    def test_uuid_without_hyphens_matches_wallet_fill_uuid(self):
+        identity = "123e4567-e89b-12d3-a456-426614174001"
+        self.broker.fills[0]["id"] = identity.replace("-", "").upper()
+        meta = self.broker.postings[0]["meta_data"]
+        meta.pop("fill_id")
+        meta["fill_uuid"] = identity
+        report = self.run_report()
+        self.assertEqual(report["net_realized_pnl_usd"], "0.075")
+        self.assertIn(identity, report["matched_fill_ids"])
+
+    def test_raw_fill_id_case_normalizes_like_explicit_wallet_fill_id(self):
+        identity = "123e4567-e89b-12d3-a456-426614174002"
+        self.broker.fills[0]["id"] = identity.upper()
+        self.broker.postings[0]["meta_data"]["fill_id"] = identity
+        report = self.run_report()
+        self.assertTrue(report["is_net_realized_pnl"])
+        self.assertEqual(report["net_realized_pnl_usd"], "0.075")
+
+    def test_unknown_wallet_fill_uuid_still_blocks_pnl(self):
+        self.broker.postings[0]["meta_data"].pop("fill_id")
+        self.broker.postings[0]["meta_data"]["fill_uuid"] = (
+            "123e4567-e89b-12d3-a456-426614174003")
+        self.assert_unknown("posting_identity_mismatch")
+
     def test_long_round_trip_includes_partial_fills_fees_and_funding(self):
         report = self.run_report()
         self.assertEqual(report["net_realized_pnl_usd"], "0.075", report)
