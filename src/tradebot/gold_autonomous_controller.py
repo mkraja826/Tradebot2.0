@@ -5,10 +5,10 @@ flatness, three equity rechecks, leverage synchronization, postfill
 liquidation clearance and emergency reduce-only closeout. No production host.
 """
 import os
+from decimal import Decimal
 from pathlib import Path
 
-from tradebot.btc_demo_size import (
-    MAX_AUTONOMOUS_LARGE_CONTRACTS, evidence_contract_ceiling)
+from tradebot.btc_demo_size import MAX_AUTONOMOUS_LARGE_CONTRACTS
 from tradebot.btc_supervised_equity_guard import SupervisedSessionEquityGuard
 from tradebot.delta import DEMO_API
 from tradebot.fire_account_guard import require_flat_demo_account
@@ -136,23 +136,23 @@ class AutoGoldController(FireDemoController):
                 "chosen_leverage_requires_live_broker_recheck": True}
 
     def _normalize_plan(self, plan, context):
+        """Use DeepSeek's quantity unchanged; broker/risk proofs independently gate it.
+
+        Do not silently reduce the model's selected size to a technical
+        evidence tier. The fixed demo safety cap remains independently enforced.
+        """
         self._gold_sizing_record = {}
-        ceiling = evidence_contract_ceiling(context, plan.get("direction"))
         proposed = plan.get("contracts")
-        if (ceiling == 0 or type(proposed) is not int
-                or not 1 <= proposed <= self._hard_contract_cap()):
+        if type(proposed) is not int or not 1 <= proposed <= self._hard_contract_cap():
             return plan
-        size = min(proposed, ceiling)
         self._gold_sizing_record = {
-            "tier": ("strong_dynamic" if size >= 3 else
-                     "medium_two" if size == 2 else "exploratory_one"),
-            "policy": "gold-demo-evidence-size-v1",
-            "evidence_contract_ceiling": ceiling,
+            "policy": "gold-demo-model-selected-size-v1",
             "model_proposed_contracts": proposed,
-            "selected_contracts": size,
-            "model_selected_leverage": plan["leverage"],
+            "selected_contracts": proposed,
+            "model_selected_leverage": plan.get("leverage"),
+            "quantity_auto_reduced": False,
         }
-        return {**plan, "contracts": size}
+        return plan
 
     def _entry_sizing_record(self):
         evidence = getattr(self, "_gold_sizing_record", None)
@@ -167,4 +167,5 @@ class AutoGoldController(FireDemoController):
                 max_contracts=self._hard_contract_cap(),
                 equity_risk_fraction=None,
                 minimum_net_reward_risk=None,
+                minimum_gross_reward_risk=Decimal("1"),
                 version="gold-demo-chart-stop-v1"))
