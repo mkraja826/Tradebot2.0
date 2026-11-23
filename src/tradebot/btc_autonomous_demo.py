@@ -20,6 +20,9 @@ from tradebot.btc_supervised_execution import SupervisedBTCController
 from tradebot.btc_supervised_equity_guard import SupervisedSessionEquityGuard
 from tradebot.portfolio_equity_guard import EquityRiskError, amount
 from tradebot.fire_btc_supervised_commission import readonly_btc_commission_preflight
+from tradebot.fire_account_guard import (
+    AccountExposureRejected, require_flat_demo_account_for_configuration,
+)
 from tradebot.btc_demo_size import evidence_contract_ceiling
 
 ARM_CONTENT = "DELTA-INDIA-DEMO:BTCUSD:UNATTENDED:30MIN-MAX48-UTC-DAY"
@@ -212,6 +215,33 @@ def check_candidate(data_dir, *, broker_factory=DeltaDemo,
     )
 
 
+def signed_active_trade_skip(root, *, broker_factory=DeltaDemo,
+                             exposure_check=require_flat_demo_account_for_configuration):
+    """Return True only for a confirmed signed non-flat account, not a read error.
+
+    A broker outage, malformed pagination or missing credential is UNKNOWN and
+    must not be reported as an open trade. No broker mutation is permitted.
+    """
+    try:
+        broker = broker_factory(
+            api_key=os.getenv("DELTA_DEMO_API_KEY", ""),
+            api_secret=os.getenv("DELTA_DEMO_API_SECRET", ""),
+            allow_orders=False)
+        if (getattr(broker, "base_url", None) != DEMO_API
+                or getattr(broker, "allow_orders", None) is not False):
+            return None
+        exposure_check(broker)
+        return False
+    except AccountExposureRejected as exc:
+        return True if str(exc) in {
+            "Account has open exposure",
+            "Account has pending orders",
+            "FIRE market has open exposure",
+        } else None
+    except Exception:
+        return None
+
+
 def prior_fire_receipts_safe(root):
     """Never auto-retry an unresolved/error FIRE after a process restart."""
     path=Path(root)/"fire-ops.sqlite"
@@ -253,7 +283,8 @@ def prior_fire_receipts_safe(root):
 
 def run_once(data_dir, *, instant=None, armed=is_armed,
              candidate=check_candidate, controller_factory=AutoBTCController,
-             receipts_safe=prior_fire_receipts_safe, do_execute=False):
+             receipts_safe=prior_fire_receipts_safe,
+             active_trade_probe=signed_active_trade_skip, do_execute=False):
     """The default is read-only. The service requires its private arm file."""
     now = instant or datetime.now(timezone.utc)
     root = Path(data_dir)
@@ -268,6 +299,14 @@ def run_once(data_dir, *, instant=None, armed=is_armed,
     except Exception:
         eligible = False
     if not eligible:
+        # Do not spend GPT tokens or reserve an attempt when signed broker
+        # evidence specifically identifies a running position/order.
+        try:
+            active = active_trade_probe(root)
+        except Exception:
+            active = None
+        if active is True:
+            return {"status":"skipped_active_trade"}
         return {"status":"read_only_preflight_unavailable"}
     if not receipts_safe(root):
         return {"status":"previous_fire_decision_or_execution_unresolved"}
