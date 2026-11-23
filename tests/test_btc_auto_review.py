@@ -71,9 +71,10 @@ class NoOrderReviewTests(unittest.TestCase):
             self.root, approval=RISK_APPROVAL, candidate=lambda root: True)
         self.assertEqual(approved["status"], "reviewed_no_order")
         self.assertTrue(reviewed_receipt_matches(self.root))
-        self.assertTrue(prior_fire_receipts_safe(self.root) is False)
-        # The legacy receipt continues to require the incident-specific
-        # release path. New warning-only receipts use their own normal path.
+        self.assertTrue(prior_fire_receipts_safe(self.root))
+        # The legacy receipt can proceed only after matching signed review;
+        # the separate halt latch still requires its own incident-specific
+        # release path. New warning-only receipts take the normal path.
         with sqlite3.connect(self.dbpath) as db:
             db.execute("UPDATE fire_requests SET result=? WHERE press=?",
                        (json.dumps({**outcome, "take_profit": "62000"}), PRESS))
