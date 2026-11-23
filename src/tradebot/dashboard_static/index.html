@@ -10,6 +10,7 @@
   <script defer src="/app.js"></script>
   <script defer src="/charts.js"></script>
   <script defer src="/isolated.js"></script>
+  <script defer src="/performance.js"></script>
 </head>
 <body>
   <div class="shell">
@@ -18,6 +19,7 @@
       <div class="section-label">COMMAND CENTER</div>
       <a href="#overview" class="nav active"><span class="nav-icon">◫</span> Overview</a>
       <a href="#isolated-accounts" class="nav"><span class="nav-icon">◈</span> BTC + Gold Bots</a>
+      <a href="#autonomous-performance" class="nav"><span class="nav-icon">▤</span> Performance</a>
       <a href="#market" class="nav"><span class="nav-icon">⌁</span> Market &amp; Account</a>
       <a href="#intelligence" class="nav"><span class="nav-icon">✧</span> AI Decisions</a>
       <a href="#activity" class="nav"><span class="nav-icon">≡</span> Activity Log</a>
@@ -55,6 +57,26 @@
             <article class="isolated-card"><div class="isolated-loading">Loading Gold isolated account…</div></article>
           </div>
           <p class="isolated-disclosure">Equity observations are not realized profit. A worker running is not proof of an active position. An unverified broker read is shown as unavailable, never zero.</p>
+        </section>
+        <section class="isolated-performance" id="autonomous-performance"
+                 aria-labelledby="auto-performance-title">
+          <div class="isolated-head">
+            <div>
+              <div class="eyebrow">SIGNED BROKER FINANCIAL EVIDENCE · SEPARATE DEMO ACCOUNTS</div>
+              <h2 id="auto-performance-title">Trading performance</h2>
+              <p>Complete seven-day broker fill and wallet history. Posted trading cash flows are not necessarily attributable to GPT-6 or DeepSeek; final per-trade P&amp;L requires independent order/fill/funding reconciliation.</p>
+            </div>
+            <span id="performance-sync" class="isolated-sync" role="status" aria-live="polite">Loading broker history…</span>
+          </div>
+          <div class="performance-switch" role="group" aria-label="Broker posting cash flow period">
+            <button id="performance-24h" type="button" aria-pressed="true">Last 24 hours</button>
+            <button id="performance-7d" type="button" aria-pressed="false">Last 7 days</button>
+          </div>
+          <div id="performance-grid" class="performance-grid" aria-live="polite">
+            <div class="performance-card">BTC broker history loading…</div>
+            <div class="performance-card">Gold broker history loading…</div>
+          </div>
+          <p class="isolated-disclosure">All monetary figures are USD on Delta India Demo. Wallet activity excludes transfers and deposits. “Unverified” is not zero profit or loss; P&amp;L and win rate are published only for completely reconciled closed trades.</p>
         </section>
         <div class="notice" id="halt-banner" hidden>◈ &nbsp;PERSISTENT EXECUTION HALT DETECTED — inspect exchange positions and orders before restarting.</div>
         <section id="equity-risk-banner" class="equity-risk-banner" role="status" aria-live="polite" aria-atomic="true" aria-label="Equity checkpoint risk" data-state="unavailable">
