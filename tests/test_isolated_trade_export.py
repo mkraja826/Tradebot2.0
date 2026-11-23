@@ -28,7 +28,9 @@ class IsolatedExportTests(unittest.TestCase):
                 is_btc = label == "btc-isolated"
                 receipt = ({"model":"gpt6","orders_submitted":True,
                             "entry":{"price":"61200"},"direction":"LONG",
-                            "risk_assessment":{"expected_net_reward_risk":"0.5"}}
+                            "risk_assessment":{"expected_net_reward_risk":"0.5"},
+                            "risk_quote_diagnostics":{"source":"unit_test",
+                                "broker":{"gross_1_to_1_satisfied":False}}}
                            if is_btc else
                            {"model":"deepseek","orders_submitted":False,
                             "reason_code":"risk_governor_failed"})
@@ -45,6 +47,9 @@ class IsolatedExportTests(unittest.TestCase):
         self.assertEqual([r["symbol"] for r in rows], ["BTCUSD", "XAUTUSD"])
         self.assertEqual(len(collect(self.root,"BTCUSD")),1)
         self.assertEqual(rows[0]["entry_fill_price"],"61200")
+        self.assertEqual(json.loads(rows[0]["risk_quote_diagnostics_json"])[
+            "source"], "unit_test")
+        self.assertEqual(json.loads(rows[1]["risk_quote_diagnostics_json"]), {})
         self.assertEqual(rows[1]["reason_code"],"risk_governor_failed")
 
     def test_never_auto_classifies_or_invents_pnl(self):
