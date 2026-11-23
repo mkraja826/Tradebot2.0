@@ -16,8 +16,8 @@ def number(value):
 
 def entry_budget(exchange, symbol, product_id, price, *, planned_leverage=None, max_contracts_limit=1):
     # Scope remains one contract for every legacy/supervised FIRE caller.
-    # Only a separately bounded autonomous DEMO controller may request two.
-    if type(max_contracts_limit) is not int or not 1 <= max_contracts_limit <= 3:
+    # Only a separately bounded autonomous DEMO controller may request more.
+    if type(max_contracts_limit) is not int or not 1 <= max_contracts_limit <= 6:
         raise ValueError("Unsupported BTC demo contract limit")
     product = exchange._request("GET", "/v2/products/" + symbol)["result"]
     if (product["symbol"] != symbol or product["id"] != product_id
