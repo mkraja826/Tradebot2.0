@@ -17,7 +17,7 @@ import stat
 import time
 
 from tradebot.delta import DeltaDemo, DEMO_API
-from tradebot.autonomous_cooldown import post_close_cooldown
+from tradebot.autonomous_cooldown import post_close_cooldown, require_entry_cooldown
 from tradebot.btc_supervised_execution import SupervisedBTCController
 from tradebot.btc_supervised_equity_guard import SupervisedSessionEquityGuard
 from tradebot.fire_btc_supervised_commission import readonly_btc_commission_preflight
@@ -104,6 +104,10 @@ class AutoBTCController(SupervisedBTCController):
             raise ValueError("autonomous_btc_isolated_scope_required")
         if not signed_isolated_margin_proven(exchange):
             raise ValueError("signed_demo_margin_mode_required_before_entry")
+        # This same preflight runs before the model request, after the model
+        # decision and immediately before broker order intent. A direct
+        # controller entry therefore cannot bypass the worker cooldown.
+        require_entry_cooldown(self.path.parent, fire_filename="fire-ops.sqlite")
         # Live full-account exposure is reverified before the model call and
         # the POST, against the SAME subaccount credentials.
         return require_flat_demo_account(
