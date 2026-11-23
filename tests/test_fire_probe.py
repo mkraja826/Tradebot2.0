@@ -17,14 +17,16 @@ class FireProbeTest(unittest.TestCase):
             def _call(self, url, *, body=None, timeout):
                 if body is None:
                     return {"data": [{"id": ROLES["fire"]}]}
-                calls.append(body["model"])
+                calls.append(body)
                 answer = json.dumps(PLAN)
                 return {"choices": [{"message": {"content": answer}}]}
         snapshot = Mock(return_value={"core": CORE, "collected_at": "example"})
         report = run_probe(ROLES, snapshot, Client)
         snapshot.assert_called_once()
         self.assertEqual(ROLES, {"fire": "tb-gpt-6"})
-        self.assertEqual(calls, ["tb-gpt-6"])
+        self.assertEqual([row["model"] for row in calls], ["tb-gpt-6"])
+        self.assertEqual(calls[0]["max_completion_tokens"], 1024)
+        self.assertNotIn("response_format", calls[0])
         self.assertEqual(list(report["results"]), ["fire"])
         self.assertEqual(report["results"]["fire"]["decision"]["contracts"], 2)
 
