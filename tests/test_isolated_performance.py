@@ -15,7 +15,8 @@ import unittest
 from tradebot.dashboard import create_handler
 from tradebot.delta import DEMO_API
 from tradebot.isolated_performance import (
-    _cashflows, collect_account_performance, IsolatedPerformanceDashboard)
+    _cashflows, _cashflow_buckets, _trade_distribution,
+    collect_account_performance, IsolatedPerformanceDashboard)
 from tradebot.fire_reconciliation import ReconciliationError
 
 
@@ -112,6 +113,65 @@ class PerformanceTests(unittest.TestCase):
             start_us=stamp-7*86400*1000000,end_us=stamp)
         self.assertEqual(out["last_7d"]["status"],"unclassified_postings")
         self.assertIsNone(out["last_7d"]["posted_net_usd"])
+
+    def test_signed_cashflow_chart_buckets_equal_full_window(self):
+        report=collect_account_performance(
+            CompleteReadOnlyBroker(self.now),self.root,"BTCUSD",now=self.now)
+        series=report["cashflow_series"]
+        self.assertEqual(series["source"],"complete_signed_wallet_postings")
+        self.assertFalse(series["is_verified_trade_pnl"])
+        self.assertFalse(series["is_strategy_attributed"])
+        self.assertEqual(len(series["last_24h"]),12)
+        self.assertEqual(len(series["last_7d"]),7)
+        for key in ("last_24h","last_7d"):
+            parts=series[key]
+            self.assertEqual(
+                sum((Decimal(p["posted_net_usd"]) for p in parts),Decimal(0)),
+                Decimal("14.20"))
+            self.assertEqual(sum(p["included_postings"] for p in parts),3)
+            self.assertEqual(sum(p["excluded_external_transfers"]
+                                 for p in parts),2)
+            self.assertTrue(all(not p["is_strategy_attributed"] for p in parts))
+            self.assertTrue(parts[-1]["partial"])
+        d=report["trade_distribution"]
+        self.assertEqual(d["total"],3)
+        self.assertEqual(d["counts"]["no_order"],1)
+        self.assertEqual(d["counts"]["open_or_unresolved"],1)
+        self.assertEqual(d["counts"]["unverified"],1)
+        self.assertEqual(sum(d["counts"].values()),3)
+        self.assertFalse(d["is_win_rate"])
+
+    def test_unclassified_bucket_suppresses_amount_and_retains_other_buckets(self):
+        end=int(self.now.timestamp()*1_000_000)
+        out=_cashflow_buckets([
+            {"at_us":end-3600*1_000_000,"asset":"USD",
+             "type":"mystery","amount":"5000"},
+            {"at_us":end-8*3600*1_000_000,"asset":"USD",
+             "type":"cashflow","amount":"-2.5"}],
+            start_us=end-7*86400*1_000_000,end_us=end)
+        hourly=out["last_24h"]
+        self.assertEqual(hourly[-1]["status"],"unclassified_postings")
+        self.assertIsNone(hourly[-1]["posted_net_usd"])
+        self.assertEqual(hourly[-4]["status"],"verified_posted_cashflow")
+        self.assertEqual(Decimal(hourly[-4]["posted_net_usd"]),Decimal("-2.5"))
+        self.assertEqual(out["last_7d"][-1]["status"],"unclassified_postings")
+
+    def test_trade_distribution_counts_verified_and_unverified_separately(self):
+        rows=[
+            {"is_net_realized_pnl":True,"net_realized_pnl_usd":"2"},
+            {"is_net_realized_pnl":True,"net_realized_pnl_usd":"-1"},
+            {"is_net_realized_pnl":True,"net_realized_pnl_usd":"0"},
+            {"is_net_realized_pnl":False,"reconciliation_status":"no_order"},
+            {"is_net_realized_pnl":False,
+             "reconciliation_status":"position_open_or_unresolved"},
+            {"is_net_realized_pnl":False,"reconciliation_status":"unverified"},
+        ]
+        d=_trade_distribution(rows)
+        self.assertEqual(d["total"],6)
+        self.assertTrue(all(v==1 for v in d["counts"].values()))
+        self.assertEqual(d["coverage"],"complete_7d_receipts")
+        self.assertEqual(_trade_distribution(rows,truncated=True)["coverage"],
+                         "partial_bounded_receipts")
 
     def test_broker_history_failure_has_no_partial_financial_metrics(self):
         broker=CompleteReadOnlyBroker(self.now)
