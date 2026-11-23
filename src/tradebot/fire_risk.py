@@ -16,7 +16,7 @@ class RiskRejected(ValueError):
 class FireRiskLimits:
     equity_risk_fraction: Decimal | None = Decimal("0.0025")
     max_effective_leverage: Decimal = Decimal("20")
-    minimum_net_reward_risk: Decimal = Decimal("1.5")
+    minimum_net_reward_risk: Decimal | None = Decimal("1.5")
     slippage_reserve_each_side: Decimal = Decimal("0.0005")
     version: str = "fire-demo-risk-v2-dynamic-leverage"
     max_contracts: int = 1
@@ -34,7 +34,9 @@ class FireRiskLimits:
         if (type(self.max_contracts) is not int or not 1 <= self.max_contracts <= 6
                 or not valid_risk_fraction
                 or not 0 < self.max_effective_leverage <= Decimal("20")
-                or not Decimal("1") <= self.minimum_net_reward_risk
+                or not ((self.minimum_net_reward_risk is None and uncapped_demo)
+                        or (isinstance(self.minimum_net_reward_risk, Decimal)
+                            and Decimal("1") <= self.minimum_net_reward_risk))
                 or not 0 <= self.slippage_reserve_each_side <= Decimal("0.01")):
             raise ValueError("Invalid demo risk policy")
 
@@ -87,7 +89,12 @@ def assess_fire_plan(plan, budget, quote, *, limits=None):
     reserve = 2 * notional * limits.slippage_reserve_each_side
     loss = gross_loss + qty * (entry + stop) * fee_rate + reserve
     reward = gross_reward - qty * (entry + target) * fee_rate - reserve
-    if reward <= 0 or loss <= 0:
+    soft_quality_demo = (
+        limits.equity_risk_fraction is None
+        and limits.minimum_net_reward_risk is None
+        and limits.version == "btc-demo-chart-stop-v4"
+        and limits.max_contracts == 6)
+    if loss <= 0 or (reward <= 0 and not soft_quality_demo):
         raise RiskRejected("Non-positive net reward or invalid risk")
     maximum_loss = (equity * limits.equity_risk_fraction
                     if limits.equity_risk_fraction is not None else None)
@@ -102,8 +109,14 @@ def assess_fire_plan(plan, budget, quote, *, limits=None):
     stop_fraction = abs(entry - stop) / entry
     if stop_fraction + Decimal("0.035") >= Decimal(1) / leverage_selected:
         raise RiskRejected("Stop too close to theoretical liquidation at selected leverage")
-    if ratio < limits.minimum_net_reward_risk:
+    if (limits.minimum_net_reward_risk is not None
+            and ratio < limits.minimum_net_reward_risk):
         raise RiskRejected("Expected net reward-to-risk below policy")
+    quality_warnings = []
+    if soft_quality_demo and ratio < Decimal("1.5"):
+        quality_warnings.append("net_reward_risk_below_1_5")
+    if soft_quality_demo and reward <= 0:
+        quality_warnings.append("net_target_reward_after_costs_nonpositive")
     return {
         "policy_version": limits.version,
         "selected_leverage": leverage_selected,
@@ -115,6 +128,10 @@ def assess_fire_plan(plan, budget, quote, *, limits=None):
         "estimated_loss_fraction_of_equity": str(loss / equity),
         "equity_loss_ceiling_enabled": maximum_loss is not None,
         "expected_net_reward_risk": str(ratio),
+        "trade_quality_policy": (
+            "warnings_only_autonomous_demo" if soft_quality_demo
+            else "minimum_net_reward_risk_enforced"),
+        "quality_warnings": quality_warnings,
         "effective_leverage": str(leverage),
         "slippage_assumption_each_side": str(limits.slippage_reserve_each_side),
         "approved": True,
