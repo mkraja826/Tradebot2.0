@@ -40,11 +40,11 @@ class ReadinessTests(unittest.TestCase):
         return FakeBroker()
 
     def check(self, *, arm=False, receipts=False, preflight=good_preflight,
-              broker=None):
+              broker=None, margin_proof=lambda broker: True):
         return inspect(
             self.root, broker_factory=broker or self.broker,
             preflight=preflight, armed=lambda: arm,
-            receipts_safe=lambda root: receipts)
+            receipts_safe=lambda root: receipts, margin_proof=margin_proof)
 
     def test_explicit_arm_and_previous_receipt_fail_closed(self):
         r = self.check()
@@ -94,6 +94,18 @@ class ReadinessTests(unittest.TestCase):
             "equity_loss_limit_breached", "supervised_session_loss_limit"])
         self.assertFalse(result["order_authorized"])
         self.assertNotIn("private-dangerous-string", str(result))
+
+    def test_signed_margin_precondition_denies_order_even_with_good_preflight(self):
+        result = self.check(
+            arm=True, receipts=True, margin_proof=lambda broker: False)
+        self.assertEqual(result["status"], "blocked")
+        self.assertIn("signed_postfill_margin_mode_unavailable",
+                      result["blockers"])
+        self.assertTrue(result["demo_broker_preflight_verified"])
+        self.assertFalse(result["signed_postfill_margin_evidence_verified"])
+        self.assertFalse(result["order_authorized"])
+        self.assertFalse(result["broker_mutations"])
+        self.assertEqual(result["ai_calls"], 0)
 
     def test_missing_live_broker_evidence_returns_specific_code(self):
         def bad(broker, root, **kwargs):

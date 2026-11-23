@@ -23,6 +23,7 @@ from tradebot.fire_account_guard import (
 )
 from tradebot.btc_demo_size import evidence_contract_ceiling, MAX_AUTONOMOUS_LARGE_CONTRACTS
 from tradebot.fire_risk import FireRiskLimits, assess_fire_plan
+from tradebot.signed_margin_mode import signed_account_margin_mode
 
 ARM_CONTENT = "DELTA-INDIA-DEMO:BTCUSD:UNATTENDED:30MIN-MAX48-DYNAMIC6"
 MAX_DAILY_ATTEMPTS = 48
@@ -61,6 +62,19 @@ def is_armed(path=None):
 # 15-minute session, weekly/peak and protection gates still apply.
 
 
+def signed_isolated_margin_proven(broker):
+    """Verify the same signed margin identity required post-fill.
+
+    A demo owner declaration permits inspection but is not usable to certify
+    broker liquidation clearance. Never send another fee-incurring parent
+    order when this exact post-fill prerequisite cannot be satisfied.
+    """
+    try:
+        return signed_account_margin_mode(broker) == "isolated"
+    except Exception:
+        return False
+
+
 class AutoBTCController(SupervisedBTCController):
     def __init__(self,path,*,enabled=False,**kwargs):
         super().__init__(path,enabled=enabled,**kwargs)
@@ -72,6 +86,11 @@ class AutoBTCController(SupervisedBTCController):
     def _require_account_flat(self, exchange, product_id):
         if not is_armed():
             raise ValueError("autonomous_demo_disarmed")
+        # This check runs before GPT-6 and once again before broker POST.
+        # It prevents the known MAIN-account ambiguity from causing an
+        # immediate paid round trip through emergency reduce-only closeout.
+        if not signed_isolated_margin_proven(exchange):
+            raise ValueError("signed_demo_margin_mode_required_before_entry")
         return super()._require_account_flat(exchange, product_id)
 
     def _allow_wait_choice(self):
@@ -195,7 +214,8 @@ def set_attempt_status(data_dir, entry_id, status):
 
 
 def check_candidate(data_dir, *, broker_factory=DeltaDemo,
-                    preflight=readonly_btc_commission_preflight):
+                    preflight=readonly_btc_commission_preflight,
+                    margin_proof=signed_isolated_margin_proven):
     """Fresh authenticated read-only gate; no order authority by itself."""
     # DeltaDemo does not read credentials from environment by itself.
     # Supply them only to the readonly instance (never stored or reported).
@@ -220,6 +240,7 @@ def check_candidate(data_dir, *, broker_factory=DeltaDemo,
         and r.get("watchdog_and_collector_active") is True
         and r.get("both_dashboard_fire_endpoints_disabled") is True
         and r.get("trade_authorized") is False
+        and margin_proof(broker) is True
     )
 
 

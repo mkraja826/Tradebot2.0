@@ -307,6 +307,27 @@ class WatchdogTests(unittest.TestCase):
             [(press, "watchdog_protection_failure_flat_verified")])
         self.assertFalse(self.store.latest()["protection_verified"])
 
+    def test_controller_emergency_flatness_cannot_be_relabelled_ordinary(self):
+        press = self.seed()
+        # The execution controller can begin reduce-only closeout after
+        # a post-fill liquidation/margin proof error. Watchdog may observe
+        # flatness while controller's original final update is in flight.
+        # Preserve the incident rather than erasing its audit category.
+        self.store.update(
+            press, "exposure_unknown", protection_verified=False,
+            reason_code="execution_or_protection_unverified")
+        self.broker.size = 0
+        self.broker.orders = []
+        report = watchdog_tick(self.broker, self.store)
+        self.assertEqual(report["status"], "flat_verified")
+        self.assertEqual(self.broker.closeouts, 0)
+        self.assertEqual(
+            self.store.latest()["reason_code"],
+            "watchdog_protection_failure_flat_verified")
+        from tradebot.fire_watchdog import _durable_emergency_receipts
+        self.assertIn((press, "watchdog_protection_failure_flat_verified"),
+                      _durable_emergency_receipts(self.store))
+
     def test_ordinary_flatness_after_protection_does_not_raise_incident(self):
         press = self.seed()
         self.broker.size = 0
