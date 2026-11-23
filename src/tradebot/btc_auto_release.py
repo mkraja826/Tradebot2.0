@@ -52,7 +52,7 @@ def _latest_attempt_matches(root, press):
 
 def release_reviewed_no_order_halt(
         root, *, approval, candidate=check_candidate,
-        stopped=worker_stopped):
+        stopped=worker_stopped, armed=is_armed):
     """Release only a halt cryptographically associated with the reviewed no-order.
 
     Broker preflight and stop condition remain enforced by every future entry.
@@ -98,7 +98,7 @@ def release_reviewed_no_order_halt(
 
     # The authenticated broker exposure/monitoring preflight is independently
     # checked before writing any release audit. Model response is not authority.
-    if not is_armed() or candidate(root) is not True:
+    if armed() is not True or candidate(root) is not True:
         raise ValueError("Fresh signed DEMO preflight or owner arming is invalid")
     if (not stopped() or evidence(root) != required
             or not reviewed_receipt_matches(root)
