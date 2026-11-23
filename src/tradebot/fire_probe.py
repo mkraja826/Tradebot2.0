@@ -195,7 +195,8 @@ def instruction_for_snapshot(snapshot):
         return (
             "This is one BTCUSD Delta India DEMO autonomous candidate, "
             "bounded to at most 48 attempts per UTC day and no less than "
-            "30 minutes between attempted decisions. Up to six contracts "
+            "five minutes between attempted decisions, plus a five-minute "
+            "cooldown after a broker-verified closed trade. Up to six contracts "
             "are model-selectable without confidence-tier allocation, "
             "but always within separately verified broker margin, "
             "liquidation and attached bracket protections. " +
