@@ -45,7 +45,7 @@ RESTRICTED_BTC_INSTRUCTION = (
     "inadequate, choose WAIT. Never invent monthly or weekly statistics. "
     "In unattended DEMO, lower-confidence but defensible exploratory setups "
     "can use one contract to collect performance evidence; strong corroborated "
-    "setups may request up to two only if permitted by broker limits. "
+    "setups may request two or three only if permitted by broker limits. "
     "Do not invent a side or unprotected trade solely to increase frequency. "
     "WAIT when spread, price evidence, stop/target or risk is unsafe. "
     "Return only one JSON object with keys direction, leverage, contracts, "
@@ -89,7 +89,7 @@ def instruction_for_snapshot(snapshot):
             or not isinstance(ticker, dict)
             or ticker.get("symbol") != "BTCUSD"
             or type(scope.get("max_contracts_per_entry")) is not int
-            or not 1 <= scope["max_contracts_per_entry"] <= 2
+            or not 1 <= scope["max_contracts_per_entry"] <= 3
             or scope.get("attached_stop_loss_and_take_profit_required") is not True
             or not isinstance(levels, dict)
             or levels.get("strategy_history_version") != version
@@ -116,14 +116,14 @@ def instruction_for_snapshot(snapshot):
         raise PlanError("Unverified restricted BTC FIRE history")
     if scope.get("unattended_demo_mode") is True:
         if (scope.get("one_attempt_operator_supervision_required") is not False
-                or scope.get("max_new_order_attempts_per_utc_day") != 2):
+                or scope.get("max_new_order_attempts_per_utc_day") != 48):
             raise PlanError("Unsupported autonomous demo FIRE scope")
         return (
             "BTCUSD Delta India DEMO unattended candidate, at most two "
-            "attempts per UTC day and at most two contracts per attempt. "
+            "attempts per UTC day and at most three contracts per attempt. "
             "Prefer one small exploratory entry when market structure and "
-            "risk are acceptable even if conviction is modest; up to two "
-            "only for strong independently corroborated evidence. "
+            "risk are acceptable even if conviction is modest; two for "
+            "medium confidence and three only for strong independently " "corroborated evidence. "
             "Genuinely unsafe conditions still require WAIT. Account isolated margin "
             "is OPERATOR DECLARED, not independently broker-verified. "
             "Do not interpret this declaration as proof of broker leverage "
