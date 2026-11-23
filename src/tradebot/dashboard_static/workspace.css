@@ -201,3 +201,13 @@ body[data-screen="desk"] .desk{scroll-margin-top:14px}
  .activity-group-entries{padding:0 7px 11px}
  .activity-group-entries .event{padding:12px!important}
 }
+
+/* Legacy advanced market desk remains single column on phones. */
+@media(max-width:850px){
+ body[data-screen="desk"] .content > .desk,
+ body[data-screen="desk"] .content > .main-grid,
+ body[data-screen="desk"] .content > .secondary-grid{display:block!important}
+ body[data-screen="desk"] .content > .desk > *,
+ body[data-screen="desk"] .content > .main-grid > *,
+ body[data-screen="desk"] .content > .secondary-grid > *{margin-bottom:12px}
+}
