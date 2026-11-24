@@ -204,6 +204,31 @@
     monitor.append(infoRow("Daily / weekly checkpoint",
       (health.daily_checkpoint||"unavailable")+" / "+(health.weekly_checkpoint||"unavailable")));
     card.append(monitor);
+    const alerts=make("div","iso-monitor");
+    alerts.append(make("h4","","Protection and equity alerts"));
+    alerts.append(make("p","iso-warning",
+      "Read-only account diagnostics. Display severity does not change execution permissions."));
+    const cleanCodes=values=>Array.isArray(values)?
+      [...new Set(values.map(code=>typeof code==="string"&&/^[a-z][a-z0-9_]{0,79}$/.test(code)
+        ?code:"unrecognized_protection_condition"))].sort():null;
+    const blockers=cleanCodes(health.blocking_conditions);
+    const codes=cleanCodes(health.alert_codes);
+    const lossCodes=new Set(["equity_loss_limit_breached","equity_daily_loss_limit_breached"]);
+    if(blockers===null||codes===null) {
+      alerts.append(make("p","iso-unavailable","Protection conditions unavailable; not verified clear."));
+    } else {
+      const all=[...new Set([...blockers,...codes])].sort();
+      if(!all.length) alerts.append(make("p","iso-empty","No equity monitor conditions reported."));
+      for(const code of all) {
+        const status=blockers.includes(code)?"Monitor reports blocker":
+          lossCodes.has(code)?"Equity warning":"Review alert";
+        alerts.append(infoRow(code.replace(/_/g," "),status));
+      }
+    }
+    if(item.halted===true) alerts.append(infoRow("Worker incident","Halt reported"));
+    if(item.status!=="connected") alerts.append(infoRow("Broker identity","Unverified"));
+    alerts.append(make("small","","Only this subaccount is shown; parent-account accounting is separate."));
+    card.append(alerts);
     const history=make("div","iso-history");
     const hh=make("div","iso-history-head");
     hh.append(make("h4","","Recent execution receipts"),
