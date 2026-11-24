@@ -176,7 +176,7 @@ class MonitorStore:
                 transition = "resolved" if not active else "opened" if changed else "reminder"
                 severity = "info" if not active else (
                     "warning" if code.startswith("missed_") or code in ("equity_boundary_ambiguous",
-                                     DAILY_ONLY_WARNING)
+                                     DAILY_ONLY_WARNING, PORTFOLIO_LOSS_WARNING)
                     else "critical")
                 db.execute("INSERT INTO monitor_alert_state VALUES (?,?,?) "
                            "ON CONFLICT(code) DO UPDATE SET active=excluded.active, "

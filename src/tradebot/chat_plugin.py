@@ -104,10 +104,18 @@ def equity_checkpoint_status() -> dict:
         "latest_observation_age_seconds", "daily_next_window_start_utc",
         "weekly_next_window_start_utc",
     )
+    # Classify demo strategy loss warnings independently of raw health evidence.
+    # The dashboard checkpoint result is not autonomous execution admission.
+    loss_codes = {"equity_daily_loss_limit_breached", "equity_loss_limit_breached"}
+    alerts = data.get("alert_codes")
+    loss_warnings = sorted({code for code in alerts
+                            if isinstance(code, str) and code in loss_codes}) if isinstance(alerts, list) else []
     return {
         "environment": "delta-india-demo",
         "mode": "read_only_checkpoint_health",
         **{name: data.get(name) for name in safe_fields},
+        "demo_equity_loss_warnings": loss_warnings,
+        "checkpoint_is_execution_admission": False,
         "trade_authorized": False,
         "safe_to_enable_fire": False,
         "ready_for_unattended_trading": False,

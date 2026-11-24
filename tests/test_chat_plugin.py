@@ -36,6 +36,18 @@ class ChatPluginTests(unittest.TestCase):
         self.assertNotIn("PRIVATE_API_KEY", str(report))
         self.assertNotIn("SECRET_ACCOUNT_BALANCE", str(report))
 
+    def test_demo_loss_warning_does_not_replace_raw_checkpoint_or_authorize(self):
+        from tradebot.chat_plugin import equity_checkpoint_status
+        codes = ["equity_loss_limit_breached", "watchdog_protection_unverified"]
+        source = {"blocking_conditions": codes, "alert_codes": codes,
+                  "checkpoint_prerequisites_met": False}
+        with patch("tradebot.chat_plugin.dashboard", return_value=source):
+            report = equity_checkpoint_status()
+        self.assertEqual(report["demo_equity_loss_warnings"], ["equity_loss_limit_breached"])
+        self.assertEqual(report["blocking_conditions"], codes)
+        self.assertFalse(report["checkpoint_is_execution_admission"])
+        self.assertFalse(report["trade_authorized"])
+
     def test_empty_checkpoint_result_never_authorizes(self):
         from tradebot.chat_plugin import equity_checkpoint_status
         with patch("tradebot.chat_plugin.dashboard", return_value={}):
