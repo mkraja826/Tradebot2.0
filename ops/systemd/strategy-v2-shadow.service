@@ -1,0 +1,21 @@
+[Unit]
+Description=Tradebot2 Strategy V2 read-only BTC and Gold signal observation
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/home/support/Tradebot2.0/src/tradebot/strategy_v2/pipeline.py
+
+[Service]
+Type=oneshot
+User=support
+Group=support
+WorkingDirectory=/home/support/Tradebot2.0
+Environment=PYTHONPATH=/home/support/Tradebot2.0/src
+ExecStart=/home/support/Tradebot2.0/.venv/bin/python -m tradebot.strategy_v2.pipeline
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/home/support/Tradebot2.0/data/strategy-v2
+PrivateTmp=yes
+MemoryMax=192M
+TimeoutStartSec=25
