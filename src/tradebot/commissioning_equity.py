@@ -9,7 +9,7 @@ import stat
 from tradebot.delta import DEMO_API
 from tradebot.equity_monitor import risk_health
 from tradebot.equity_receipt import validate_receipt, EquityReadError
-from tradebot.portfolio_equity_guard import (
+from tradebot.equity_policy_core import (
     DEFAULT_LIMITS, PortfolioEquityGuard, EquityRiskError, amount, assess_equity, stamp,
     validated_watermark,
 )
