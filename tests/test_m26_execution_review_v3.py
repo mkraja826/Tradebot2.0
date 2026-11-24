@@ -16,6 +16,16 @@ class ReviewTests(unittest.TestCase):
             r=project("BTCUSD",a,{}, {},now=t)
             self.assertEqual(r["checks"]["account_identity"],"unverified")
             self.assertIn("checkpoint_unverified",r["existing_release_blockers"])
+    def test_malformed_or_inconsistent_account_evidence(self):
+        for leverage in (None,[],"bad",True):
+            a=report();a["markets"]["BTCUSD"]["leverage_evidence"]=leverage
+            r=project("BTCUSD",a,{}, {},now=NOW)
+            self.assertEqual(r["checks"]["configured_leverage"],"unverified_or_outside_ceiling")
+            self.assertFalse(r["execution_authorized"])
+        a=report();a["markets"]["BTCUSD"]["identity_verified"]=False
+        r=project("BTCUSD",a,{}, {},now=NOW)
+        self.assertEqual(r["checks"]["account_flatness"],"unverified")
+        self.assertEqual(r["checks"]["configured_leverage"],"unverified_or_outside_ceiling")
     def test_no_approval_even_healthy(self):
         r=project("BTCUSD",report(),{"prerequisites_met":True},{},now=NOW)
         self.assertEqual(r["checks"]["account_identity"],"observed")

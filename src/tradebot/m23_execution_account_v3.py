@@ -44,7 +44,10 @@ def inspect(symbol,child,parent,*,clock=lambda:datetime.now(timezone.utc)):
     try:
         # Diagnostic only; this internal exposure function is not a release gate.
         x=_require_flat_demo_exposure(child,selected_symbol=symbol,selected_product_id=a["product"]["product_id"])
-        if x["account_flat_verified"] is not True or x["open_positions"]!=0 or x["open_orders"]!=0:raise ValueError("flatness_unverified")
+        if (x["account_flat_verified"] is not True
+            or type(x["open_positions"]) is not int or x["open_positions"]!=0
+            or type(x["open_orders"]) is not int or x["open_orders"]!=0):
+            raise ValueError("flatness_unverified")
         out.update(flat_exposure_verified=True,status="signed_readonly_exposure_verified")
     except Exception as exc:
         out.update(stage="account_wide_exposure",reason=type(exc).__name__)

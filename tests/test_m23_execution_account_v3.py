@@ -24,6 +24,16 @@ class AccountTests(unittest.TestCase):
  def test_exposure_failure(self,read,flat):
     read.return_value=self.a;flat.side_effect=ValueError()
     self.assertFalse(inspect("BTCUSD",self.client,self.client)["flat_exposure_verified"])
+ @patch("tradebot.m23_execution_account_v3._require_flat_demo_exposure")
+ @patch("tradebot.m23_execution_account_v3.read_signed_context")
+ def test_invalid_zero_exposure_types(self,read,flat):
+    read.return_value=self.a
+    for value in (False,0.0,"0",None):
+        with self.subTest(value=value):
+            flat.return_value=dict(account_flat_verified=True,open_positions=value,open_orders=0)
+            self.assertFalse(inspect("BTCUSD",self.client,self.client)["flat_exposure_verified"])
+            flat.return_value=dict(account_flat_verified=True,open_positions=0,open_orders=value)
+            self.assertFalse(inspect("BTCUSD",self.client,self.client)["flat_exposure_verified"])
  def test_mutation_client_rejected(self):
     self.client.allow_orders=True
     self.assertEqual(inspect("BTCUSD",self.client,self.client)["stage"],"readonly_demo_required")

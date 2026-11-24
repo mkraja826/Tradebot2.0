@@ -23,10 +23,13 @@ def project(symbol,account,legacy,child,*,now):
             a=account["markets"][symbol]
     except (KeyError,ValueError,TypeError,AttributeError):pass
     l=a.get("leverage_evidence",{})
+    if not isinstance(l,dict): l={}
+    identity=a.get("identity_verified") is True
+    flat=identity and a.get("flat_exposure_verified") is True
     checks={
-        "account_identity":"observed" if a.get("identity_verified") is True else "unverified",
-        "account_flatness":"observed" if a.get("flat_exposure_verified") is True else "unverified",
-        "configured_leverage":"observed_within_existing_ceiling" if l.get("within_existing_20x_ceiling") is True else "unverified_or_outside_ceiling",
+        "account_identity":"observed" if identity else "unverified",
+        "account_flatness":"observed" if flat else "unverified",
+        "configured_leverage":"observed_within_existing_ceiling" if flat and l.get("within_existing_20x_ceiling") is True else "unverified_or_outside_ceiling",
         "execution_permission":"uncommissioned",
         "actual_order_margin":"uncommissioned",
         "decision_validation":"requires_current_trade",
