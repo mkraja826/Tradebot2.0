@@ -382,16 +382,19 @@ class IsolatedAccountsDashboard:
             }
         except Exception:
             info["equity_health"] = {"status": "unavailable"}
+        broker_stage = "child_credential_loading"
         try:
             child = self.credential_loader(
                 self.keys / ("btc-demo-keys.env" if label == "BTC"
                              else "gold-demo-keys.env"))
+            broker_stage = "child_readonly_client"
             broker = self.client_factory(
                 api_key=child["DELTA_DEMO_API_KEY"],
                 api_secret=child["DELTA_DEMO_API_SECRET"],
                 allow_orders=False)
             if (broker.base_url != DEMO_API or broker.allow_orders is not False):
                 raise ValueError("Only broker-signed DEMO readonly clients allowed")
+            broker_stage = "parent_identity_client"
             parent_key = os.environ.get("DELTA_DEMO_API_KEY")
             parent_secret = os.environ.get("DELTA_DEMO_API_SECRET")
             if not parent_key or not parent_secret:
@@ -400,12 +403,14 @@ class IsolatedAccountsDashboard:
                 api_key=parent_key, api_secret=parent_secret, allow_orders=False)
             if parent.base_url != DEMO_API or parent.allow_orders is not False:
                 raise ValueError("Parent broker evidence is not read-only DEMO")
+            broker_stage = "child_signed_identity"
             child_prefs = broker._request(
                 "GET", "/v2/users/trading_preferences", auth=True)
             prefs = child_prefs.get("result")
             if not isinstance(prefs, dict):
                 raise ValueError("Signed child identity unavailable")
             user = _user_id(prefs.get("user_id"))
+            broker_stage = "signed_subaccount_binding"
             mode = _parent_signed_subaccount_mode(
                 user, prefs.get("margin_mode"),
                 parent_exchange=parent, expected_label=label)
@@ -413,15 +418,22 @@ class IsolatedAccountsDashboard:
                 raise ValueError("Signed isolated margin mode unavailable")
             # Delta requires this signed account-wide inventory endpoint; the
             # product-filtered /v2/positions route cannot prove other exposure.
+            broker_stage = "signed_position_inventory"
             positions = broker._request("GET", "/v2/positions/margined", auth=True)
             rows = positions.get("result")
             view = _sanitized_positions(rows, symbol)
+            broker_stage = "signed_open_orders"
             orders = broker.open_orders()
+            if not isinstance(orders, list):
+                raise ValueError("Broker orders unverified")
+            broker_stage = "signed_wallet_equity"
             wallet = broker.wallet_balances()
             net = _num((wallet.get("meta") or {}).get("net_equity"))
             if not isinstance(orders, list) or net is None:
                 raise ValueError("Broker orders or net equity unverified")
+            broker_stage = "signed_bracket_validation"
             _signed_brackets(view, orders)
+            broker_stage = "account_report_assembly"
             info.update({
                 "status": "connected", "margin_mode": "isolated_verified",
                 "broker_checked_at": datetime.now(timezone.utc).isoformat(),
@@ -443,8 +455,13 @@ class IsolatedAccountsDashboard:
                         "Inspect the watchdog and settlement ledger.")
         except Exception:
             # No stale/raw broker data or credential details exposed on error.
-            info["status"] = "broker_unavailable"
-            info["margin_mode"] = "unverified"
+            info.update({
+                "status": "broker_unavailable", "margin_mode": "unverified",
+                "broker_failure_stage": broker_stage, "broker_checked_at": None,
+                "positions": None, "live_position_count": None,
+                "open_orders": None, "net_equity": None,
+                "reconciliation_warning": None,
+            })
         return info
 
     def refresh(self):
