@@ -77,6 +77,30 @@ class BTCRejectionProofTests(unittest.TestCase):
                 self.assertFalse(prior_fire_receipts_safe(self.root))
         self.rewrite()
 
+    def test_model_passes_but_signed_broker_quote_fails(self):
+        case=dict(self.receipt)
+        case["stop_loss"]="105"
+        case["take_profit"]="95"
+        case["decision_quote"]={"best_bid":"100","best_ask":"100.1"}
+        case["risk_quote_diagnostics"]={
+            "source":"snapshot_vs_signed_broker_quote",
+            "model_entry":"100","broker_entry":"99",
+            "quote_change_bps":"100",
+            "model":{"gross_1_to_1_satisfied":True,
+                     "stop_distance":"5","target_distance":"5",
+                     "gross_reward_risk":"1"},
+            "broker":{"gross_1_to_1_satisfied":False,
+                      "stop_distance":"6","target_distance":"4",
+                      "gross_reward_risk":"0.6666666666666666666666666667"}}
+        with sqlite3.connect(self.db) as db:
+            db.execute("UPDATE fire_model_inputs SET snapshot=?",(
+                json.dumps({"environment":"delta-india-demo",
+                   "fire_execution_scope":{"unattended_demo_mode":True},
+                   "core":{"best_bid":"100","best_ask":"100.1"}}),))
+        self.rewrite(case)
+        self.assertIsNotNone(evidence(self.root))
+        self.assertTrue(prior_fire_receipts_safe(self.root))
+
     def test_missing_snapshot_or_durable_intent_blocks(self):
         with sqlite3.connect(self.db) as db:
             db.execute("INSERT INTO fire_entries VALUES(?)",(BTC_PRESS,))
