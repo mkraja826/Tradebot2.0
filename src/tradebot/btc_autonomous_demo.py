@@ -192,6 +192,7 @@ class AutoBTCController(SupervisedBTCController):
             from tradebot.fire_risk import RiskRejected
             raise RiskRejected("Autonomous BTC requires owner-selected fixed 20x")
         return assess_fire_plan(
+            plan, budget, quote, limits=FireRiskLimits(
                 max_contracts=self._hard_contract_cap(),
                 equity_risk_fraction=None,
                 minimum_net_reward_risk=None,
