@@ -74,6 +74,32 @@ def safe_risk_rejection_detail(exc):
     return RISK_REJECTION_LABELS.get(str(exc), "unclassified_risk_rejection")
 
 
+# Fixed, non-sensitive diagnostics for PRE-ORDER validation failures.
+# The rejection remains unchanged; this only explains the exact failed gate.
+EXCHANGE_PREFLIGHT_LABELS = {
+    "Demo-only trading API required": "wrong_exchange_environment",
+    "Selected market ticker mismatch": "broker_ticker_mismatch",
+    "Stale broker quote": "stale_broker_quote",
+    "Invalid broker spread": "invalid_broker_spread",
+    "Selected broker product not verified": "broker_product_mismatch",
+    "Invalid broker tick size": "missing_or_invalid_broker_tick",
+    "GPT-6 exit price not aligned to current broker tick size": "exit_price_off_broker_tick",
+    "Protective orders already crossed the broker mark price": "protective_price_crossed_mark",
+    "Market moved after GPT-6 analysis": "broker_quote_moved",
+    "Existing exchange orders require reconciliation": "existing_orders_need_reconciliation",
+    "An existing position must be closed first": "existing_position_not_flat",
+}
+
+
+def safe_exchange_preflight_detail(exc):
+    if isinstance(exc, RiskRejected):
+        return safe_risk_rejection_detail(exc)
+    if isinstance(exc, FireTradeError):
+        return EXCHANGE_PREFLIGHT_LABELS.get(
+            str(exc), "unclassified_exchange_preflight_failure")
+    return "exchange_preflight_exception_unclassified"
+
+
 def _pretrade_quote_distance_evidence(model_core, checked_quote, plan):
     """Explain 1:1 reject across model versus signed pre-order broker quote.
 
@@ -304,7 +330,7 @@ class FireTradeStore:
         allowed = {"model", "direction", "contracts", "stop_loss",
                    "take_profit", "broker_order_id", "order_state",
                    "protection_verified", "orders_submitted",
-                   "model_latency_ms", "budget", "sizing_estimate", "sizing_evidence", "risk_assessment", "reason_code", "risk_rejection_detail", "risk_quote_diagnostics", "snapshot_at", "thesis", "decision_at", "entry", "exit_order_ids", "protected_at", "decision_quote", "indicators", "selected_leverage", "liquidation_verified", "liquidation_price"}
+                   "model_latency_ms", "budget", "sizing_estimate", "sizing_evidence", "risk_assessment", "reason_code", "risk_rejection_detail", "preflight_rejection_detail", "risk_quote_diagnostics", "snapshot_at", "thesis", "decision_at", "entry", "exit_order_ids", "protected_at", "decision_quote", "indicators", "selected_leverage", "liquidation_verified", "liquidation_price"}
         if set(fields) - allowed:
             raise FireTradeError("Unexpected FIRE status data")
         with closing(self._connect()) as db:
@@ -349,7 +375,10 @@ def _live_preflight(exchange, snapshot, plan):
             str(product.get("id")) != str(snapshot["core"]["ticker"]["product_id"]) or
             product.get("symbol") != symbol):
         raise FireTradeError("Selected broker product not verified")
-    tick = _dec(product.get("tick_size"))
+    try:
+        tick = _dec(product.get("tick_size"))
+    except FireTradeError:
+        raise FireTradeError("Invalid broker tick size") from None
     if tick <= 0:
         raise FireTradeError("Invalid broker tick size")
     for price_name in ("stop_loss", "take_profit"):
@@ -726,8 +755,11 @@ class FireDemoController:
         except Exception as exc:
             # Preserve existing retry semantics and safety gates.
             if not submitted:
-                detail = ({"risk_rejection_detail": safe_risk_rejection_detail(exc)}
-                          if stage == "risk_governor" else {})
+                detail = (
+                    {"risk_rejection_detail": safe_risk_rejection_detail(exc)}
+                    if stage == "risk_governor" else
+                    {"preflight_rejection_detail": safe_exchange_preflight_detail(exc)}
+                    if stage == "exchange_preflight" else {})
                 if (self.symbol == "BTCUSD" and detail.get(
                         "risk_rejection_detail") == "stop_distance_exceeds_target"):
                     proof = _pretrade_quote_distance_evidence(
