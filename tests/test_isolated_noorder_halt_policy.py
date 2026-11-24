@@ -85,7 +85,7 @@ class BTCRejectionProofTests(unittest.TestCase):
         case["risk_quote_diagnostics"]={
             "source":"snapshot_vs_signed_broker_quote",
             "model_entry":"100","broker_entry":"99",
-            "quote_change_bps":"100",
+            "quote_change_bps":"-100",
             "model":{"gross_1_to_1_satisfied":True,
                      "stop_distance":"5","target_distance":"5",
                      "gross_reward_risk":"1"},
@@ -100,6 +100,11 @@ class BTCRejectionProofTests(unittest.TestCase):
         self.rewrite(case)
         self.assertIsNotNone(evidence(self.root))
         self.assertTrue(prior_fire_receipts_safe(self.root))
+        bad=dict(case)
+        bad["risk_quote_diagnostics"]={**case["risk_quote_diagnostics"],
+                                       "quote_change_bps":"100"}
+        self.rewrite(bad)
+        self.assertIsNone(evidence(self.root))
 
     def test_missing_snapshot_or_durable_intent_blocks(self):
         with sqlite3.connect(self.db) as db:
