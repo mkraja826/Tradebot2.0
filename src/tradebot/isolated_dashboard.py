@@ -365,10 +365,11 @@ class IsolatedAccountsDashboard:
             "reconciliation_warning": None,
         }
         try:
-            health = risk_health(root / "fire-equity-risk.sqlite")
+            from tradebot.subaccount_equity_scope_v3 import scoped_equity_ledger
+            health = risk_health(scoped_equity_ledger(self.root, symbol))
             info["equity_health"] = {
                 k: health.get(k) for k in (
-                    "status", "daily_checkpoint", "weekly_checkpoint",
+                    "status", "as_of", "daily_checkpoint", "weekly_checkpoint",
                     "database_integrity", "latest_receipt_status",
                     "observation_status", "latest_observation_age_seconds",
                     "blocking_conditions", "alert_codes", "checkpoint_prerequisites_met"
