@@ -15,7 +15,7 @@ import sqlite3
 import tempfile
 
 from tradebot.equity_install_preflight import inspect_collector_schema
-from tradebot.portfolio_equity_guard import PortfolioEquityGuard
+from tradebot.equity_policy_core import PortfolioEquityGuard
 
 
 def _sha256(path):
