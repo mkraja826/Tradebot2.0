@@ -66,8 +66,13 @@ def inspect(data_dir, *, broker_factory=DeltaDemo,
             # The owner main/isolated declaration can allow a signed
             # preflight yet fail the *mandatory* post-fill liquidation check.
             # Distinguish this now, BEFORE any model or fee-incurring order.
-            result["signed_postfill_margin_evidence_verified"] = (
-                margin_proof(broker) is True)
+            try:
+                result["signed_postfill_margin_evidence_verified"] = (
+                    margin_proof(broker) is True)
+            except Exception:
+                # Preserve the margin blocker, but continue independent read-only
+                # diagnostics so a transient probe failure does not mask other faults.
+                result["signed_postfill_margin_evidence_verified"] = False
             if not result["signed_postfill_margin_evidence_verified"]:
                 blockers.append("signed_postfill_margin_mode_unavailable")
             check = preflight(
