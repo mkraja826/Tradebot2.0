@@ -14,11 +14,21 @@ def number(value):
     return result
 
 
-def entry_budget(exchange, symbol, product_id, price, *, planned_leverage=None, max_contracts_limit=1):
+def entry_budget(exchange, symbol, product_id, price, *,
+                 planned_leverage=None, max_contracts_limit=1,
+                 margin_share=MARGIN_SHARE):
     # Scope remains one contract for every legacy/supervised FIRE caller.
     # Only a separately bounded autonomous DEMO controller may request more.
-    if type(max_contracts_limit) is not int or not 1 <= max_contracts_limit <= 6:
-        raise ValueError("Unsupported BTC demo contract limit")
+    # Default FIRE remains 20% margin and one contract. Only isolated
+    # autonomous controllers explicitly opt into the user's 40% ceiling.
+    maximum = 1200 if symbol == "XAUTUSD" else 96 if symbol == "BTCUSD" else 1
+    if type(max_contracts_limit) is not int or not 1 <= max_contracts_limit <= maximum:
+        raise ValueError("Unsupported isolated demo contract limit")
+    if (not isinstance(margin_share, Decimal)
+            or not margin_share.is_finite()
+            or not Decimal("0") < margin_share <= Decimal("0.40")
+            or (margin_share > MARGIN_SHARE and max_contracts_limit == 1)):
+        raise ValueError("Higher margin ceiling reserved for isolated demo controllers")
     product = exchange._request("GET", "/v2/products/" + symbol)["result"]
     if (product["symbol"] != symbol or product["id"] != product_id
             or product["contract_type"] != "perpetual_futures"
@@ -38,7 +48,7 @@ def entry_budget(exchange, symbol, product_id, price, *, planned_leverage=None, 
     equity = number(wallet["meta"]["net_equity"])
     usd, = (r for r in wallet["balances"] if r["asset_symbol"] == "USD")
     available = number(usd["available_balance"])
-    ceiling = equity * MARGIN_SHARE
+    ceiling = equity * margin_share
     multiplier = number(product["contract_value"])
     per_contract = multiplier * number(price)
     if not per_contract or not leverage:
@@ -70,7 +80,9 @@ def entry_budget(exchange, symbol, product_id, price, *, planned_leverage=None, 
             low = mid
         else:
             high = mid - 1
-    return {"margin_budget_usd": str(ceiling), "leverage": str(leverage),
+    return {"margin_budget_usd": str(ceiling),
+            "max_equity_margin_fraction": str(margin_share),
+            "leverage": str(leverage),
             "equity_usd": str(equity), "taker_commission_rate": str(fee),
             "equity_read_receipt": wallet.get("equity_read_receipt"),
             "risk_policy": "fire-demo-risk-v2-dynamic-leverage",

@@ -25,30 +25,31 @@ from tradebot.gold_autonomous_readiness import gold_preflight
 # would unexpectedly disarm an already-approved isolated DEMO worker.
 ARM_CONTENT = "DELTA-INDIA-DEMO:XAUTUSD:DEEPSEEK:UNATTENDED:30MIN-MAX48-DYNAMIC6"
 MIN_INTERVAL=5*60
-POLL_SECONDS=300
+POLL_SECONDS=60
 TERMINAL_SAFE={"rejected_no_order","flat_verified"}
 SAFE_NO_ORDER_REASONS = frozenset((
     "risk_governor_failed", "autonomous_invalid_wait",
-    "market_quality_failed", "provider_network_error"))
+    "market_quality_failed", "provider_network_error", "provider_http_500"))
+PROVIDER_NO_ORDER_REASONS = frozenset(("provider_network_error", "provider_http_500"))
 
 
 def _no_durable_intent(root, press):
-    """A retryable AI-provider failure must predate any durable broker POST."""
-    file = Path(root)/"fire-xaut.sqlite"
+    """Only retry a provider error if no broker order intent was persisted."""
+    file = Path(root) / "fire-xaut.sqlite"
     if type(press) is not str or not press or file.is_symlink() or not file.is_file():
         return False
     try:
         with closing(sqlite3.connect(
-                file.absolute().as_uri()+"?mode=ro",uri=True,timeout=3)) as db:
+                file.absolute().as_uri() + "?mode=ro", uri=True, timeout=3)) as db:
             db.execute("PRAGMA query_only=ON")
             if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' "
                               "AND name='fire_entries'").fetchone():
                 return False
-            return db.execute("SELECT 1 FROM fire_entries WHERE press=? LIMIT 1",
-                              (press,)).fetchone() is None
+            return db.execute(
+                "SELECT 1 FROM fire_entries WHERE press=? LIMIT 1",
+                (press,)).fetchone() is None
     except (sqlite3.Error, ValueError, OSError, TypeError):
         return False
-
 
 
 def gold_arm_path():
@@ -135,8 +136,10 @@ def receipts_safe(root):
                 return (detail.get("orders_submitted") is False
                     and detail.get("protection_verified") is False
                     and detail.get("reason_code") in SAFE_NO_ORDER_REASONS
-                    and (detail.get("reason_code") != "provider_network_error"
-                         or _no_durable_intent(root,row[0])))
+                    and (detail.get("reason_code") not in PROVIDER_NO_ORDER_REASONS
+                         or (not detail.get("broker_order_id")
+                             and not detail.get("exit_order_ids")
+                             and _no_durable_intent(root, row[0]))))
             # Broker-signed watchdog closed an ordinarily protected trade.
             # In a naturally flat terminal receipt, attached protection is
             # no longer active, so do not require protection_verified=True.
@@ -185,6 +188,17 @@ def run_once(data_dir,*,instant=None,armed=is_gold_armed,candidate=check_candida
         return {"status":"disarmed"}
     if (root/"gold-auto-demo-halt").exists():
         return {"status":"halted_pending_operator_review"}
+    # Cooldown is a cheap local-ledger read. Check it before expensive signed
+    # broker preflight calls so the worker can poll once per minute without
+    # extra model spending or repeated broker API traffic while cooling.
+    if do_execute:
+        cooldown, remaining = cooldown_check(
+            root, fire_filename="fire-xaut.sqlite", now=now)
+        if cooldown == "unavailable":
+            return {"status":"verified_trade_close_time_unavailable"}
+        if cooldown == "cooling_down":
+            return {"status":"post_trade_cooldown",
+                    "remaining_seconds":remaining}
     try:
         eligible=candidate(root)
     except Exception:
@@ -201,13 +215,6 @@ def run_once(data_dir,*,instant=None,armed=is_gold_armed,candidate=check_candida
         return {"status":"previous_gold_fire_unresolved"}
     if not do_execute:
         return {"status":"eligible_read_only_no_order"}
-    cooldown, remaining = cooldown_check(
-        root, fire_filename="fire-xaut.sqlite", now=now)
-    if cooldown == "unavailable":
-        return {"status":"verified_trade_close_time_unavailable"}
-    if cooldown == "cooling_down":
-        return {"status":"post_trade_cooldown",
-                "remaining_seconds":remaining}
     attempt=claim_attempt(root,now)
     if attempt is None:
         return {"status":"interval_cooldown_active"}
@@ -232,8 +239,10 @@ def run_once(data_dir,*,instant=None,armed=is_gold_armed,candidate=check_candida
             and receipt.get("orders_submitted") is False
             and receipt.get("protection_verified") is False
             and receipt.get("reason_code") in SAFE_NO_ORDER_REASONS
-            and (receipt.get("reason_code") != "provider_network_error"
-                 or _no_durable_intent(root,attempt)))
+            and (receipt.get("reason_code") not in PROVIDER_NO_ORDER_REASONS
+                 or (not receipt.get("broker_order_id")
+                     and not receipt.get("exit_order_ids")
+                     and _no_durable_intent(root, attempt))))
         if ((status not in TERMINAL_SAFE and not protected)
                 or (status=="rejected_no_order" and not safe_no_order)
                 or emergency):

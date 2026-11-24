@@ -79,6 +79,11 @@ class FireProbeTest(unittest.TestCase):
             AUTONOMOUS_BTC_DIRECTION_INSTRUCTION, INSTRUCTION)
         prompt = AUTONOMOUS_BTC_DIRECTION_INSTRUCTION
         self.assertIn("quality threshold is 1.5", prompt)
+        self.assertIn("Signed executable broker", prompt)
+        self.assertIn("1.01:1", prompt)
+        self.assertIn("NEW broker price", prompt)
+        self.assertIn("chart-defensible SL/TP", prompt)
+        self.assertIn("Never widen a target past real levels", prompt)
         self.assertIn("WARNING ONLY", prompt)
         self.assertIn("taker_commission_rate", prompt)
         self.assertIn("0.0005", prompt)

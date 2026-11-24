@@ -52,6 +52,22 @@ def identifier(value):
     return str(value)
 
 
+def canonical_fill_id(value):
+    """Use broker-defined UUID identity, regardless of casing or 32/36 form.
+
+    Delta fills may use uppercase UUID strings while commission wallet
+    metadata contains lowercase fill_uuid. Only UUID spelling is normalized;
+    unknown or non-UUID identifiers retain their exact identity.
+    """
+    identity = identifier(value)
+    if type(value) is str and len(value) in (32, 36):
+        try:
+            return str(UUID(value))
+        except (ValueError, AttributeError):
+            pass
+    return identity
+
+
 def timestamp_us(value):
     """Broker microseconds or explicit timezone-aware ISO; no guessed units."""
     if type(value) is int or (isinstance(value, str) and value.isdigit()):
@@ -81,7 +97,7 @@ def normalize_fill(raw):
     require(isinstance(meta, dict), "invalid_fill_metadata")
     position = meta.get("new_position") or {}
     require(isinstance(product, dict) and isinstance(position, dict), "invalid_fill_metadata")
-    row = {"id": identifier(raw.get("id")), "order_id": identifier(raw.get("order_id")),
+    row = {"id": canonical_fill_id(raw.get("id")), "order_id": identifier(raw.get("order_id")),
            "product_id": identifier(raw.get("product_id")), "symbol": raw.get("product_symbol"),
            "at_us": timestamp_us(raw.get("created_at")), "side": raw.get("side"),
            "size": decimal_text(raw.get("size")), "price": decimal_text(raw.get("price")),
@@ -110,7 +126,8 @@ def normalize_posting(raw):
     require(isinstance(meta, dict), "invalid_posting_metadata")
     refs = {}
     for key in ("order_id", "fill_id"):
-        values = {identifier(source[key]) for source in (raw, meta)
+        normalize = canonical_fill_id if key == "fill_id" else identifier
+        values = {normalize(source[key]) for source in (raw, meta)
                   if source.get(key) is not None}
         require(len(values) <= 1, "conflicting_posting_reference")
         refs[key] = next(iter(values), None)
@@ -169,6 +186,31 @@ def unavailable(reason):
             "reconciliation_version": VERSION, "reconciliation_reason": reason,
             "net_realized_pnl_usd": None, "is_net_realized_pnl": False,
             "funding_reconciled": False}
+
+
+def _proven_foreign_fill_posting(posting, foreign_by_id, foreign_by_order,
+                                 first, last):
+    """Exclude only independently signed, foreign-fill-linked fee/cash postings.
+
+    Wallet posting time may lag its broker fill and fall inside another
+    trade's lifetime. A known OTHER fill outside that lifetime plus matching
+    explicit posting reference(s) proves it cannot be the selected trade's
+    commission or settlement. Unlinked funding/adjustments stay ambiguous.
+    """
+    if posting["type"] not in ("commission", "cashflow"):
+        return False
+    oid, fid = posting["order_id"], posting["fill_id"]
+    if oid is None and fid is None:
+        return False
+    if oid is not None and oid not in foreign_by_order:
+        return False
+    if fid is not None and fid not in foreign_by_id:
+        return False
+    if oid is not None and fid is not None and foreign_by_id[fid]["order_id"] != oid:
+        return False
+    matches = foreign_by_order[oid] if oid is not None else [foreign_by_id[fid]]
+    return bool(matches) and all(
+        not first <= f["at_us"] <= last for f in matches)
 
 
 def analyse(symbol, trade, product, orders, fills, postings, start_us, end_us):
@@ -247,8 +289,11 @@ def analyse(symbol, trade, product, orders, fills, postings, start_us, end_us):
     # Neither route can create a report or assume an absent total is zero.
     final_funding = selected[-1]["realized_funding"]
     fill_by_id = {f["id"]: f for f in selected}
-    other_orders = {f["order_id"] for f in fills if f["order_id"] not in owned}
-    other_fills = {f["id"] for f in fills if f["order_id"] not in owned}
+    foreign = [f for f in fills if f["order_id"] not in owned]
+    foreign_by_id = {f["id"]: f for f in foreign}
+    foreign_by_order = {}
+    for f in foreign:
+        foreign_by_order.setdefault(f["order_id"], []).append(f)
     totals = dict.fromkeys(("cashflow", "commission", "funding"), ZERO)
     attributed = []
     for p in postings:
@@ -263,11 +308,15 @@ def analyse(symbol, trade, product, orders, fills, postings, start_us, end_us):
                     and (oid is None or fid is None or fill_by_id[fid]["order_id"] == oid)
                     and p["product_id"] in (None, pid), "posting_identity_mismatch")
             require(p["at_us"] >= first, "posting_precedes_trade")
+        elif _proven_foreign_fill_posting(
+                p, foreign_by_id, foreign_by_order, first, last):
+            # The signed fill belongs to an entirely different order and is
+            # outside this trade's lifecycle; this cash posting is not ours.
+            # No amount or fee is estimated, and no funding is ignored.
+            continue
         elif same_product and within:
             require(oid is None and fid is None, "overlapping_external_postings")
         elif p["at_us"] >= first and (same_product or p["product_id"] is None):
-            if (oid in other_orders or fid in other_fills) and not within:
-                continue
             # A currency-only entry could be this trade's fee/tax/adjustment.
             # Unreferenced delayed same-product cashflows are ambiguous too.
             raise ReconciliationError("unattributed_wallet_posting")

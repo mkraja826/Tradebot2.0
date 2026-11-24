@@ -9,7 +9,8 @@ from decimal import Decimal
 from pathlib import Path
 
 from tradebot.autonomous_cooldown import require_entry_cooldown
-from tradebot.btc_demo_size import MAX_AUTONOMOUS_LARGE_CONTRACTS
+from tradebot.isolated_tier_sizing import GOLD_DEMO_CAP, FIXED_LEVERAGE, MAX_MARGIN_SHARE, size_guideline_evidence
+from tradebot.fire_budget import entry_budget
 from tradebot.btc_supervised_equity_guard import SupervisedSessionEquityGuard
 from tradebot.delta import DEMO_API
 from tradebot.fire_account_guard import require_flat_demo_account
@@ -120,42 +121,43 @@ class AutoGoldController(FireDemoController):
             "trade_authorized": False,
             "one_attempt_operator_supervision_required": False,
             "daily_attempt_cap_enabled": False,
+            "fixed_leverage": FIXED_LEVERAGE,
+            "equity_margin_tiers": {"small": "0.05", "medium": "0.20",
+                                      "large": "0.40"},
+            "broker_margin_cap_fraction": str(MAX_MARGIN_SHARE),
         }
 
     def _allow_wait_choice(self):
         return False
 
     def _hard_contract_cap(self):
-        return MAX_AUTONOMOUS_LARGE_CONTRACTS
+        return GOLD_DEMO_CAP
+
+    def _entry_budget(self, exchange, product_id, price, *, planned_leverage=None):
+        return entry_budget(exchange, self.symbol, product_id, price,
+            planned_leverage=planned_leverage,
+            max_contracts_limit=self._hard_contract_cap(),
+            margin_share=MAX_MARGIN_SHARE)
 
     def _max_contracts_for_entry(self, budget):
-        return min(MAX_AUTONOMOUS_LARGE_CONTRACTS,
+        return min(GOLD_DEMO_CAP,
                    super()._max_contracts_for_entry(budget))
 
     def _model_entry_budget(self, exchange, product_id, price):
         preview = self._entry_budget(
-            exchange, product_id, price, planned_leverage=20)
+            exchange, product_id, price, planned_leverage=FIXED_LEVERAGE)
+        self._tier_preview = preview
         return {**preview, "capacity_preview_only": True,
                 "capacity_preview_leverage": 20,
                 "chosen_leverage_requires_live_broker_recheck": True}
 
     def _normalize_plan(self, plan, context):
-        """Use DeepSeek's quantity unchanged; broker/risk proofs independently gate it.
-
-        Do not silently reduce the model's selected size to a technical
-        evidence tier. The fixed demo safety cap remains independently enforced.
-        """
-        self._gold_sizing_record = {}
+        """Respect DeepSeek's exact contract quantity and tier selection."""
         proposed = plan.get("contracts")
-        if type(proposed) is not int or not 1 <= proposed <= self._hard_contract_cap():
-            return plan
-        self._gold_sizing_record = {
-            "policy": "gold-demo-model-selected-size-v1",
-            "model_proposed_contracts": proposed,
-            "selected_contracts": proposed,
-            "model_selected_leverage": plan.get("leverage"),
-            "quantity_auto_reduced": False,
-        }
+        self._gold_sizing_record = {}
+        if type(proposed) is int and 1 <= proposed <= self._hard_contract_cap():
+            self._gold_sizing_record = size_guideline_evidence(
+                plan, getattr(self, "_tier_preview", None), account="GOLD")
         return plan
 
     def _entry_sizing_record(self):
@@ -166,10 +168,12 @@ class AutoGoldController(FireDemoController):
         size = plan.get("contracts")
         if type(size) is not int or not 1 <= size <= self._hard_contract_cap():
             raise RiskRejected("Unsupported Gold autonomous demo size")
+        if plan.get("leverage") != FIXED_LEVERAGE:
+            raise RiskRejected("Autonomous Gold requires owner-selected fixed 20x")
         return assess_fire_plan(
             plan, budget, quote, limits=FireRiskLimits(
                 max_contracts=self._hard_contract_cap(),
                 equity_risk_fraction=None,
                 minimum_net_reward_risk=None,
                 minimum_gross_reward_risk=Decimal("1"),
-                version="gold-demo-chart-stop-v1"))
+                version="gold-demo-tiered-fixed20-v2"))

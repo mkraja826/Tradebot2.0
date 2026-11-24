@@ -8,6 +8,7 @@ Financial views have two disjoint meanings:
 Unknown funding, pagination, fills or order identities never become a $0 gain.
 No orders, no AI calls, no DB writes, no cross-subaccount aggregation.
 """
+from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -49,7 +50,7 @@ def _amount(v):
 def _read_trades(root, *, start_us, cutoff_us):
     """A bounded immutable snapshot; never initialize or alter FIRE ledgers."""
     name = "fire-ops.sqlite" if root.name == "btc-isolated" else "fire-xaut.sqlite"
-    with _sqlite(root / name) as db:
+    with closing(_sqlite(root / name)) as db:
         rows = db.execute(
             "SELECT press,created_at,status,result FROM fire_requests "
             "ORDER BY created_at DESC LIMIT ?", (MAX_RECEIPTS+1,)).fetchall()
@@ -207,6 +208,92 @@ def _trade_distribution(trades, *, truncated=False):
     }
 
 
+def _overlap_evidence_summary(trade, product, fills, postings):
+    """Bounded reference counts only; never expose IDs, amounts or infer P&L."""
+    empty = {"status": "unavailable"}
+    try:
+        owned = {identifier(trade["broker_order_id"])} | {
+            identifier(x) for x in (trade.get("exit_order_ids") or {}).values()}
+        selected = [f for f in fills if f["order_id"] in owned]
+        if len(selected) < 2:
+            return empty
+        first, last = selected[0]["at_us"], selected[-1]["at_us"]
+        owned_fills = {f["id"] for f in selected}
+        other_orders = {f["order_id"] for f in fills if f["order_id"] not in owned}
+        other_fills = {f["id"] for f in fills if f["order_id"] not in owned}
+        pid = identifier(product["id"])
+        overlap = [p for p in postings if p["product_id"] == pid
+                   and first <= p["at_us"] <= last
+                   and p["type"] not in EXTERNAL_TYPES
+                   and p["order_id"] not in owned
+                   and p["fill_id"] not in owned_fills]
+        explicit = [p for p in overlap if p["order_id"] is not None
+                    or p["fill_id"] is not None]
+        return {
+            "status": "reference_counts_only",
+            "overlapping_same_product_postings": len(overlap),
+            "explicitly_referenced_unattributed": len(explicit),
+            "unreferenced": len(overlap)-len(explicit),
+            "present_order_references": sum(
+                p["order_id"] is not None for p in explicit),
+            "present_fill_references": sum(
+                p["fill_id"] is not None for p in explicit),
+            "known_foreign_order_references": sum(
+                p["order_id"] in other_orders for p in explicit),
+            "known_foreign_fill_references": sum(
+                p["fill_id"] in other_fills for p in explicit),
+            "unmatched_order_references": sum(
+                p["order_id"] is not None and p["order_id"] not in other_orders
+                for p in explicit),
+            "unmatched_fill_references": sum(
+                p["fill_id"] is not None and p["fill_id"] not in other_fills
+                for p in explicit),
+            "commission_postings": sum(p["type"] == "commission" for p in overlap),
+            "cashflow_postings": sum(p["type"] == "cashflow" for p in overlap),
+            "funding_postings": sum(p["type"] == "funding" for p in overlap),
+            "is_verified_trade_pnl": False,
+        }
+    except (KeyError, TypeError, ValueError, ReconciliationError):
+        return empty
+
+
+def _unattributed_evidence_summary(trade, product, fills, postings):
+    """Read-only posting timing/identity counts; never infer trade P&L."""
+    try:
+        owned = {identifier(trade["broker_order_id"])} | {
+            identifier(x) for x in (trade.get("exit_order_ids") or {}).values()}
+        selected = [f for f in fills if f["order_id"] in owned]
+        if len(selected) < 2:
+            return {"status": "unavailable"}
+        first, last = selected[0]["at_us"], selected[-1]["at_us"]
+        owned_fills = {f["id"] for f in selected}
+        pid = identifier(product["id"])
+        unrelated = [p for p in postings
+                     if p["at_us"] >= first and p["type"] not in EXTERNAL_TYPES
+                     and p["product_id"] in (None, pid)
+                     and p["order_id"] not in owned
+                     and p["fill_id"] not in owned_fills]
+        after = [p for p in unrelated if p["at_us"] > last]
+        return {
+            "status": "timing_counts_only",
+            "nonowned_since_entry": len(unrelated),
+            "nonowned_during_position": len(unrelated)-len(after),
+            "nonowned_after_flat_fill": len(after),
+            "after_flat_without_order_or_fill_ref": sum(
+                p["order_id"] is None and p["fill_id"] is None for p in after),
+            "after_flat_commissions": sum(p["type"]=="commission" for p in after),
+            "after_flat_cashflows": sum(p["type"]=="cashflow" for p in after),
+            "after_flat_funding": sum(p["type"]=="funding" for p in after),
+            "after_flat_other_types": sum(p["type"] not in (
+                "commission","cashflow","funding") for p in after),
+            "after_flat_unscoped_product": sum(
+                p["product_id"] is None for p in after),
+            "is_verified_trade_pnl": False,
+        }
+    except (KeyError, TypeError, ValueError, ReconciliationError):
+        return {"status": "unavailable"}
+
+
 def _trade_result(symbol, row, product, broker, fills, postings, start, end):
     trade=row["body"]
     base={
@@ -249,9 +336,70 @@ def _trade_result(symbol, row, product, broker, fills, postings, start, end):
             reconciliation_status="broker_reconciled",
             reason="matched_order_fill_and_wallet_postings"),selected
     except ReconciliationError as exc:
-        return dict(base,reason=str(exc)[:75]),None
+        reason = str(exc)[:75]
+        if reason == "overlapping_external_postings":
+            return dict(base,reason=reason,
+                        overlap_evidence=_overlap_evidence_summary(
+                            trade, product, fills, postings)),None
+        if reason == "unattributed_wallet_posting":
+            return dict(base,reason=reason,
+                        wallet_timing_evidence=_unattributed_evidence_summary(
+                            trade, product, fills, postings)),None
+        return dict(base,reason=reason),None
     except Exception:
         return dict(base,reason="broker_order_evidence_unavailable"),None
+
+
+def _signed_fill_uuid_alias_probe(raw_fills, raw_postings):
+    """Detect explicit broker fill UUID aliases; never expose identities."""
+    from uuid import UUID
+
+    def uuid_text(value):
+        if type(value) is not str or len(value) not in (32, 36):
+            return None
+        try:
+            return str(UUID(value))
+        except (ValueError, AttributeError):
+            return None
+
+    names = ("uuid", "fill_uuid", "trade_uuid", "fill_id")
+    by_name = {name: set() for name in names}
+    fill_uuid_ids = set()
+    rows_with_alias = 0
+    for raw in raw_fills:
+        if not isinstance(raw, dict):
+            continue
+        if (candidate := uuid_text(raw.get("id"))) is not None:
+            fill_uuid_ids.add(candidate)
+        sources = (raw, raw.get("meta_data") or {})
+        found = False
+        for source in sources:
+            if not isinstance(source, dict):
+                continue
+            for name in names:
+                if (candidate := uuid_text(source.get(name))) is not None:
+                    by_name[name].add(candidate)
+                    found = True
+        rows_with_alias += bool(found)
+
+    wallet_aliases = set()
+    for raw in raw_postings:
+        if not isinstance(raw, dict) or raw.get("transaction_type") != "commission":
+            continue
+        for source in (raw, raw.get("meta_data") or {}):
+            if isinstance(source, dict):
+                if (candidate := uuid_text(source.get("fill_uuid"))) is not None:
+                    wallet_aliases.add(candidate)
+    all_signed = fill_uuid_ids | set().union(*by_name.values())
+    return {"status": "identity_counts_only",
+            "signed_fill_count": len(raw_fills),
+            "signed_fill_id_is_uuid": len(fill_uuid_ids),
+            "signed_fill_rows_with_explicit_alias": rows_with_alias,
+            "signed_fill_alias_key_counts": {
+                k: len(v) for k, v in by_name.items()},
+            "wallet_commission_uuid_references": len(wallet_aliases),
+            "uuid_identity_intersection": len(wallet_aliases & all_signed),
+            "is_verified_trade_pnl": False}
 
 
 def collect_account_performance(broker, root, symbol, *, now=None):
@@ -275,6 +423,7 @@ def collect_account_performance(broker, root, symbol, *, now=None):
     # account totals or 7-day strategy results are exposed.
     raw_fills=broker.product_fills(product["id"],start_time_us=start,end_time_us=end)
     raw_postings=broker.wallet_postings(start,end)
+    fill_identity_probe=_signed_fill_uuid_alias_probe(raw_fills,raw_postings)
     fills=unique([normalize_fill(f) for f in raw_fills])
     postings=unique([normalize_posting(p) for p in raw_postings])
     if any(not start <= r["at_us"] <= end for r in fills+postings):
@@ -317,6 +466,7 @@ def collect_account_performance(broker, root, symbol, *, now=None):
         "trade_distribution":_trade_distribution(trades,truncated=overflow),
         "signed_fill_count":len(fills),
         "signed_wallet_posting_count":len(postings),
+        "fill_identity_diagnostics":fill_identity_probe,
         "fire_trade_count_in_window":len(trades),
         "broker_reconciled_closed_trades":len(verified),
         "unverified_or_open_trades":len(trades)-len(verified),
@@ -329,6 +479,37 @@ def collect_account_performance(broker, root, symbol, *, now=None):
                   "Only completely reconciled closed FIRE outcomes are counted; "
                   "unverified trade profit remains unknown.",
     }
+
+
+def _local_attempt_activity(root):
+    """Fresh read-only activity counters, separate from broker P&L evidence."""
+    result = {"status": "unavailable", "recorded_attempts": None,
+              "rejected_attempts": None, "verified_flat_attempts": None,
+              "active_or_unresolved_attempts": None,
+              "latest_at": None, "latest_status": None,
+              "is_verified_trade_pnl": False}
+    if root.is_symlink() or root.name not in ("btc-isolated", "gold-isolated"):
+        return result
+    filename = "fire-ops.sqlite" if root.name == "btc-isolated" else "fire-xaut.sqlite"
+    try:
+        with closing(_sqlite(root / filename)) as db:
+            counts = dict(db.execute(
+                "SELECT status,COUNT(*) FROM fire_requests GROUP BY status").fetchall())
+            latest = db.execute(
+                "SELECT created_at,status FROM fire_requests "
+                "ORDER BY created_at DESC,rowid DESC LIMIT 1").fetchone()
+        total = sum(counts.values())
+        closed = counts.get("flat_verified", 0)
+        rejected = counts.get("rejected_no_order", 0)
+        return {"status": "available", "recorded_attempts": total,
+                "rejected_attempts": rejected,
+                "verified_flat_attempts": closed,
+                "active_or_unresolved_attempts": total-rejected-closed,
+                "latest_at": str(latest[0]) if latest else None,
+                "latest_status": str(latest[1])[:45] if latest else None,
+                "is_verified_trade_pnl": False}
+    except (OSError, sqlite3.Error, ValueError, TypeError):
+        return result
 
 
 class IsolatedPerformanceDashboard:
@@ -395,4 +576,24 @@ class IsolatedPerformanceDashboard:
                 self._checked=time.monotonic()
                 self._updating=True
                 Thread(target=self.refresh,daemon=True).start()
-            return dict(self._report)
+            report = dict(self._report)
+            updating = self._updating
+        checked = report.get("checked_at")
+        try:
+            age = max(0, int((datetime.now(timezone.utc) -
+                              datetime.fromisoformat(checked)).total_seconds()))
+        except (ValueError, TypeError):
+            age = None
+        stale = age is None or age > max(self.refresh_seconds*2, 600)
+        report["age_seconds"] = age
+        report["stale"] = stale
+        report["refreshing"] = updating
+        report["refresh_status"] = ("refreshing" if updating else
+                                    "loading" if checked is None else
+                                    "stale" if stale else "fresh")
+        # Local receipt counters can be newer than an expensive signed broker
+        # report. Their counts never represent wins, P&L, or broker fills.
+        report["attempt_activity"] = {
+            label: _local_attempt_activity(self.accounts.root / ACCOUNTS[label][0])
+            for label in ACCOUNTS}
+        return report

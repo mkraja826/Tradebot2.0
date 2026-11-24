@@ -92,9 +92,11 @@ def evidence(root):
                     or receipt.get("orders_submitted") is not False
                     or receipt.get("protection_verified") is True):
                 return None
-            if (reason == "risk_governor_failed"
-                    and not _proved_historical_low_net_rr(db, press, receipt)):
-                return None
+            if reason == "risk_governor_failed":
+                from tradebot.btc_no_order_proof import proved_gross_distance_failure
+                if not (_proved_historical_low_net_rr(db, press, receipt)
+                        or proved_gross_distance_failure(db, press, receipt)):
+                    return None
             # An unresolved intent is never released by a model-error review.
             exists = db.execute(
                 "SELECT 1 FROM sqlite_master WHERE type='table' "

@@ -25,6 +25,8 @@ from tradebot.fire_account_guard import (
     AccountExposureRejected, require_flat_demo_account_for_configuration,
 )
 from tradebot.btc_demo_size import MAX_AUTONOMOUS_LARGE_CONTRACTS
+from tradebot.isolated_tier_sizing import size_guideline_evidence, FIXED_LEVERAGE, BTC_DEMO_CAP, MAX_MARGIN_SHARE
+from tradebot.fire_budget import entry_budget
 from tradebot.fire_risk import FireRiskLimits, assess_fire_plan
 from tradebot.signed_margin_mode import signed_account_margin_mode
 from tradebot.fire_account_guard import require_flat_demo_account
@@ -133,11 +135,17 @@ class AutoBTCController(SupervisedBTCController):
         return False
 
     def _hard_contract_cap(self):
-        """AI chooses quantity; separate absolute DEMO safety cap remains six."""
-        return MAX_AUTONOMOUS_LARGE_CONTRACTS
+        """AI chooses quantity; signed broker affordability still gates."""
+        return BTC_DEMO_CAP
 
     def _max_contracts_for_entry(self, budget):
-        return min(MAX_AUTONOMOUS_LARGE_CONTRACTS, super()._max_contracts_for_entry(budget))
+        return min(BTC_DEMO_CAP, super()._max_contracts_for_entry(budget))
+
+    def _entry_budget(self, exchange, product_id, price, *, planned_leverage=None):
+        return entry_budget(exchange, self.symbol, product_id, price,
+            planned_leverage=planned_leverage,
+            max_contracts_limit=self._hard_contract_cap(),
+            margin_share=MAX_MARGIN_SHARE)
 
     def _model_entry_budget(self, exchange, product_id, price):
         """Read-only maximum-affordability preview, NOT broker leverage proof.
@@ -147,7 +155,8 @@ class AutoBTCController(SupervisedBTCController):
         and the existing 20%-of-equity margin share before any order.
         """
         preview = self._entry_budget(
-            exchange, product_id, price, planned_leverage=20)
+            exchange, product_id, price, planned_leverage=FIXED_LEVERAGE)
+        self._tier_preview = preview
         return {
             **preview,
             "capacity_preview_only": True,
@@ -156,23 +165,12 @@ class AutoBTCController(SupervisedBTCController):
         }
 
     def _normalize_plan(self, plan, context):
-        """Preserve the AI-selected quantity: no evidence-tier downgrading.
-
-        A malformed or unaffordable proposal is rejected by later independently
-        signed broker and risk checks; never silently turn it into another order.
-        Existing absolute demo cap remains a separate execution safety bound.
-        """
-        self._sizing_record = {}
+        """Keep GPT-6's quantity and tier unchanged; record guideline context."""
         proposed = plan.get("contracts")
-        if type(proposed) is not int or not 1 <= proposed <= self._hard_contract_cap():
-            return plan
-        self._sizing_record = {
-            "policy": "btc-demo-model-selected-size-v1",
-            "model_proposed_contracts": proposed,
-            "selected_contracts": proposed,
-            "model_selected_leverage": plan.get("leverage"),
-            "quantity_auto_reduced": False,
-        }
+        self._sizing_record = {}
+        if type(proposed) is int and 1 <= proposed <= self._hard_contract_cap():
+            self._sizing_record = size_guideline_evidence(
+                plan, getattr(self, "_tier_preview", None), account="BTC")
         return plan
 
     def _entry_sizing_record(self):
@@ -190,6 +188,9 @@ class AutoBTCController(SupervisedBTCController):
         if type(size) is not int or not 1 <= size <= self._hard_contract_cap():
             from tradebot.fire_risk import RiskRejected
             raise RiskRejected("Unsupported autonomous BTC demo size")
+        if plan.get("leverage") != FIXED_LEVERAGE:
+            from tradebot.fire_risk import RiskRejected
+            raise RiskRejected("Autonomous BTC requires owner-selected fixed 20x")
         return assess_fire_plan(
             plan, budget, quote, limits=FireRiskLimits(
                 max_contracts=self._hard_contract_cap(),
@@ -202,9 +203,13 @@ class AutoBTCController(SupervisedBTCController):
         return {
             "strategy_history_version": "btc-demo-recent24h-v1",
             "unattended_demo_mode": True,
-            "max_contracts_per_entry": MAX_AUTONOMOUS_LARGE_CONTRACTS,
+            "max_contracts_per_entry": BTC_DEMO_CAP,
             "one_attempt_operator_supervision_required": False,
             "daily_attempt_cap_enabled": False,
+            "fixed_leverage": FIXED_LEVERAGE,
+            "equity_margin_tiers": {"small": "0.05", "medium": "0.20",
+                                      "large": "0.40"},
+            "broker_margin_cap_fraction": str(MAX_MARGIN_SHARE),
         }
 
 
@@ -305,6 +310,27 @@ def signed_active_trade_skip(root, *, broker_factory=DeltaDemo,
         return None
 
 
+def _verified_preorder_retry(root, press, receipt):
+    """Retry only independently evidenced no-order AI/risk rejections.
+
+    A new attempt must still pass fresh signed broker checks, cooldown,
+    position and margin checks, plus the full risk governor again.
+    Unknown exposure or unresolved execution never retries.
+    """
+    if (Path(root).name != "btc-isolated" or type(press) is not str
+            or type(receipt) is not dict
+            or receipt.get("orders_submitted") is not False
+            or receipt.get("protection_verified") is not False
+            or receipt.get("broker_order_id")
+            or receipt.get("reason_code") not in (
+                "risk_governor_failed", "model_decision_failed")):
+        return False
+    from tradebot.btc_auto_review import evidence
+    proof = evidence(root)
+    return (type(proof) is dict and proof.get("press") == press
+            and proof.get("reason_code") == receipt.get("reason_code"))
+
+
 def prior_fire_receipts_safe(root):
     """Never auto-retry an unresolved/error FIRE after a process restart."""
     path=Path(root)/"fire-ops.sqlite"
@@ -319,15 +345,17 @@ def prior_fire_receipts_safe(root):
             if any(row[0] not in TERMINAL_SAFE for row in all_statuses):
                 return False
             last=db.execute(
-                "SELECT status,result FROM fire_requests "
+                "SELECT press,status,result FROM fire_requests "
                 "ORDER BY created_at DESC, rowid DESC LIMIT 1").fetchone()
             if last is None:
                 return True
-            detail=json.loads(last[1])
+            detail=json.loads(last[2])
             if type(detail) is not dict:
                 return False
-            if last[0]=="rejected_no_order":
+            if last[1]=="rejected_no_order":
                 if detail.get("reason_code")=="gpt6_wait_no_trade":
+                    return True
+                if _verified_preorder_retry(root,last[0],detail):
                     return True
                 # Only precisely reviewed historical no-order incidents
                 # qualify. An old generic risk_governor_failed must reproduce
@@ -340,7 +368,7 @@ def prior_fire_receipts_safe(root):
                     from tradebot.btc_auto_review import reviewed_receipt_matches
                     return reviewed_receipt_matches(root)
                 return False
-            return (last[0]=="flat_verified"
+            return (last[1]=="flat_verified"
                     and detail.get("reason_code") not in (
                         "emergency_flat_verified","execution_or_protection_unverified"))
     except (sqlite3.Error,OSError,ValueError,TypeError):
@@ -400,7 +428,8 @@ def run_once(data_dir, *, instant=None, armed=is_armed,
         # before another unattended attempt; no fail-open retry loops.
         unexpected_rejection = (
             status == "rejected_no_order"
-            and receipt.get("reason_code") != "gpt6_wait_no_trade")
+            and receipt.get("reason_code") != "gpt6_wait_no_trade"
+            and not _verified_preorder_retry(root,attempt_id,receipt))
         emergency_closeout = (
             status == "flat_verified"
             and receipt.get("reason_code") in (

@@ -91,6 +91,91 @@ class ReconciliationTests(unittest.TestCase):
             self.assertEqual(report["reconciliation_reason"], reason)
         return report
 
+    def _add_signed_foreign_fill(self, *, oid=900, fill_id="foreign-fill", at=5):
+        foreign=deepcopy(self.broker.fills[0])
+        foreign.update(id=fill_id, order_id=oid,
+                       created_at=BASE+at*1_000_000)
+        self.broker.fills.append(foreign)
+
+    def test_foreign_signed_fee_posted_during_trade_does_not_corrupt_pnl(self):
+        self._add_signed_foreign_fill()
+        self.broker.postings.append(self.broker.posting(
+            "foreign-fee", "commission", "-0.3", 45,
+            order_id=900, fill_id="foreign-fill"))
+        report=self.run_report()
+        self.assertEqual(report["net_realized_pnl_usd"], "0.075")
+        self.assertTrue(report["is_net_realized_pnl"])
+        self.assertNotIn("foreign-fee", report["matched_posting_ids"])
+
+    def test_foreign_fill_identity_alias_alone_can_prove_foreign_fee(self):
+        self._add_signed_foreign_fill()
+        self.broker.postings.append(self.broker.posting(
+            "foreign-fee", "commission", "-0.3", 45,
+            fill_id="foreign-fill"))
+        self.assertEqual(self.run_report()["net_realized_pnl_usd"], "0.075")
+
+    def test_unknown_foreign_order_during_lifecycle_stays_unverified(self):
+        self.broker.postings.append(self.broker.posting(
+            "ambiguous", "commission", "-0.3", 45, order_id=900))
+        self.assert_unknown("overlapping_external_postings")
+
+    def test_cross_referenced_foreign_order_fill_mismatch_stays_blocked(self):
+        self._add_signed_foreign_fill()
+        self._add_signed_foreign_fill(oid=901,fill_id="foreign2",at=6)
+        self.broker.postings.append(self.broker.posting(
+            "ambiguous","commission","-0.3",45,
+            order_id=900,fill_id="foreign2"))
+        self.assert_unknown("overlapping_external_postings")
+
+    def test_foreign_signed_funding_during_lifecycle_is_not_ignored(self):
+        self._add_signed_foreign_fill()
+        self.broker.postings.append(self.broker.posting(
+            "foreign-funding", "funding", "-0.3", 45,
+            order_id=900, fill_id="foreign-fill"))
+        self.assert_unknown("overlapping_external_postings")
+
+    def test_signed_foreign_fill_inside_position_window_stays_blocked(self):
+        self._add_signed_foreign_fill(at=45)
+        self.broker.postings.append(self.broker.posting(
+            "foreign-fee","commission","-0.3",45,
+            order_id=900,fill_id="foreign-fill"))
+        self.assert_unknown("overlapping_external_fills")
+
+    def test_uppercase_signed_uuid_matches_lowercase_wallet_alias(self):
+        identity = "123e4567-e89b-12d3-a456-426614174000"
+        self.broker.fills[0]["id"] = identity.upper()
+        meta = self.broker.postings[0]["meta_data"]
+        meta.pop("fill_id")
+        meta["fill_uuid"] = identity
+        report = self.run_report()
+        self.assertTrue(report["is_net_realized_pnl"], report)
+        self.assertEqual(report["net_realized_pnl_usd"], "0.075")
+        self.assertIn(identity, report["matched_fill_ids"])
+
+    def test_uuid_without_hyphens_matches_wallet_fill_uuid(self):
+        identity = "123e4567-e89b-12d3-a456-426614174001"
+        self.broker.fills[0]["id"] = identity.replace("-", "").upper()
+        meta = self.broker.postings[0]["meta_data"]
+        meta.pop("fill_id")
+        meta["fill_uuid"] = identity
+        report = self.run_report()
+        self.assertEqual(report["net_realized_pnl_usd"], "0.075")
+        self.assertIn(identity, report["matched_fill_ids"])
+
+    def test_raw_fill_id_case_normalizes_like_explicit_wallet_fill_id(self):
+        identity = "123e4567-e89b-12d3-a456-426614174002"
+        self.broker.fills[0]["id"] = identity.upper()
+        self.broker.postings[0]["meta_data"]["fill_id"] = identity
+        report = self.run_report()
+        self.assertTrue(report["is_net_realized_pnl"])
+        self.assertEqual(report["net_realized_pnl_usd"], "0.075")
+
+    def test_unknown_wallet_fill_uuid_still_blocks_pnl(self):
+        self.broker.postings[0]["meta_data"].pop("fill_id")
+        self.broker.postings[0]["meta_data"]["fill_uuid"] = (
+            "123e4567-e89b-12d3-a456-426614174003")
+        self.assert_unknown("posting_identity_mismatch")
+
     def test_long_round_trip_includes_partial_fills_fees_and_funding(self):
         report = self.run_report()
         self.assertEqual(report["net_realized_pnl_usd"], "0.075", report)

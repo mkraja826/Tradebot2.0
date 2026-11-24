@@ -111,6 +111,67 @@ def _fire_receipts(root, name):
     return outcome
 
 
+
+def isolated_gold_fire_history(data_dir, *, page=0, press=None):
+    """Read sanitized, paginated Gold receipts from the *isolated* ledger.
+
+    This is strictly a local read. Never substitute the legacy parent
+    XAUTUSD FIRE ledger or a generic account query when the child is missing.
+    """
+    if (type(page) is not int or not 0 <= page <= 1000000
+            or (press is not None and
+                (type(press) is not str or
+                 re.fullmatch(r"[a-f0-9]{32}", press) is None))):
+        raise ValueError("Invalid isolated Gold FIRE query")
+    root = Path(data_dir) / "gold-isolated"
+    if root.is_symlink() or not root.is_dir():
+        raise ValueError("Isolated Gold directory unavailable")
+    with _sqlite(root / "fire-xaut.sqlite") as db:
+        total = db.execute("SELECT COUNT(*) FROM fire_requests").fetchone()[0]
+        if press is None:
+            rows = db.execute(
+                "SELECT press,status,result,created_at,updated_at "
+                "FROM fire_requests ORDER BY created_at DESC,rowid DESC "
+                "LIMIT 40 OFFSET ?", (page * 40,)).fetchall()
+        else:
+            rows = db.execute(
+                "SELECT press,status,result,created_at,updated_at "
+                "FROM fire_requests WHERE press=? LIMIT 1",
+                (press,)).fetchall()
+    receipts = []
+    for id_, status, encoded, created_at, updated_at in rows:
+        result = json.loads(encoded)
+        if not isinstance(result, dict) or not re.fullmatch(r"[a-f0-9]{32}", str(id_)):
+            raise ValueError("Unverified isolated Gold receipt")
+        entry = result.get("entry")
+        row = {
+            "id": id_, "status": str(status)[:35],
+            "at": str(created_at)[:40], "updated": str(updated_at)[:40],
+        }
+        for field in RECEIPT_FIELDS:
+            value = result.get(field)
+            if isinstance(value, bool) or type(value) in (int, float):
+                row[field] = value
+            elif isinstance(value, str):
+                row[field] = value[:90]
+        if isinstance(result.get("thesis"), str):
+            row["thesis"] = result["thesis"][:350]
+        if isinstance(result.get("broker_order_id"), (str, int)):
+            row["broker_order_id"] = str(result["broker_order_id"])[:50]
+        if isinstance(entry, dict):
+            row["entry"] = {
+                key: str(entry[key])[:40] for key in ("price", "at")
+                if isinstance(entry.get(key), (str, int, float))
+            }
+        receipts.append(row)
+    return {
+        "symbol": "XAUTUSD",
+        "source": "gold_isolated_fire_receipts",
+        "page": page, "total": total, "receipts": receipts,
+        "realized_pnl_verified": False,
+    }
+
+
 def _attempt_summary(root, name, table):
     try:
         with _sqlite(root / name) as db:
