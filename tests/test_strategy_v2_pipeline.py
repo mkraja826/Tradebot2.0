@@ -47,6 +47,11 @@ class SignalJournalTests(unittest.TestCase):
         self.assertEqual(journal.observe(event)["status"],"duplicate_signal_observation")
         self.assertEqual(journal.count(),1)
         self.assertEqual(SignalJournal(self.db).count(),1)
+        import sqlite3
+        with sqlite3.connect(self.db) as conn:
+            self.assertEqual(conn.execute(
+                "SELECT direction_hint FROM signal_observations"
+            ).fetchone()[0], "LONG")
 
     def test_both_market_events_are_independent(self):
         journal=SignalJournal(self.db)
