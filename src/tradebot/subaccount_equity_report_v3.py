@@ -21,6 +21,13 @@ KNOWN_CODES = LOSS_CODES | frozenset({
     "daily_checkpoint_missed_window", "weekly_checkpoint_missed_window",
     "daily_checkpoint_pending_window", "weekly_checkpoint_pending_window",
     "daily_checkpoint_unverified_receipt", "weekly_checkpoint_unverified_receipt",
+    "broker_time_evidence_unavailable", "equity_read_receipt_missing",
+    "equity_read_value_mismatch", "system_clock_jump", "broker_equity_read_slow",
+    "broker_clock_or_stale_response", "broker_equity_response_cached",
+    "broker_equity_read_stale", "equity_boundary_ambiguous", "clock_unverified",
+    "equity_clock_inconsistent", "operations_clock_inconsistent",
+    "watchdog_restart_loop", "equity_collector_restart_loop",
+    "watchdog_emergency_flat_verified", "watchdog_protection_failure_flat_verified",
 })
 
 
@@ -59,7 +66,10 @@ def account_report(overview, *, now=None):
         row = {"symbol": symbol, "account_scope": label,
                "broker_identity_and_margin_reported": False,
                "equity_conditions": ["child_evidence_unavailable"],
-               "equity_loss_warnings": [], "other_review_conditions": [],
+               "reported_checkpoint_blockers": ["child_evidence_unavailable"],
+               "equity_loss_warnings": [],
+               "other_review_conditions": ["child_evidence_unavailable"],
+               "checkpoint_prerequisites_met": False,
                "trade_authorized": False}
         if (isinstance(child, dict) and child.get("label") == label
                 and child.get("symbol") == symbol):
@@ -69,15 +79,31 @@ def account_report(overview, *, now=None):
             row["broker_identity_and_margin_reported"] = verified
             health = child.get("equity_health")
             if isinstance(health, dict):
-                codes = sorted(set(_codes(health.get("blocking_conditions"))
-                                   + _codes(health.get("alert_codes"))))
-                row["equity_conditions"] = codes
-                row["equity_loss_warnings"] = sorted(set(codes) & LOSS_CODES)
-                row["other_review_conditions"] = sorted(set(codes) - LOSS_CODES)
-                row["checkpoint_prerequisites_met"] = (
-                    health.get("checkpoint_prerequisites_met") is True)
+                blockers = _codes(health.get("blocking_conditions"))
+                alerts = _codes(health.get("alert_codes"))
+                review = set()
+                if not _fresh(health.get("as_of"), now):
+                    review.add("child_equity_report_stale_or_missing")
+                if health.get("database_integrity") != "verified":
+                    review.add("child_equity_database_unverified")
+                if health.get("latest_receipt_status") != "verified":
+                    review.add("child_equity_receipt_unverified")
+                if health.get("observation_status") != "fresh":
+                    review.add("child_equity_observation_unverified")
+                for period in ("daily", "weekly"):
+                    if health.get(period + "_checkpoint") != "verified":
+                        review.add("child_" + period + "_checkpoint_unverified")
+                if health.get("checkpoint_prerequisites_met") is not True:
+                    review.add("child_checkpoint_prerequisites_unmet")
+                codes = set(blockers) | set(alerts) | review
+                row["reported_checkpoint_blockers"] = blockers
+                row["equity_conditions"] = sorted(codes)
+                row["equity_loss_warnings"] = sorted(codes & LOSS_CODES)
+                row["other_review_conditions"] = sorted(codes - LOSS_CODES)
+                row["checkpoint_prerequisites_met"] = not codes and verified
             if not verified:
-                row["other_review_conditions"].append("child_broker_evidence_unverified")
+                row["other_review_conditions"] = sorted(set(
+                    row["other_review_conditions"]) | {"child_broker_evidence_unverified"})
         accounts[label] = row
     return {"environment": "delta-india-demo", "mode": "read_only_subaccount_equity",
             "accounts": accounts, "parent_account_scope": "separate_accounting",
