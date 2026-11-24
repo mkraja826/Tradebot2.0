@@ -85,7 +85,13 @@ class DeltaDemo:
                         and exc.code in (401, 403) else "broker_equity_unavailable")
                 raise DeltaReadError(code) from None
             raise DeltaError(f"Demo exchange request failed: {exc}") from exc
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            if capture_wallet:
+                raise DeltaReadError("broker_equity_unavailable") from None
+            raise DeltaError("Malformed demo exchange response") from None
         if not isinstance(message, dict):
+            if capture_wallet:
+                raise DeltaReadError("broker_equity_unavailable")
             raise DeltaError("Unexpected Delta API response")
         if message.get("success") is not True:
             if capture_wallet:
