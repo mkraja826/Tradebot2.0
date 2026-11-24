@@ -23,7 +23,7 @@ from tradebot.equity_monitor import (
     PORTFOLIO_LOSS_WARNING,
 )
 from tradebot.equity_receipt import validate_receipt, EquityReadError
-from tradebot.portfolio_equity_guard import amount, EquityRiskError, validated_watermark
+from tradebot.equity_policy_core import amount, EquityRiskError, validated_watermark
 
 MAX_SESSION_SECONDS = 900
 MAX_SESSION_DECLINE = Decimal("0.005")
