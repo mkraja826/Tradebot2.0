@@ -86,9 +86,11 @@ class SignalJournal:
         serialized = json.dumps(event, sort_keys=True, separators=(",", ":"))
         fingerprint = sha256(serialized.encode()).hexdigest()
         highest = max(int(s["score"]) for s in signals)
+        directions = {s["direction"] for s in signals}
+        direction_hint = next(iter(directions)) if len(directions) == 1 else None
         record = (
             event["event_id"], event["symbol"], event["candle_time"],
-            event["model"], None, len(signals), highest,
+            event["model"], direction_hint, len(signals), highest,
             int(event["conflicting_directions"]), fingerprint,
             datetime.now(timezone.utc).isoformat(), "observed_only",
         )
