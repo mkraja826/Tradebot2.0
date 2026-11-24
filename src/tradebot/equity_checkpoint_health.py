@@ -11,7 +11,7 @@ import json
 from pathlib import Path
 import sqlite3
 
-from tradebot.portfolio_equity_guard import ANCHOR_WINDOW, amount, stamp, validated_watermark
+from tradebot.equity_policy_core import ANCHOR_WINDOW, amount, stamp, validated_watermark
 from tradebot.equity_receipt import EquityReadError, validate_receipt
 
 
