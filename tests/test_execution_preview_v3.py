@@ -37,6 +37,16 @@ class ExecutionPreviewTests(unittest.TestCase):
         with self.assertRaises(ValueError): translate(q,r,dict(s,symbol="XAUTUSD"),now=NOW)
         r["plan"]["stop_loss"]=95.01
         with self.assertRaises(ValueError): translate(q,r,s,now=NOW)
+    def test_model_product_context_must_bind_exactly(self):
+        from tradebot.model_wire_v3 import build_synthetic_fixture
+        e=self.events[0]; symbol=e["symbol"]
+        spec=product_spec(raw(symbol),symbol,NOW)
+        q=build_synthetic_fixture(e,spec,{"symbol":symbol,"mode":"synthetic_fixture"},now=NOW)["request"]
+        r=wait_fixture(q)
+        self.assertEqual(translate(q,r,spec,now=NOW)["action"],"WAIT")
+        for change in ({"product_id":spec["product_id"]+1},{"tick_size":"0.2"},{"contract_value":"0.002"}):
+            with self.subTest(change=change), self.assertRaisesRegex(ValueError,"product_binding_mismatch"):
+                translate(q,r,dict(spec,**change),now=NOW)
     def test_receipts_and_restart(self):
         q,r,s=self.make(self.events[0]); p=translate(q,r,s,now=NOW)
         receipt=dict(source="synthetic_fixture",client_order_id=p["entry"]["preview_client_id"],symbol=p["symbol"],product_id=s["product_id"],side="buy",filled_contracts=1,status="open")
@@ -44,6 +54,7 @@ class ExecutionPreviewTests(unittest.TestCase):
         self.assertEqual(observe_fixture(p,dict(receipt,filled_contracts=3,status="closed"))["state"],"fixture_filled")
         self.assertEqual(observe_fixture(p,dict(receipt,symbol="XAUTUSD"))["state"],"unknown_requires_reconciliation")
         self.assertEqual(observe_fixture(p,None)["state"],"unknown_requires_reconciliation")
+        self.assertEqual(observe_fixture(p,dict(receipt,product_id=float(s["product_id"])))["state"],"unknown_requires_reconciliation")
         path=self.root/"preview.sqlite"; j=PreviewLedger(path)
         self.assertEqual(j.reserve(p,now=NOW),"reserved")
         j=PreviewLedger(path); self.assertEqual(j.recover(now=NOW+120),1)

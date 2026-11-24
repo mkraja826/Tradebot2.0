@@ -13,6 +13,10 @@ def translate(request,response,product,*,now):
     if product.get("symbol")!=s or product.get("source")!="delta_demo_public_product" or not 0<=now-product["observed_at"]<=300:
         raise ValueError("wrong_or_stale_product")
     if type(product.get("product_id")) is not int or product["product_id"]<=0: raise ValueError("invalid_product")
+    # When the model wire includes product context, the preview must use the
+    # same specification, not merely another product with the same symbol.
+    if "product" in p and (not isinstance(p["product"],dict) or p["product"]!=product):
+        raise ValueError("product_binding_mismatch")
     r=validate(response,request)
     base={"mode":"synthetic_execution_preview","symbol":s,"event_id":p["event_id"],
           "request_sha256":request["request_sha256"],"response_sha256":digest(r),
@@ -40,6 +44,7 @@ def observe_fixture(preview,receipt):
     if not isinstance(receipt,dict): return unknown
     if receipt.get("source")!="synthetic_fixture" or receipt.get("client_order_id")!=entry["preview_client_id"] or receipt.get("symbol")!=preview["symbol"] or receipt.get("product_id")!=entry["product_id"] or receipt.get("side")!=entry["side"]:
         return unknown
+    if type(receipt.get("product_id")) is not int: return unknown
     q=receipt.get("filled_contracts"); status=receipt.get("status")
     if type(q) is not int or not 0<=q<=entry["contracts"]: return unknown
     if status=="rejected" and q==0: state="fixture_rejected"
