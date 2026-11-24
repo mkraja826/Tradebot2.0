@@ -8,7 +8,7 @@ broker/account binding and the existing execution and protection checks.
 from pathlib import Path
 from stat import S_ISREG
 
-from tradebot.portfolio_equity_guard import EquityRiskError, RuntimeEquityGuard
+from tradebot.equity_policy_core import EquityRiskError, RuntimeEquityGuard
 
 _CHILD_DIRS = {"BTCUSD": "btc-isolated", "XAUTUSD": "gold-isolated"}
 _LEDGER = "fire-equity-risk.sqlite"
