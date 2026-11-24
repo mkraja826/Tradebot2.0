@@ -158,6 +158,8 @@ class ShadowPipelineTests(unittest.TestCase):
         self.assertEqual(first["events_recorded"],1)
         self.assertEqual(second["events_recorded"],1)
         self.assertTrue(first["markets"][0]["ai_candidate_recorded"])
+        self.assertTrue(first["markets"][0]["model_context_ready"])
+        self.assertEqual(len(first["markets"][0]["model_context_hash"]),64)
         self.assertEqual(second["markets"][0]["status"],
                          "duplicate_signal_observation")
         self.assertFalse(second["markets"][0]["ai_candidate_recorded"])
