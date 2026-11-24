@@ -1,4 +1,4 @@
-[redacted potentially sensitive output]
+"""Read-only BTCUSD/XAUTUSD shadow scan. No model calls or order authority.
 
 This module never calls an AI provider or mutates broker/trading state.
 Use --once (default) from a systemd timer; the next tick retries feed faults.
@@ -34,7 +34,7 @@ def sample_market(broker, symbol, *, as_of):
 def run_shadow(*, broker=None, now=None):
     """Public market data only; isolates failures per symbol."""
     client=broker if broker is not None else DeltaDemo(
-[redacted potentially sensitive output]
+        "", "", allow_orders=False)
     moment=int(time.time()) if now is None else now
     if type(moment) is not int:
         raise ValueError("shadow_invalid_clock")
@@ -44,7 +44,7 @@ def run_shadow(*, broker=None, now=None):
         try:
             results.append(sample_market(client,symbol,as_of=closed_boundary))
         except Exception as exc:
-[redacted potentially sensitive output]
+            # Report only exception type; do not log raw API responses.
             results.append({"symbol":symbol,"mode":"SHADOW_NO_AI_NO_ORDERS",
                             "status":"signal_scan_unavailable",
                             "error_type":type(exc).__name__,
