@@ -53,6 +53,13 @@ class MonitorTests(unittest.TestCase):
         guard.observe("1000", at=datetime.now(timezone.utc) - timedelta(days=8))
         return guard
 
+    def test_demo_loss_events_are_warnings_but_protection_failures_are_critical(self):
+        codes = ["equity_daily_loss_limit_breached", "equity_loss_limit_breached",
+                 "watchdog_protection_unverified", "broker_authentication_failed"]
+        severity = {event["code"]: event["severity"]
+                    for event in self.store.publish(codes, at=self.now)}
+        self.assertEqual(severity, dict(zip(codes, ["warning", "warning", "critical", "critical"])))
+
     def test_events_are_deduplicated_and_recover_across_restarts(self):
         code = "broker_authentication_failed"
         self.assertEqual(self.store.publish([code], at=self.now)[0]["transition"], "opened")
