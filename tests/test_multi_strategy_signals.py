@@ -32,6 +32,7 @@ def candles(n=230):
                      "low":p-1,"close":p,"volume":10.0})
     return bars
 
+
 class MultiStrategyTests(unittest.TestCase):
     def test_registry_has_ten_unique_independent_strategies(self):
         self.assertEqual(len(STRATEGIES),10)
@@ -66,7 +67,8 @@ class MultiStrategyTests(unittest.TestCase):
             with self.subTest(strategy=STRATEGIES[i]):
                 f=features()
                 f.update(changes)
-                actual=_evaluate(f)                matching=[s for s in actual if s["strategy_id"]==STRATEGIES[i]
+                actual=_evaluate(f)
+                matching=[s for s in actual if s["strategy_id"]==STRATEGIES[i]
                           and s["direction"]=="LONG"]
                 self.assertTrue(matching, f"detector {i} did not trigger: {actual}")
                 self.assertFalse(matching[0]["trade_authorized"])
@@ -100,7 +102,8 @@ class MultiStrategyTests(unittest.TestCase):
         f.update({"macd":1,"prev_macd":-.5,"adx":20,
                   "plus_di":30,"minus_di":10,"rvol":1.25})
         one=_evaluate(f)
-        self.assertEqual(one,_evaluate(copy.deepcopy(f)))        self.assertEqual(len({x["signal_id"] for x in one}),len(one))
+        self.assertEqual(one,_evaluate(copy.deepcopy(f)))
+        self.assertEqual(len({x["signal_id"] for x in one}),len(one))
         f["time"]+=300
         self.assertNotEqual(one[0]["signal_id"],_evaluate(f)[0]["signal_id"])
 
@@ -134,7 +137,8 @@ class MultiStrategyTests(unittest.TestCase):
                     scan_completed_5m(data,"BTCUSD",as_of=stamp)
 
     def test_malformed_data_rejected(self):
-        bars=candles()        now=bars[-1]["time"]+300
+        bars=candles()
+        now=bars[-1]["time"]+300
         for invalid in ({"volume":float("nan")},{"low":-5},
                         {"close":float("inf")},{"time":"not an int"}):
             copybars=copy.deepcopy(bars)
@@ -168,7 +172,8 @@ class MultiStrategyTests(unittest.TestCase):
 
     def test_opposing_signals_require_ai_conflict_resolution(self):
         from unittest.mock import patch
-        bars=candles()        signals=[{"strategy_id":STRATEGIES[2],"direction":"LONG","score":70},
+        bars=candles()
+        signals=[{"strategy_id":STRATEGIES[2],"direction":"LONG","score":70},
                  {"strategy_id":STRATEGIES[7],"direction":"SHORT","score":80}]
         with patch("tradebot.multi_strategy_signals._evaluate",return_value=signals):
             result=scan_completed_5m(bars,"BTCUSD",
@@ -197,3 +202,4 @@ class MultiStrategyTests(unittest.TestCase):
         result=scan_completed_5m(bars,"XAUTUSD",as_of=bars[-1]["time"]+300)
         self.assertEqual(result["symbol"],"XAUTUSD")
         self.assertFalse(result["execution_authorized"])
+
