@@ -370,7 +370,8 @@ class IsolatedAccountsDashboard:
                 k: health.get(k) for k in (
                     "status", "daily_checkpoint", "weekly_checkpoint",
                     "database_integrity", "latest_receipt_status",
-                    "observation_status", "latest_observation_age_seconds"
+                    "observation_status", "latest_observation_age_seconds",
+                    "blocking_conditions", "alert_codes", "checkpoint_prerequisites_met"
                 )}
             monitor = health.get("monitoring") or {}
             info["equity_health"]["monitoring"] = {
