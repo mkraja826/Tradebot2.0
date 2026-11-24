@@ -64,7 +64,8 @@ def proved_gross_distance_failure(db, press, receipt):
                 return False
             if abs(D(str(v["gross_reward_risk"]))-target/stop)>D("1e-20"):
                 return False
-        drift=abs(broker-entry)/entry*D(10000)
+        # Signed quote drift: the broker can move above OR below the AI quote.
+        drift=(broker-entry)/entry*D(10000)
         return abs(D(str(diag["quote_change_bps"]))-drift)<=D("1e-18")
     except (sqlite3.Error,ValueError,TypeError,KeyError,InvalidOperation,
             ArithmeticError,ZeroDivisionError):
