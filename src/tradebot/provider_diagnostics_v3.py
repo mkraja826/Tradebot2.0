@@ -1,5 +1,7 @@
 """Sanitized provider response diagnostics. Never retain model text or raw errors."""
 import json,re,hashlib
+from urllib.error import HTTPError, URLError
+from tradebot.ai import PlanError
 
 CODES=frozenset("""offline_only request_integrity fixture_mode_mismatch wire_integrity unexpected_model incomplete_response unexpected_message duplicate_json_key invalid_content nonfinite_json invalid_response_fields response_identity_mismatch missing_rationale wait_must_have_no_plan account_context_unavailable invalid_plan_fields invalid_entry_type invalid_numeric_plan integer_required invalid_protection_geometry missing_management invalid_action""".split())
 
@@ -7,7 +9,26 @@ def classify(exc,phase):
     if isinstance(exc,json.JSONDecodeError): return "invalid_json"
     if type(exc) is ValueError and len(exc.args)==1 and isinstance(exc.args[0],str) and exc.args[0] in CODES:
         return exc.args[0]
-    if phase=="transport": return "transport_outcome_unknown"
+    if phase=="transport":
+        # Classify only known exception types and fixed client messages.
+        # A category never proves the request was not billed or processed.
+        code = None
+        if isinstance(exc, HTTPError):
+            code = exc.code
+        elif type(exc) is PlanError and len(exc.args)==1 and isinstance(exc.args[0],str):
+            msg=exc.args[0]
+            match=re.fullmatch(r"Top Billing API HTTP ([1-5][0-9]{2})",msg)
+            if match: code=int(match.group(1))
+            elif msg=="Top Billing API network error": return "provider_network_error"
+            elif msg in ("Invalid Top Billing API JSON response","Malformed Top Billing response"): return "provider_malformed_response"
+            elif msg=="TB_API_KEY is required; store it in a local secret environment": return "provider_credentials_unavailable"
+        if code in (401,403): return "provider_authentication_or_permission"
+        if code==429: return "provider_rate_limited"
+        if type(code) is int and 500<=code<=599: return "provider_server_error"
+        if type(code) is int and 400<=code<=499: return "provider_request_rejected"
+        if isinstance(exc,TimeoutError) or (isinstance(exc,URLError) and isinstance(exc.reason,TimeoutError)): return "provider_timeout"
+        if isinstance(exc,(URLError,OSError)): return "provider_network_error"
+        return "transport_outcome_unknown"
     if isinstance(exc,(TypeError,KeyError,AttributeError)): return "unexpected_schema"
     return "unclassified_validation_failure"
 

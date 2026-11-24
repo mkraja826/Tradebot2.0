@@ -42,7 +42,10 @@ class ProviderShadowTests(unittest.TestCase):
     def test_failure_consumes_budget(self):
         c=Campaign(self.p/"campaign.sqlite",request_limit=1)
         def fail(*args):raise TimeoutError()
-        self.assertEqual(self.run_event(c,"BTCUSD",fail)["status"],"transport_outcome_unknown")
+        r=self.run_event(c,"BTCUSD",fail)
+        self.assertEqual(r["status"],"transport_outcome_unknown")
+        self.assertEqual(r["failure_code"],"provider_timeout")
+        self.assertFalse(r["execution_authorized"])
         self.assertEqual(self.run_event(c,"BTCUSD")["status"],"duplicate")
         self.assertEqual(self.run_event(c,"XAUTUSD")["status"],"budget_exhausted")
         self.assertFalse(self.calls)
