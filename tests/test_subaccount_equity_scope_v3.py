@@ -2,7 +2,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from tradebot.portfolio_equity_guard import EquityRiskError
+from tradebot.equity_policy_core import EquityRiskError
 from tradebot.subaccount_equity_scope_v3 import child_equity_guard, scoped_equity_ledger
 
 
