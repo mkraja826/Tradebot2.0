@@ -1,8 +1,9 @@
 import hashlib
 import hmac
 import unittest
+from unittest.mock import patch
 
-from tradebot.delta import DeltaDemo, DeltaError, DEMO_API, is_btc_contract, signature
+from tradebot.delta import DeltaDemo, DeltaError, DeltaReadError, DEMO_API, is_btc_contract, signature
 
 
 class TestDeltaDemo(unittest.TestCase):
@@ -44,3 +45,23 @@ class TestDeltaDemo(unittest.TestCase):
     def test_path_guard(self):
         with self.assertRaises(ValueError):
             DeltaDemo()._request("GET", "https://api.india.delta.exchange/v2/products")
+
+    def test_malformed_signed_wallet_response_is_sanitized(self):
+        for raw in (b"private upstream response", b"[]", b"null", bytes([255])):
+            with self.subTest(raw=raw), patch("tradebot.delta.urlopen") as request:
+                response = request.return_value.__enter__.return_value
+                response.read.return_value = raw
+                response.headers = {}
+                with self.assertRaises(DeltaReadError) as error:
+                    DeltaDemo("fixture", "secret").wallet_balances()
+                self.assertEqual(error.exception.code, "broker_equity_unavailable")
+                self.assertNotIn("private upstream response", str(error.exception))
+                self.assertEqual(request.call_args.args[0].get_method(), "GET")
+
+    def test_malformed_public_response_uses_broker_error(self):
+        with patch("tradebot.delta.urlopen") as request:
+            response = request.return_value.__enter__.return_value
+            response.read.return_value = b"private upstream response"
+            with self.assertRaises(DeltaError) as error:
+                DeltaDemo().ticker("BTCUSD")
+            self.assertEqual(str(error.exception), "Malformed demo exchange response")

@@ -132,15 +132,21 @@ def inspect(root, *, preflight=gold_preflight):
     result=preflight(root)
     blocks=result["blockers"]
     try:
-        if not receipts_safe(root):
+        if receipts_safe(root) is not True:
             blocks.append("previous_gold_fire_needs_review")
     except Exception:
         blocks.append("previous_gold_fire_needs_review")
-    result["armed"]=is_gold_armed()
+    try:
+        result["armed"]=is_gold_armed() is True
+    except Exception:
+        result["armed"]=False
     if not result["armed"]:
         blocks.append("gold_autonomous_arm_missing")
-    if (Path(root)/"gold-auto-demo-halt").exists():
-        blocks.append("gold_isolated_halt_requires_review")
+    try:
+        if (Path(root)/"gold-auto-demo-halt").exists():
+            blocks.append("gold_isolated_halt_requires_review")
+    except OSError:
+        blocks.append("gold_isolated_halt_state_unavailable")
     if blocks:result["status"]="blocked"
     return result
 

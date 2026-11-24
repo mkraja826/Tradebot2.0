@@ -109,6 +109,28 @@ class ReadinessTests(unittest.TestCase):
         self.assertFalse(result["broker_mutations"])
         self.assertEqual(result["ai_calls"], 0)
 
+    def test_margin_probe_exception_preserves_block_and_other_diagnostics(self):
+        def failed_margin(_broker):
+            raise RuntimeError("private upstream detail")
+
+        def failed_preflight(broker, root, **kwargs):
+            return {**good_preflight(broker, root),
+                    "status": "blocked", "blockers": [
+                        "account_wide_exposure_unverified"]}
+
+        r = self.check(arm=True, receipts=True, margin_proof=failed_margin,
+                       preflight=failed_preflight)
+        self.assertEqual(r["status"], "blocked")
+        self.assertEqual(r["blockers"], [
+            "account_wide_exposure_unverified",
+            "signed_postfill_margin_mode_unavailable",
+        ])
+        self.assertFalse(r["signed_postfill_margin_evidence_verified"])
+        self.assertFalse(r["order_authorized"])
+        self.assertFalse(r["broker_mutations"])
+        self.assertEqual(r["ai_calls"], 0)
+        self.assertNotIn("private upstream detail", str(r))
+
     def test_missing_live_broker_evidence_returns_specific_code(self):
         def bad(broker, root, **kwargs):
             return {**good_preflight(broker, root),

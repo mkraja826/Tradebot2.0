@@ -178,6 +178,41 @@ class IsolatedDashboardTests(unittest.TestCase):
             self.assertIsNone(acct["net_equity"])
             self.assertNotEqual(acct["margin_mode"],"isolated_verified")
 
+    def test_wallet_failure_identifies_stage_without_exposing_details(self):
+        class WalletFailure(FakeBroker):
+            def wallet_balances(self):
+                if self.key == "GOLD_CHILD":
+                    raise RuntimeError("private upstream response")
+                return super().wallet_balances()
+
+        with patch.dict(os.environ, {"DELTA_DEMO_API_KEY": "PARENT",
+                                     "DELTA_DEMO_API_SECRET": "TEST"}):
+            snap = self.dashboard()
+            snap.client_factory = WalletFailure
+            report = snap.refresh()
+        btc, gold = report["accounts"]["BTC"], report["accounts"]["GOLD"]
+        self.assertEqual(btc["status"], "connected")
+        self.assertEqual(gold["status"], "broker_unavailable")
+        self.assertEqual(gold["broker_failure_stage"], "signed_wallet_equity")
+        for field in ("broker_checked_at", "positions", "live_position_count",
+                      "open_orders", "net_equity"):
+            self.assertIsNone(gold[field])
+        self.assertNotIn("private upstream response", json.dumps(report))
+        self.assertFalse(FakeBroker.mutations)
+
+    def test_credential_load_failure_reports_static_stage(self):
+        snap = self.dashboard()
+
+        def failed_loader(path):
+            raise OSError("private path detail")
+
+        snap.credential_loader = failed_loader
+        result = snap._account("GOLD")
+        self.assertEqual(result["status"], "broker_unavailable")
+        self.assertEqual(result["broker_failure_stage"], "child_credential_loading")
+        self.assertIsNone(result["positions"])
+        self.assertNotIn("private path detail", json.dumps(result))
+
     def test_unverified_product_never_mislabelled_gold(self):
         items=_sanitized_positions([{
             "size":"3","product_symbol":"ETHUSD","entry_price":"4200"}],
