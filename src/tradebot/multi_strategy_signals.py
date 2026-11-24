@@ -32,6 +32,7 @@ def _vwap(rows, candle_time):
     return (sum((r[2]+r[3]+r[4])/3*r[5] for r in window)/vol
             if len(window) >= 6 and vol > 0 else None)
 
+
 def _features(candles, symbol, as_of):
     if symbol not in MARKETS:
         raise ValueError("isolated_market_required")
@@ -66,7 +67,8 @@ def _features(candles, symbol, as_of):
     ema=lambda x,n:_ema_series(x,n)[-1]
     adx=_wilder_adx(highs,lows,closes)
     bb=_bands(closes)
-    previous_bb=_bands(closes[:-1])    prev_volume=sum(vols[-21:-1])/20
+    previous_bb=_bands(closes[:-1])
+    prev_volume=sum(vols[-21:-1])/20
     ranges=[max(highs[i]-lows[i],abs(highs[i]-closes[i-1]),
                 abs(lows[i]-closes[i-1]))
             for i in range(len(closes)-14,len(closes))]
@@ -100,7 +102,8 @@ def _evaluate(f):
     """Ten independent detectors. Any one signal is sufficient for AI evaluation."""
     found=[]
     c,p,o=f["close"],f["prev_close"],f["open"]
-    e20,e50,e200=f["ema20"],f["ema50"],f["ema200"]    rsi,rprev=f["rsi"],f["rsi_prev"]
+    e20,e50,e200=f["ema20"],f["ema50"],f["ema200"]
+    rsi,rprev=f["rsi"],f["rsi_prev"]
     adx,vol=f["adx"],f["rvol"]
     for side,sign in (("LONG",1),("SHORT",-1)):
         good=lambda a,b:sign*(a-b)>0
@@ -134,7 +137,8 @@ def _evaluate(f):
             })
 
         emit(0,trend and di and adx>=22 and 52<=rdir<=75
-             and good(c,e20) and candle,             (adx>=28,advance,vol is not None and vol>=1.15))
+             and good(c,e20) and candle,
+             (adx>=28,advance,vol is not None and vol>=1.15))
         touched=(prev_extreme<=f["ema20_prev"] if sign==1
                  else prev_extreme>=f["ema20_prev"])
         emit(1,good(e20,e50) and touched and good(c,e20)
@@ -168,7 +172,8 @@ def _evaluate(f):
         near=extreme<=reversal_level*1.002 if sign==1 else extreme>=reversal_level*.998
         emit(8,near and candle and wick>=1.3*body
              and good(f["stoch"],f["prev_stoch"]) and sdir<=50,
-             (advance,f["true_range"]>=.7*f["atr"],di))        swept=extreme<reversal_level if sign==1 else extreme>reversal_level
+             (advance,f["true_range"]>=.7*f["atr"],di))
+        swept=extreme<reversal_level if sign==1 else extreme>reversal_level
         emit(9,swept and good(c,reversal_level) and wick>=body
              and advance and candle,
              (sdir<=55,f["true_range"]>=f["atr"],
@@ -191,3 +196,4 @@ def scan_completed_5m(candles, symbol, *, as_of=None):
         "execution_authorized":False,
         "source":"completed_5m_local_1_of_10",
     }
+
