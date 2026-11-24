@@ -43,12 +43,23 @@ class AutonomousQuantityAndDistanceTests(unittest.TestCase):
                     self.assertEqual(bot._entry_sizing_record()
                                      ["sizing_evidence"]["model_proposed_contracts"],number)
                     self.assertNotIn("tier",bot._entry_sizing_record()["sizing_evidence"])
-            oversized={"direction":"LONG","leverage":20,"contracts":7,
-                       "stop_loss":"3590","take_profit":"3610"}
-            self.assertEqual(bot._normalize_plan(oversized,{})["contracts"],7)
+            # Seven contracts may fit the configured controller cap, but the
+            # signed budget in this fixture permits at most six.
+            over_budget={"direction":"LONG","leverage":20,"contracts":7,
+                         "stop_loss":"3590","take_profit":"3610"}
+            self.assertEqual(bot._normalize_plan(over_budget,{})["contracts"],7)
+            self.assertEqual(bot._entry_sizing_record()
+                             ["sizing_evidence"]["selected_contracts"],7)
+            with self.assertRaises(RiskRejected):
+                bot._assess_risk(over_budget,budget(),quote())
+
+            # Separately check the actual controller hard cap.
+            over_cap={**over_budget,"contracts":bot._hard_contract_cap()+1}
+            self.assertEqual(bot._normalize_plan(over_cap,{})["contracts"],
+                             over_cap["contracts"])
             self.assertEqual(bot._entry_sizing_record(),{})
             with self.assertRaises(RiskRejected):
-                bot._assess_risk(oversized,budget(),quote())
+                bot._assess_risk(over_cap,budget(),quote())
 
     def test_equal_gross_stop_and_target_distance_accepted_long_and_short(self):
         for bot in (self.btc,self.gold):

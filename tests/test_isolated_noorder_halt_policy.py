@@ -133,8 +133,10 @@ class GoldHTTP500Tests(unittest.TestCase):
                        (GOLD_PRESS,"2026-11-24T00:18:53+00:00",
                         "rejected_no_order",json.dumps(self.receipt)))
 
-    def test_provider_http_500_without_intent_can_retry(self):
-        self.assertTrue(receipts_safe(self.root))
+    def test_unallowlisted_http_500_requires_review_even_without_intent(self):
+        # A provider HTTP response is distinct from the explicitly supported
+        # network-error retry classification. Preserve conservative review.
+        self.assertFalse(receipts_safe(self.root))
 
     def test_provider_http_500_with_durable_intent_halts(self):
         with sqlite3.connect(self.db) as db:
@@ -153,7 +155,7 @@ class GoldHTTP500Tests(unittest.TestCase):
                        (json.dumps({**self.receipt,"reason_code":"provider_http_401"}),))
         self.assertFalse(receipts_safe(self.root))
 
-    def test_new_provider_http_500_no_order_not_halted(self):
+    def test_new_unallowlisted_http_500_no_order_is_halted(self):
         from datetime import datetime,timezone
         import tradebot.gold_autonomous_demo as gold
         fake=Mock()
@@ -165,7 +167,7 @@ class GoldHTTP500Tests(unittest.TestCase):
              controller_factory=lambda *a,**k:fake,
              cooldown_check=lambda *a,**k:("ready",0),do_execute=True)
         self.assertEqual(result["result"],"rejected_no_order")
-        self.assertFalse((self.root/"gold-auto-demo-halt").exists())
+        self.assertTrue((self.root/"gold-auto-demo-halt").exists())
 
     def test_unknown_or_submitted_execution_halts(self):
         with sqlite3.connect(self.db) as db:

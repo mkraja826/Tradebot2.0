@@ -126,7 +126,7 @@ class ChatPluginTests(unittest.TestCase):
                 await session.initialize()
                 result = await session.list_tools()
                 tools = {t.name:t for t in result.tools}
-                self.assertEqual(set(tools), {"fire_demo","review_fire","fire_history","market_status","equity_checkpoint_status","admin_root_shell"})
+                self.assertEqual(set(tools), {"fire_demo","review_fire","fire_history","market_status","equity_checkpoint_status","subaccount_equity_status","admin_root_shell"})
                 self.assertTrue(tools["fire_demo"].annotations.idempotentHint)
                 self.assertFalse(tools["fire_demo"].annotations.readOnlyHint)
                 self.assertFalse(tools["admin_root_shell"].annotations.readOnlyHint)

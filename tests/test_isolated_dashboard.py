@@ -152,6 +152,16 @@ class IsolatedDashboardTests(unittest.TestCase):
         self.assertNotIn("GOLD_CHILD",json.dumps(report))
         self.assertNotIn("PARENT",json.dumps(report))
 
+    def test_parent_hardlinked_equity_history_is_not_exposed(self):
+        child = self.root / "btc-isolated" / "fire-equity-risk.sqlite"
+        parent = self.root / "fire-equity-risk.sqlite"
+        child.rename(parent)
+        child.hardlink_to(parent)
+        result = self.dashboard()._account("BTC")
+        self.assertEqual(result["equity_points"], [])
+        self.assertEqual(result["equity_health"], {"status": "unavailable"})
+        self.assertTrue(parent.is_file())
+
     def test_signing_failure_never_invents_empty_positions(self):
         with patch.dict(os.environ, {"DELTA_DEMO_API_KEY": "PARENT",
                                      "DELTA_DEMO_API_SECRET": "TEST"}):

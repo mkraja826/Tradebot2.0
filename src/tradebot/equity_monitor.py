@@ -18,7 +18,7 @@ from uuid import uuid4
 
 from tradebot.delta import DeltaDemo, DeltaReadError
 from tradebot.equity_receipt import EquityReadError
-from tradebot.portfolio_equity_guard import RuntimeEquityGuard, EquityRiskError, stamp
+from tradebot.equity_policy_core import RuntimeEquityGuard, EquityRiskError, stamp
 
 SERVICES = {"watchdog", "equity_collector"}
 READ_FAILURES = {

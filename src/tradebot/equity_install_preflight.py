@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 import sqlite3
 
-from tradebot.portfolio_equity_guard import EquityRiskError, validated_watermark
+from tradebot.equity_policy_core import EquityRiskError, validated_watermark
 
 REQUIRED_TABLES = frozenset((
     "equity_evidence", "equity_watermark", "equity_read_receipts",

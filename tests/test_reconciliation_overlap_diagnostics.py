@@ -9,17 +9,16 @@ from tradebot.isolated_performance import (
 
 class OverlapEvidenceTests(unittest.TestCase):
     def setUp(self):
-[redacted potentially sensitive output]
-[redacted potentially sensitive output]
-        self.product={"id":27}
-        self.fills=[
-[redacted potentially sensitive output]
-[redacted potentially sensitive output]
-[redacted potentially sensitive output]
-[redacted potentially sensitive output]
-                "type":"commission","amount":"-9876.54321",
-[redacted potentially sensitive output]
-[redacted potentially sensitive output]
+        # Synthetic test-only order/fill identities and microsecond timestamps.
+        self.trade = {"broker_order_id": "101", "exit_order_ids": {"stop": "102"}}
+        self.product = {"id": 27}
+        self.fills = [
+            {"id": "201", "order_id": "101", "at_us": 10},
+            {"id": "202", "order_id": "102", "at_us": 30},
+        ]
+        self.p = {"product_id": "27", "at_us": 20,
+                  "type": "commission", "amount": "-9876.54321",
+                  "order_id": "999001", "fill_id": "999002"}
 
     def test_unknown_broker_references_are_counted_not_attributed(self):
         result=_overlap_evidence_summary(
@@ -90,11 +89,11 @@ class OverlapEvidenceTests(unittest.TestCase):
         self.assertEqual(d["after_flat_without_order_or_fill_ref"],1)
         self.assertEqual(d["after_flat_funding"],1)
         self.assertFalse(d["is_verified_trade_pnl"])
-[redacted potentially sensitive output]
+        self.assertNotIn("-9876.54321", json.dumps(d))
 
     def test_known_owned_posting_after_close_not_counted_as_foreign(self):
         posting={**self.p,"at_us":101,
-[redacted potentially sensitive output]
+                 "order_id":"102","fill_id":"202"}
         d=_unattributed_evidence_summary(
             self.trade,self.product,self.fills,[posting])
         self.assertEqual(d["nonowned_since_entry"],0)
@@ -104,7 +103,7 @@ class OverlapEvidenceTests(unittest.TestCase):
         result=_overlap_evidence_summary(
             self.trade,self.product,self.fills,[self.p])
         raw=json.dumps(result)
-[redacted potentially sensitive output]
+        for value in ("999001", "999002", "-9876.54321"):
             self.assertNotIn(value,raw)
         self.assertEqual(_overlap_evidence_summary({}, {}, [], [])["status"],
                          "unavailable")

@@ -18,7 +18,7 @@ from tradebot.equity_monitor import (
     PORTFOLIO_LOSS_WARNING,
 )
 from tradebot.equity_receipt import validate_receipt
-from tradebot.portfolio_equity_guard import EquityRiskError, amount
+from tradebot.equity_policy_core import EquityRiskError, amount
 
 
 class SupervisedSessionEquityGuard:

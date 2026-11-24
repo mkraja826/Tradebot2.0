@@ -102,6 +102,7 @@ class SignalJournalTests(unittest.TestCase):
             SignalJournal(link)
         bad=self.root/"bad"
         bad.mkdir(mode=0o755)
+        bad.chmod(0o755)  # Explicit fixture mode, independent of CI umask.
         with self.assertRaises(ValueError):
             SignalJournal(bad/"journal.sqlite")
 

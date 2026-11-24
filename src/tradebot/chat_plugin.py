@@ -122,6 +122,13 @@ def equity_checkpoint_status() -> dict:
     }
 
 
+@server.tool(annotations=READ)
+def subaccount_equity_status() -> dict:
+    """Read separate BTC and GOLD demo equity diagnostics, never authorize orders."""
+    from tradebot.subaccount_equity_report_v3 import account_report
+    return account_report(dashboard("/api/isolated/overview"))
+
+
 @server.tool(annotations=WRITE)
 def fire_demo(symbol: Market, fire_id: UUID) -> dict:
     """Request one GPT-decided demo trade. Generate a UUID for this explicit request and retain it.
