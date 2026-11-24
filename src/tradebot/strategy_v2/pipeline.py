@@ -3,6 +3,7 @@
 SHADOW MODE ONLY. The existing broker execution and risk systems are untouched.
 """
 from datetime import datetime, timezone
+from hashlib import sha256
 from pathlib import Path
 import json
 import os
@@ -12,6 +13,7 @@ from tradebot.delta import DeltaDemo, DEMO_API
 from tradebot.multi_strategy_signals import MARKETS, scan_completed_5m
 from tradebot.signal_ai_router import build_ai_signal_event
 from tradebot.strategy_v2.journal import SignalJournal
+from tradebot.strategy_v2.ai_context import build_model_context
 
 DEFAULT_JOURNAL_DIR = Path("data/strategy-v2")
 
@@ -30,7 +32,12 @@ def inspect_symbol(client, symbol, *, as_of, journal):
     scan = scan_completed_5m(completed[-250:], symbol, as_of=as_of)
     routed = build_ai_signal_event(scan)
     status = "no_qualifying_signal"
+    context_hash = None
     if routed["dispatch_ai"]:
+        model_context = build_model_context(routed, completed[-250:])
+        context_hash = sha256(json.dumps(
+            model_context, sort_keys=True, separators=(",", ":")
+        ).encode()).hexdigest()
         result = journal.observe(routed)
         status = result["status"]
     return {
@@ -43,6 +50,8 @@ def inspect_symbol(client, symbol, *, as_of, journal):
         "ai_candidate_recorded": routed["dispatch_ai"]
             and status == "new_signal_observed",
         "ai_dispatched": False,
+        "model_context_ready": context_hash is not None,
+        "model_context_hash": context_hash,
         "broker_orders_submitted": 0,
         "execution_authorized": False,
     }
