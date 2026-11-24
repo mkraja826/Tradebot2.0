@@ -359,14 +359,16 @@ class IsolatedAccountsDashboard:
             "armed": self._armed(label, self.keys / arm),
             "fire": _fire_receipts(root, ledger),
             "attempts": _attempt_summary(root, attempts_db, attempt_table),
-            "equity_points": _equity_series(root),
+            "equity_points": [],
             "realized_pnl": None,
             "realized_pnl_verified": False,
             "reconciliation_warning": None,
         }
         try:
             from tradebot.subaccount_equity_scope_v3 import scoped_equity_ledger
-            health = risk_health(scoped_equity_ledger(self.root, symbol))
+            equity_path = scoped_equity_ledger(self.root, symbol)
+            health = risk_health(equity_path)
+            info["equity_points"] = _equity_series(equity_path.parent)
             info["equity_health"] = {
                 k: health.get(k) for k in (
                     "status", "as_of", "daily_checkpoint", "weekly_checkpoint",
