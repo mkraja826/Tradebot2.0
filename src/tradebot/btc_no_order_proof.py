@@ -49,10 +49,16 @@ def proved_gross_distance_failure(db, press, receipt):
             return False
         for price,name in ((entry,"model"),(broker,"broker")):
             v=diag.get(name)
-            if type(v) is not dict or v.get("gross_1_to_1_satisfied") is not False:
+            if type(v) is not dict:
                 return False
             stop=abs(price-sl);target=abs(tp-price)
-            if (target<=0 or stop<=target
+            satisfies=target>=stop
+            # The AI's quote may pass 1:1 while the fresh broker quote fails.
+            # Either model state is acceptable ONLY with matching arithmetic;
+            # the final signed broker quote MUST fail.
+            if (stop<=0 or target<=0
+                    or v.get("gross_1_to_1_satisfied") is not satisfies
+                    or (name=="broker" and satisfies)
                     or D(str(v["stop_distance"]))!=stop
                     or D(str(v["target_distance"]))!=target):
                 return False
