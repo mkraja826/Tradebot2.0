@@ -273,12 +273,16 @@ class FireExecutionTests(unittest.TestCase):
         self.assertTrue(fire.start()[0])
         self.assertEqual(fire.snapshot()["status"], "rejected_no_order")
         self.assertEqual(fire.snapshot()["reason_code"], "exchange_preflight_failed")
+        self.assertEqual(fire.snapshot()["preflight_rejection_detail"],
+                         "exit_price_off_broker_tick")
         self.assertFalse(self.exchange.requests)
 
     def test_off_tick_target_rejected_before_order_mutation(self):
         fire = self.make(plan=PLAN | {"take_profit": "63950.13"})
         self.assertTrue(fire.start()[0])
         self.assertEqual(fire.snapshot()["reason_code"], "exchange_preflight_failed")
+        self.assertEqual(fire.snapshot()["preflight_rejection_detail"],
+                         "exit_price_off_broker_tick")
         self.assertFalse(self.exchange.requests)
 
     def test_unknown_broker_tick_rejected_without_order(self):
@@ -292,6 +296,8 @@ class FireExecutionTests(unittest.TestCase):
         fire = self.make()
         self.assertTrue(fire.start()[0])
         self.assertEqual(fire.snapshot()["reason_code"], "exchange_preflight_failed")
+        self.assertEqual(fire.snapshot()["preflight_rejection_detail"],
+                         "missing_or_invalid_broker_tick")
         self.assertFalse(self.exchange.requests)
 
     def test_gpt6_can_select_lower_leverage_after_flat_verified_preflight(self):
