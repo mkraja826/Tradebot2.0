@@ -1,4 +1,4 @@
-[redacted potentially sensitive output]
+"""Offline tests for the read-only BTC and Gold shadow monitor."""
 import unittest
 from unittest.mock import patch
 from tradebot.delta import DEMO_API
