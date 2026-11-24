@@ -14,7 +14,13 @@ class SubaccountEquityReportTests(unittest.TestCase):
                         "margin_mode": "isolated_verified",
                         "broker_checked_at": self.now.isoformat(),
                         "equity_health": {"blocking_conditions": [], "alert_codes": [],
-                                          "checkpoint_prerequisites_met": True}}
+                                          "checkpoint_prerequisites_met": True,
+                                          "as_of": self.now.isoformat(),
+                                          "database_integrity": "verified",
+                                          "latest_receipt_status": "verified",
+                                          "observation_status": "fresh",
+                                          "daily_checkpoint": "verified",
+                                          "weekly_checkpoint": "verified"}}
                 for label, symbol in (("BTC", "BTCUSD"), ("GOLD", "XAUTUSD"))
             }
         }
@@ -61,3 +67,29 @@ class SubaccountEquityReportTests(unittest.TestCase):
         self.assertIn("child_broker_evidence_unverified", result["other_review_conditions"])
         self.assertNotIn("PRIVATE_UNKNOWN_VALUE", str(result))
         self.assertIn("other_equity_condition_requires_review", result["equity_conditions"])
+
+    def test_stale_or_unverified_equity_does_not_look_healthy(self):
+        health = self.overview["accounts"]["GOLD"]["equity_health"]
+        health.update(as_of="2026-11-24T18:00:00+00:00",
+                      weekly_checkpoint="missed_window",
+                      latest_receipt_status="invalid")
+        row = self.report()["accounts"]["GOLD"]
+        self.assertFalse(row["checkpoint_prerequisites_met"])
+        self.assertIn("child_equity_report_stale_or_missing", row["equity_conditions"])
+        self.assertIn("child_weekly_checkpoint_unverified", row["equity_conditions"])
+        self.assertIn("child_equity_receipt_unverified", row["equity_conditions"])
+
+    def test_loss_blocker_not_suppressed_even_with_inconsistent_health(self):
+        health = self.overview["accounts"]["BTC"]["equity_health"]
+        health["blocking_conditions"] = ["equity_loss_limit_breached"]
+        row = self.report()["accounts"]["BTC"]
+        self.assertEqual(row["reported_checkpoint_blockers"], ["equity_loss_limit_breached"])
+        self.assertFalse(row["checkpoint_prerequisites_met"])
+
+    def test_missing_evidence_and_bad_broker_are_explicit(self):
+        self.overview["accounts"]["GOLD"].pop("equity_health")
+        self.overview["accounts"]["GOLD"]["status"] = "broker_unavailable"
+        row = self.report()["accounts"]["GOLD"]
+        self.assertFalse(row["checkpoint_prerequisites_met"])
+        self.assertIn("child_evidence_unavailable", row["other_review_conditions"])
+        self.assertIn("child_broker_evidence_unverified", row["other_review_conditions"])
