@@ -24,6 +24,15 @@ class SubaccountEquityScopeTests(unittest.TestCase):
         self.assertEqual(scoped_equity_ledger(self.root, "XAUTUSD"), self.gold)
         self.assertEqual(child_equity_guard(self.root, "BTCUSD").path, self.btc)
 
+    def test_legacy_module_alias_preserves_core_identity(self):
+        from tradebot import equity_policy_core, portfolio_equity_guard
+        from importlib import import_module
+        self.assertIs(import_module("tradebot.portfolio_equity_guard"), equity_policy_core)
+        self.assertIs(portfolio_equity_guard, equity_policy_core)
+        self.assertIs(portfolio_equity_guard.RuntimeEquityGuard,
+                      equity_policy_core.RuntimeEquityGuard)
+        self.assertIs(portfolio_equity_guard.EquityRiskError, EquityRiskError)
+
     def test_missing_child_never_falls_back_to_parent(self):
         self.btc.unlink()
         with self.assertRaises(EquityRiskError):
