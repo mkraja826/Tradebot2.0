@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+.venv/
+.env*
+*.sqlite*
+*.pem
+*.key
+research-data/
+data/
+legacy_archive/
