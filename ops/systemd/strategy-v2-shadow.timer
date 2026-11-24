@@ -1,0 +1,11 @@
+[Unit]
+Description=Strategy V2 read-only independent ten-strategy scanner each minute
+
+[Timer]
+OnCalendar=*-*-* *:*:30
+AccuracySec=10s
+Persistent=true
+Unit=tradebot2-signal-shadow.service
+
+[Install]
+WantedBy=timers.target
