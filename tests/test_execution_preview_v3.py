@@ -47,6 +47,26 @@ class ExecutionPreviewTests(unittest.TestCase):
         for change in ({"product_id":spec["product_id"]+1},{"tick_size":"0.2"},{"contract_value":"0.002"}):
             with self.subTest(change=change), self.assertRaisesRegex(ValueError,"product_binding_mismatch"):
                 translate(q,r,dict(spec,**change),now=NOW)
+    def test_recovery_records_unknown_and_rejects_invalid_clock(self):
+        import sqlite3,json
+        from contextlib import closing
+        q,r,s=self.make(self.events[0]); p=translate(q,r,s,now=NOW)
+        path=self.root/"recovery.sqlite"; j=PreviewLedger(path)
+        for bad in (True,-1,1.5,"123",2**63):
+            with self.subTest(bad=bad),self.assertRaises(ValueError):
+                j.reserve(p,now=bad)
+        self.assertEqual(j.reserve(p,now=NOW),"reserved")
+        for bad in (True,0,-1,1.5,"120",2**63):
+            with self.subTest(timeout=bad),self.assertRaises(ValueError):
+                j.recover(now=NOW,timeout=bad)
+        self.assertEqual(j.recover(now=NOW+119),0)
+        self.assertEqual(j.recover(now=NOW+120),1)
+        self.assertEqual(j.recover(now=NOW+121),0)
+        with closing(sqlite3.connect(path)) as db:
+            state,raw=db.execute("SELECT state,receipt FROM reservations").fetchone()
+        self.assertEqual(state,"unknown_requires_reconciliation")
+        self.assertEqual(json.loads(raw),dict(state=state,filled_contracts=None,broker_verified=False))
+        self.assertEqual(PreviewLedger(path).reserve(p,now=NOW+122),"already_reserved")
     def test_receipts_and_restart(self):
         q,r,s=self.make(self.events[0]); p=translate(q,r,s,now=NOW)
         receipt=dict(source="synthetic_fixture",client_order_id=p["entry"]["preview_client_id"],symbol=p["symbol"],product_id=s["product_id"],side="buy",filled_contracts=1,status="open")
