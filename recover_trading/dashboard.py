@@ -213,7 +213,21 @@ def chart_data(root,symbol,frame,now,cache_dir=None):
         "candles":candles,"studies":chart_studies(candles,step),"invalid_rows":invalid,"gap_count":gaps,
         "last_close_age_s":now-candles[-1]["time"]-step if candles else None}
 
-def handler(root,cache_dir=None):
+def reference_chart(symbol,frame,now,reference_dir):
+    from .chart_feed import read_cache,REFERENCE_SOURCE
+    if symbol not in MARKETS or frame not in CHART_FRAMES:
+        raise ValueError("Unknown chart selection")
+    step=CHART_FRAMES[frame]
+    p=read_cache(reference_dir,symbol,frame,now,source=REFERENCE_SOURCE)
+    candles=p["candles"] if p else []
+    return {"symbol":symbol,"frame":frame,"step":step,"source":REFERENCE_SOURCE,
+        "generated":now,"observed_at":p["observed_at"] if p else None,
+        "status":"observed" if candles else "unavailable","candles":candles,
+        "studies":chart_studies(candles,step),"invalid_rows":p["invalid_rows"] if p else 0,
+        "gap_count":sum(b["time"]-a["time"]!=step for a,b in zip(candles,candles[1:])),
+        "last_close_age_s":now-candles[-1]["time"]-step if candles else None}
+
+def handler(root,cache_dir=None,reference_dir=None):
     class Handler(BaseHTTPRequestHandler):
         def send(self, status, content, mime):
             self.send_response(status)
@@ -244,18 +258,22 @@ def handler(root,cache_dir=None):
                 return self.send(200,content,mime)
             if path == "/api/chart":
                 try:
-                    q=parse_qs(urlsplit(self.path).query,strict_parsing=True,max_num_fields=2)
-                    if set(q)!={"symbol","frame"} or any(len(v)!=1 for v in q.values()):raise ValueError("Invalid query")
-                    data=chart_data(root,q["symbol"][0],q["frame"][0],int(time.time()),cache_dir)
+                    q=parse_qs(urlsplit(self.path).query,strict_parsing=True,max_num_fields=3)
+                    if set(q) not in ({"symbol","frame"},{"symbol","frame","source"}) or any(len(v)!=1 for v in q.values()):raise ValueError("Invalid query")
+                    source=q.get("source",["demo"])[0]
+                    if source not in ("demo","reference"):raise ValueError("Invalid source")
+                    data=reference_chart(q["symbol"][0],q["frame"][0],int(time.time()),reference_dir) if source=="reference" else chart_data(root,q["symbol"][0],q["frame"][0],int(time.time()),cache_dir)
                 except ValueError:
                     return self.send(400,b"Invalid chart selection","text/plain")
                 return self.send(200,json.dumps(data,allow_nan=False).encode(),"application/json")
             if path == "/api/chart-quote":
                 try:
-                    q=parse_qs(urlsplit(self.path).query,strict_parsing=True,max_num_fields=1)
-                    if set(q)!={"symbol"} or len(q["symbol"])!=1 or q["symbol"][0] not in MARKETS:raise ValueError("Invalid symbol")
-                    from .chart_quote import read_quote
-                    data=read_quote(cache_dir,q["symbol"][0],int(time.time()))
+                    q=parse_qs(urlsplit(self.path).query,strict_parsing=True,max_num_fields=2)
+                    if set(q) not in ({"symbol"},{"symbol","source"}) or any(len(v)!=1 for v in q.values()) or q["symbol"][0] not in MARKETS:raise ValueError("Invalid symbol")
+                    from .chart_quote import read_quote,REFERENCE_SOURCE
+                    source=q.get("source",["demo"])[0]
+                    if source not in ("demo","reference"):raise ValueError("Invalid source")
+                    data=read_quote(reference_dir,q["symbol"][0],int(time.time()),source=REFERENCE_SOURCE) if source=="reference" else read_quote(cache_dir,q["symbol"][0],int(time.time()))
                 except ValueError:
                     return self.send(400,b"Invalid chart quote selection","text/plain")
                 return self.send(200,json.dumps(data,allow_nan=False).encode(),"application/json")
@@ -270,8 +288,9 @@ def main():
     p.add_argument("--data-dir",default="data/recover-service")
     p.add_argument("--port",type=int,default=8765)
     p.add_argument("--chart-cache-dir",default=None)
+    p.add_argument("--reference-cache-dir",default=None)
     args=p.parse_args()
-    with ThreadingHTTPServer(("127.0.0.1",args.port),handler(args.data_dir,args.chart_cache_dir)) as server:
+    with ThreadingHTTPServer(("127.0.0.1",args.port),handler(args.data_dir,args.chart_cache_dir,args.reference_cache_dir)) as server:
         print(f"Local dashboard: http://127.0.0.1:{server.server_port}",flush=True)
         try:
             server.serve_forever()

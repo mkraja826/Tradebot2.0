@@ -17,6 +17,7 @@ from tradebot.market_data_v3 import MARKETS, FRAMES, public_client
 
 COUNT = 350
 SOURCE = "demo_public_completed_candles"
+REFERENCE_SOURCE = "reference_public_completed_candles"
 FIELDS = ("open", "high", "low", "close", "volume")
 
 
@@ -61,7 +62,7 @@ def cache_path(directory, symbol, frame):
     return Path(directory) / (symbol + "-" + frame + ".json")
 
 
-def read_cache(directory, symbol, frame, now):
+def read_cache(directory, symbol, frame, now, *, source=SOURCE):
     if not directory:
         return None
     try:
@@ -73,7 +74,7 @@ def read_cache(directory, symbol, frame, now):
         data = json.loads(raw)
         end = data["boundary"]
         observed = data["observed_at"]
-        if (data.get("source") != SOURCE or data.get("symbol") != symbol or
+        if (data.get("source") != source or data.get("symbol") != symbol or
             data.get("frame") != frame or type(end) is not int or
             type(observed) is not int or not 0 < end <= observed <= now or
             end % FRAMES[frame] or observed - end >= FRAMES[frame]):
@@ -86,7 +87,7 @@ def read_cache(directory, symbol, frame, now):
         return None
 
 
-def refresh(directory, symbol, frame, now, client_factory=public_client):
+def refresh(directory, symbol, frame, now, client_factory=public_client, *, source=SOURCE):
     step = FRAMES[frame]
     end = now // step * step
     rows = client_factory().candles(symbol=symbol, resolution=frame,
@@ -94,11 +95,11 @@ def refresh(directory, symbol, frame, now, client_factory=public_client):
     candles, invalid = validated(rows, frame, end)
     if not candles:
         raise ValueError("empty validated candle window")
-    old = read_cache(directory, symbol, frame, now)
+    old = read_cache(directory, symbol, frame, now, source=source)
     # Never replace a more recent successful window with an older response.
     if old and candles[-1]["time"] < old["candles"][-1]["time"]:
         return old
-    data = {"source": SOURCE, "symbol": symbol, "frame": frame,
+    data = {"source": source, "symbol": symbol, "frame": frame,
             "boundary": end, "observed_at": now, "candles": candles,
             "invalid_rows": invalid}
     path = cache_path(directory, symbol, frame)
@@ -108,15 +109,16 @@ def refresh(directory, symbol, frame, now, client_factory=public_client):
     return data
 
 
-def main():
-    p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--cache-dir", required=True)
-    p.add_argument("--once", action="store_true")
-    args = p.parse_args()
-    directory = Path(args.cache_dir)
+def collect(directory, once=False, reference=False):
+    from .chart_reference import ReferenceClient
+    from .chart_quote import REFERENCE_SOURCE as REFERENCE_QUOTE_SOURCE, SOURCE as DEMO_QUOTE_SOURCE
+    directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
-    if not args.once:
-        threading.Thread(target=quote_loop,args=(directory,threading.Event()),daemon=True,name="display-quotes").start()
+    factory=ReferenceClient if reference else public_client
+    source=REFERENCE_SOURCE if reference else SOURCE
+    quote_source=REFERENCE_QUOTE_SOURCE if reference else DEMO_QUOTE_SOURCE
+    if not once:
+        threading.Thread(target=quote_loop,args=(directory,threading.Event()),kwargs={"client_factory":factory,"source":quote_source},daemon=True,name="display-quotes").start()
     last_attempt = {}
     pairs = [(s,f) for s in MARKETS for f in FRAMES]
     while True:
@@ -124,24 +126,32 @@ def main():
         due = []
         for s, f in pairs:
             end = now // FRAMES[f] * FRAMES[f]
-            previous = read_cache(directory,s,f,now)
+            previous = read_cache(directory,s,f,now,source=source)
             complete = previous and previous["candles"][-1]["time"] == end - FRAMES[f]
-            if args.once or (not complete and now - end >= 3 and now - last_attempt.get((s,f),0) >= 30):
+            if once or (not complete and now - end >= 3 and now - last_attempt.get((s,f),0) >= 30):
                 due.append((s,f))
                 last_attempt[s,f] = now
         def task(pair):
             s,f = pair
             try:
-                data = refresh(directory,s,f,int(time.time()))
-                print(s,f,"bars",len(data["candles"]),"last",data["candles"][-1]["time"],flush=True)
+                data = refresh(directory,s,f,int(time.time()),factory,source=source)
+                print(source,s,f,"bars",len(data["candles"]),"last",data["candles"][-1]["time"],flush=True)
             except Exception as exc:
-                print(s,f,"unavailable",type(exc).__name__,flush=True)
+                print(source,s,f,"unavailable",type(exc).__name__,flush=True)
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
             list(pool.map(task,due))
-        if args.once:
+        if once:
             return
         time.sleep(5)
 
+
+def main():
+    p=argparse.ArgumentParser(description=__doc__)
+    p.add_argument("--cache-dir",required=True)
+    p.add_argument("--once",action="store_true")
+    p.add_argument("--reference",action="store_true")
+    args=p.parse_args()
+    collect(args.cache_dir,args.once,args.reference)
 
 if __name__ == "__main__":
     main()

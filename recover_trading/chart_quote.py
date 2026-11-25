@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 from tradebot.market_data_v3 import MARKETS, public_client
 
 SOURCE = "demo_public_ticker"
+REFERENCE_SOURCE = "reference_public_ticker"
 MAX_AGE_S = 15
 POLL_S = 3
 
@@ -24,17 +25,17 @@ def positive(v):
         raise ValueError("invalid price")
     return n
 
-def normalize(symbol,raw,now):
+def normalize(symbol,raw,now,*,source=SOURCE):
     if symbol not in MARKETS or not isinstance(raw,dict) or raw.get("symbol")!=symbol:
         raise ValueError("ticker identity mismatch")
     t=raw.get("timestamp")
     if type(t) is not int or not 0<t<=int((now+2)*1_000_000):
         raise ValueError("invalid exchange timestamp")
-    return {"symbol":symbol,"source":SOURCE,"exchange_time_us":t,"observed_at":now,
+    return {"symbol":symbol,"source":source,"exchange_time_us":t,"observed_at":now,
             "last_price":positive(raw["close"]),"mark_price":positive(raw["mark_price"])}
 
-def read_quote(directory,symbol,now):
-    empty={"symbol":symbol,"source":SOURCE,"status":"unavailable","last_price":None,"mark_price":None,"exchange_time_us":None,"observed_at":None,"age_s":None,"generated":now}
+def read_quote(directory,symbol,now,*,source=SOURCE):
+    empty={"symbol":symbol,"source":source,"status":"unavailable","last_price":None,"mark_price":None,"exchange_time_us":None,"observed_at":None,"age_s":None,"generated":now}
     if not directory:
         return empty
     try:
@@ -44,18 +45,18 @@ def read_quote(directory,symbol,now):
             return empty
         q=json.loads(raw)
         t=q["exchange_time_us"]; observed=q["observed_at"]
-        if q.get("symbol")!=symbol or q.get("source")!=SOURCE or type(t) is not int or type(observed) is not int or not 0<observed<=now or not 0<t<=int((observed+2)*1_000_000):
+        if q.get("symbol")!=symbol or q.get("source")!=source or type(t) is not int or type(observed) is not int or not 0<observed<=now or not 0<t<=int((observed+2)*1_000_000):
             return empty
         age=round(now-t/1_000_000,3)
         return {**empty,"status":"observed" if -2<=age<=MAX_AGE_S else "stale","last_price":positive(q["last_price"]),"mark_price":positive(q["mark_price"]),"exchange_time_us":t,"observed_at":observed,"age_s":age}
     except (OSError,ValueError,TypeError,KeyError,OverflowError):
         return empty
 
-def refresh_quote(directory,symbol,client_factory=public_client,clock=time.time):
+def refresh_quote(directory,symbol,client_factory=public_client,clock=time.time,*,source=SOURCE):
     raw=client_factory().ticker(symbol)
     now=int(clock())
-    data=normalize(symbol,raw,now)
-    old=read_quote(directory,symbol,now)
+    data=normalize(symbol,raw,now,source=source)
+    old=read_quote(directory,symbol,now,source=source)
     if old["exchange_time_us"] is not None and old["exchange_time_us"]>=data["exchange_time_us"]:
         return old
     path=path_for(directory,symbol);tmp=path.with_suffix(".tmp")
@@ -63,9 +64,9 @@ def refresh_quote(directory,symbol,client_factory=public_client,clock=time.time)
     os.replace(tmp,path)
     return data
 
-def quote_loop(directory,stop):
+def quote_loop(directory,stop,*,client_factory=public_client,source=SOURCE):
     def task(symbol):
-        try:refresh_quote(directory,symbol)
+        try:refresh_quote(directory,symbol,client_factory,source=source)
         except Exception:pass  # Retained observation ages naturally; no invented quote.
     with ThreadPoolExecutor(max_workers=2) as pool:
         while not stop.is_set():

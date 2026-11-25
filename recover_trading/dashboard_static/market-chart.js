@@ -2,6 +2,9 @@
 (()=>{
  const id=x=>document.getElementById(x),root=id("marketChart"),L=window.LightweightCharts;
  let symbol=document.querySelector("[data-symbol][aria-pressed=true]")?.dataset.symbol||"BTCUSD",frame="5m",packet=null,selected=new Set(),generation=0,busy=false,levels=true,showFills=true,overlays=new Map(),dockKey="",chart=null,candles=null,volume=null,markers=null,priceLines=[],studySeries=[],studyKey="",crossTime=null,displayed=[],rowsByTime=new Map();
+ const sourceModes=new Map([["BTCUSD","demo"],["XAUTUSD","reference"]]);
+ function sourceMode(){return sourceModes.get(symbol)||"demo"}
+ function reference(){return sourceMode()==="reference"}
  const scaleModes=new Map([["BTCUSD","full"],["XAUTUSD","focus"]]);let logarithmic=false,scaleNoteFrame=0;
  let modalInert=[],modalReturnFocus=null;
  let quote=null,quoteLine=null,quoteBusy=false,quoteGeneration=0,quoteReceived=0,quoteFailed=false;
@@ -47,7 +50,8 @@
    });
    id("studyLegend").replaceChildren(...groups);
  }
- function scaleMode(){return scaleModes.get(symbol)||"full"}
+ function scaleKey(){return symbol+(reference()?":reference":"")}
+ function scaleMode(){return scaleModes.get(scaleKey())||"full"}
  function visibleBars(){
    const range=chart?.timeScale().getVisibleRange();
    if(range&&typeof range.from==="number"&&typeof range.to==="number"){
@@ -110,12 +114,18 @@
    for(const row of rows){if(previous!==null&&row.time>previous+step)result.push({time:previous+step});result.push(map(row));previous=row.time}
    return result;
  }
+ function sourceView(){
+   id("chartSourceLabel").textContent=reference()?"PRODUCTION MARKET REFERENCE · ANALYSIS ONLY":"DEMO EXECUTION MARKET · COMPLETED CANDLES";
+   id("chartReference").setAttribute("aria-pressed",String(reference()));id("chartDemo").setAttribute("aria-pressed",String(!reference()));
+   for(const name of ["chartLevels","chartFills","chartFillFilter","clearFillSelection"])id(name).disabled=reference();
+   id("chartExecutions").hidden=reference();
+ }
  function quoteView(){
    const q=quote,age=q&&Number.isFinite(q.age_s)?q.age_s+Math.max(0,(performance.now()-quoteReceived)/1000):null;
    const current=q?.symbol===symbol&&q.status==="observed"&&age!==null&&age>=-2&&age<=15&&!quoteFailed;
    id("chartLivePrice").textContent=q?.symbol===symbol&&Number.isFinite(q.last_price)?fmt(q.last_price)+" USD":"—";
    id("chartLiveMark").textContent=q?.symbol===symbol&&Number.isFinite(q.mark_price)?"Mark "+fmt(q.mark_price):"Mark —";
-   id("chartLiveState").textContent=current?"Public demo last price · "+Math.max(0,Math.round(age))+"s old":q?.last_price!=null?"Last observed quote · stale / disconnected":"Public demo last price · unavailable";
+   id("chartLiveState").textContent=current?(reference()?"Reference":"Public demo")+" last price · "+Math.max(0,Math.round(age))+"s old":q?.last_price!=null?"Last observed quote · stale / disconnected":(reference()?"Reference":"Public demo")+" last price · unavailable";
    id("quoteDot").classList.toggle("quote-active",Boolean(current));
    if(quoteLine&&candles){candles.removePriceLine(quoteLine);quoteLine=null}
    if(current&&candles&&packet&&chart.timeScale().scrollPosition()>=-2){
@@ -124,18 +134,18 @@
  }
  async function loadQuote(){
    if(!visible()||quoteBusy)return;
-   quoteBusy=true;const g=++quoteGeneration,s=symbol;
+   quoteBusy=true;const g=++quoteGeneration,s=symbol,source=sourceMode();
    try{
-     const response=await fetch("/api/chart-quote?symbol="+encodeURIComponent(s),{cache:"no-store"});
+     const response=await fetch("/api/chart-quote?symbol="+encodeURIComponent(s)+"&source="+source,{cache:"no-store"});
      if(!response.ok)throw Error("quote unavailable");
      const p=await response.json();if(g!==quoteGeneration||symbol!==s)return;
-     if(p.symbol!==s||p.source!=="demo_public_ticker")throw Error("quote identity");
+     if(p.symbol!==s||p.source!==(source==="reference"?"reference_public_ticker":"demo_public_ticker"))throw Error("quote identity");
      quote=p;quoteReceived=performance.now();quoteFailed=false;quoteView();
    }catch(e){if(g===quoteGeneration){quoteFailed=true;quoteView()}}
    finally{if(g===quoteGeneration)quoteBusy=false}
  }
  function knownFills(){
-   return (overlay().fills||[]).filter(f=>typeof f.id==="string"&&Number.isFinite(f.time)&&Number.isFinite(f.price)&&f.price>0&&["buy","sell"].includes(f.side));
+   return (reference()?[]:overlay().fills||[]).filter(f=>typeof f.id==="string"&&Number.isFinite(f.time)&&Number.isFinite(f.price)&&f.price>0&&["buy","sell"].includes(f.side));
  }
  function candleTime(f){return packet?Math.floor(f.time/packet.step)*packet.step:null}
  function matchingFills(){return knownFills().filter(f=>fillFilter==="all"||f.kind===fillFilter||(fillFilter==="adjustment"&&["increase","reduction"].includes(f.kind)))}
@@ -173,8 +183,9 @@
    renderFillSelection();
  }
  function overlayView(){
-   dock();quoteView();fillListView();if(!chart||!packet)return;
+   dock();quoteView();fillListView();sourceView();if(!chart||!packet)return;
    for(const line of priceLines)candles.removePriceLine(line);priceLines=[];
+   if(reference()){markers.setMarkers([]);id("chartOverlayNote").textContent="Reference prices only · demo execution markers and position levels are hidden. Switch to Demo execution to inspect fills.";return}
    const o=overlay(),fresh=isFresh(o),live=levels&&fresh&&o.status==="position_observed";
    const atLatest=chart.timeScale().scrollPosition()>=-2;
    if(live&&atLatest)for(const l of o.lines||[]){if(!lineStyle[l.kind]||!Number.isFinite(l.price)||l.price<=0)continue;const [title,color]=lineStyle[l.kind];priceLines.push(candles.createPriceLine({price:l.price,color,lineWidth:l.kind==="entry"?2:1,lineStyle:l.kind==="entry"?L.LineStyle.Solid:l.kind==="mark"?L.LineStyle.Dotted:L.LineStyle.Dashed,axisLabelVisible:true,title}));}
@@ -221,19 +232,19 @@
    overlayView();readout(null);scheduleScaleNote();
  }
  function clearSelection(){
-   generation++;busy=false;packet=null;displayed=[];rowsByTime.clear();studyLookup.clear();crossTime=null;dispose();id("studyLegend").replaceChildren();id("studyPanels").replaceChildren();id("marketChartTitle").textContent=symbol+" · "+frame;id("marketChartLast").textContent="—";id("marketChartStatus").textContent="Loading chart…";id("chartOverlayNote").textContent="";readout(null);scaleNote();fillListView();if(visible())load(true);
+   generation++;busy=false;packet=null;displayed=[];rowsByTime.clear();studyLookup.clear();crossTime=null;dispose();id("studyLegend").replaceChildren();id("studyPanels").replaceChildren();id("marketChartTitle").textContent=symbol+" · "+frame;id("marketChartLast").textContent="—";id("marketChartStatus").textContent="Loading chart…";id("chartOverlayNote").textContent="";readout(null);scaleNote();fillListView();sourceView();if(visible())load(true);
  }
  async function load(force=false){
    if(!visible()||(!force&&busy))return;
-   const g=++generation,s=symbol,f=frame;busy=true;
+   const g=++generation,s=symbol,f=frame,source=sourceMode();busy=true;
    try{
-     const res=await fetch("/api/chart?symbol="+encodeURIComponent(s)+"&frame="+encodeURIComponent(f),{cache:"no-store"});
+     const res=await fetch("/api/chart?symbol="+encodeURIComponent(s)+"&frame="+encodeURIComponent(f)+"&source="+source,{cache:"no-store"});
      if(!res.ok)throw Error("chart unavailable");
      const p=await res.json();if(g!==generation)return;
-     if(p.symbol!==s||p.frame!==f||!Array.isArray(p.candles)||!Number.isFinite(p.step))throw Error("chart identity");
+     if(p.symbol!==s||p.frame!==f||!Array.isArray(p.candles)||!Number.isFinite(p.step)||(source==="reference"?p.source!=="reference_public_completed_candles":!["demo_public_completed_candles","demo_archived_completed_candles"].includes(p.source)))throw Error("chart identity");
      const reset=!packet;id("marketChartTitle").textContent=s+" · "+f;id("marketChartLast").textContent=p.candles.length?fmt(p.candles.at(-1).close)+" USD":"—";
      const age=p.last_close_age_s,stale=age===null||age>2*p.step||age<0,wide=p.candles.slice(-80).filter(x=>(x.high-x.low)/x.close>.02).length;
-     id("marketChartStatus").textContent=p.status==="observed"?(stale?"Stale archive":"Completed archive")+" · "+(p.source==="demo_public_completed_candles"?"Public demo cache":"Trading archive")+" · Last close "+age+"s ago · "+p.gap_count+" gaps · "+p.invalid_rows+" invalid rows · "+wide+" wide-range candles / last "+Math.min(80,p.candles.length):"No chart data available";
+     id("marketChartStatus").textContent=p.status==="observed"?(stale?"Stale archive":"Completed archive")+" · "+(p.source==="reference_public_completed_candles"?"Production reference":p.source==="demo_public_completed_candles"?"Public demo cache":"Trading archive")+" · Last close "+age+"s ago · "+p.gap_count+" gaps · "+p.invalid_rows+" invalid rows · "+wide+" wide-range candles / last "+Math.min(80,p.candles.length):"No chart data available";
      id("marketChartStatus").className=stale||wide?"caution":"";
      renderPacket(p,reset);
    }catch(e){if(g===generation){id("marketChartStatus").textContent="Chart unavailable · retained data may be stale";id("marketChartStatus").className="caution";console.warn("Recover chart:",e.message)}}
@@ -242,14 +253,17 @@
  function pan(n){if(chart){const scale=chart.timeScale(),r=scale.getVisibleLogicalRange();if(r)scale.setVisibleLogicalRange({from:r.from+n,to:r.to+n});overlayView()}}
  function zoom(factor){if(chart){const scale=chart.timeScale(),r=scale.getVisibleLogicalRange();if(r){const center=(r.from+r.to)/2,half=Math.max(5,Math.min(180,(r.to-r.from)*factor/2));scale.setVisibleLogicalRange({from:center-half,to:center+half})}}}
  function latest(){if(chart){chart.timeScale().scrollToRealTime();overlayView()}load()}
+ function selectSource(source){if(sourceMode()===source)return;sourceModes.set(symbol,source);selectedFillId=null;logarithmic=false;quoteGeneration++;quoteBusy=false;quote=null;quoteFailed=false;clearSelection();quoteView();loadQuote()}
+ id("chartReference").addEventListener("click",()=>selectSource("reference"));id("chartDemo").addEventListener("click",()=>selectSource("demo"));
+ sourceView();
  document.addEventListener("recover:overview",e=>{overlays=new Map(e.detail.map(o=>[o.symbol,o]));if(visible())overlayView()});
- document.addEventListener("recover:market",e=>{for(const b of document.querySelectorAll("[data-chart-symbol]"))b.setAttribute("aria-pressed",String(b.dataset.chartSymbol===e.detail));if(symbol!==e.detail){selectedFillId=null;symbol=e.detail;quoteGeneration++;quoteBusy=false;quote=null;quoteFailed=false;clearSelection();quoteView();loadQuote();dock()}});
+ document.addEventListener("recover:market",e=>{for(const b of document.querySelectorAll("[data-chart-symbol]"))b.setAttribute("aria-pressed",String(b.dataset.chartSymbol===e.detail));if(symbol!==e.detail){selectedFillId=null;symbol=e.detail;logarithmic=false;quoteGeneration++;quoteBusy=false;quote=null;quoteFailed=false;clearSelection();quoteView();loadQuote();dock()}});
  for(const b of document.querySelectorAll("[data-frame]"))b.addEventListener("click",()=>{if(frame===b.dataset.frame)return;frame=b.dataset.frame;for(const a of document.querySelectorAll("[data-frame]"))a.setAttribute("aria-pressed",String(a===b));clearSelection()});
  id("chartZoomIn").addEventListener("click",()=>zoom(.8));id("chartZoomOut").addEventListener("click",()=>zoom(1.25));id("chartLeft").addEventListener("click",()=>pan(-15));id("chartRight").addEventListener("click",()=>pan(15));id("chartReset").addEventListener("click",latest);
  id("chartFillFilter").addEventListener("change",e=>{fillFilter=e.target.value;selectedFillId=null;fillListKey="";overlayView()});
  id("clearFillSelection").addEventListener("click",()=>{selectedFillId=null;fillListKey="";overlayView()});
- id("scaleFull").addEventListener("click",()=>{scaleModes.set(symbol,"full");applyScale()});
- id("scaleFocus").addEventListener("click",()=>{scaleModes.set(symbol,"focus");applyScale()});
+ id("scaleFull").addEventListener("click",()=>{scaleModes.set(scaleKey(),"full");applyScale()});
+ id("scaleFocus").addEventListener("click",()=>{scaleModes.set(scaleKey(),"focus");applyScale()});
  id("scaleLog").addEventListener("click",()=>{logarithmic=!logarithmic;applyScale()});
  id("scaleAuto").addEventListener("click",applyScale);
  scaleNote();
