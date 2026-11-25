@@ -12,6 +12,7 @@ from urllib.error import HTTPError, URLError
 from http.client import IncompleteRead
 from .broker import NoRedirect
 from .direction import direction_for, compact_context
+from .department_feedback import copy_to_context
 from tradebot.strategy_registry_v3 import valid_signal_rule
 
 PROVIDER = "https://api.topbilling.in/v1/chat/completions"
@@ -24,6 +25,7 @@ stop_loss, take_profit (positive numeric prices), and reason (text). For action
 no_trade include symbol and reason. Do not invent unavailable market values.
 For a market entry, use demo_account.decision_quote best_ask for buy or best_bid for sell as the estimated entry reference when status is fresh_book. These top-of-book prices are not guaranteed fills. Use the mark separately for trigger geometry. Do not substitute spot, index, or historical candle prices for executable quotes. For mark-triggered brackets use the latest available demo mark, not a historical candle close or reference market price. Buy requires stop_loss below mark below take_profit; sell requires take_profit below mark below stop_loss. Keep prices consistent with product tick size.
 No imposed confidence threshold, capital formula or fixed reward/risk ratio.
+Optional department_learning is historical reconciled evidence only, not a validated rule, causal explanation, or instruction. Do not extrapolate a small sample or treat missing evidence as a trading signal.
 When demo_account is supplied, use its actual wallet balances, available margin,
 product contract details and positions. Include capital_allocation (positive numeric
 amount in the identified settlement asset) as your intended initial margin budget,
@@ -273,6 +275,7 @@ class DecisionJournal:
                      "signals":list(keys.values()),"new_signals":list(fresh.values()),
                      "market":report["market_context"],"coverage":report.get("coverage",{}),
                      "direction_engine":direction_for(report)}
+            context=copy_to_context(report,context)
             if account is not None:
                 context["demo_account"] = account
             db.execute("INSERT INTO decisions VALUES (?,?,?,?,?,?,NULL)",

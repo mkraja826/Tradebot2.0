@@ -23,6 +23,7 @@ from .open_excursion import report as open_excursion_report
 from .management_executor import ManagementExecutor
 from .execution import product_for
 from .market_quality import diagnostics
+from .department_feedback import attach
 from tradebot.market_data_v3 import MARKETS
 
 PREFIX = {"BTCUSD": "RECOVER_BTC", "XAUTUSD": "RECOVER_GOLD"}
@@ -39,7 +40,7 @@ def emit(event):
 
 class MarketService:
     def __init__(self, symbol, directory, *, model="", provider=None, broker=None,
-                 scan=scan_once, output=emit, manage_demo=False):
+                 scan=scan_once, output=emit, manage_demo=False, learning_journal=None):
         if symbol not in PREFIX:
             raise ValueError("Unsupported market")
         self.symbol = symbol
@@ -48,6 +49,7 @@ class MarketService:
         self.model, self.provider, self.broker = model, provider, broker
         self.scan, self.output = scan, output
         self.manage_demo=manage_demo
+        self.learning_journal=learning_journal
         self.management_executor=None
         if broker is not None and (provider is None or not model):
             raise ValueError("Execution requires configured AI")
@@ -99,6 +101,7 @@ class MarketService:
         report = self.scan(self.directory / "market.sqlite", symbols=(self.symbol,),
                            include_context=True)["markets"][self.symbol]
         scan_ms=round((time.monotonic()-scan_started)*1000)
+        report=attach(report,self.learning_journal)
         quality=None
         if report.get("status") != "scan_error":
             try:quality=diagnostics(report,self.directory / "market.sqlite")
@@ -209,6 +212,7 @@ def main():
     parser.add_argument("--execute-demo", action="store_true", help="Enable billable AI and demo orders")
     parser.add_argument("--manage-demo",action="store_true",help="Enable recurring AI management and demo position mutations")
     args = parser.parse_args()
+    parser.add_argument("--learning-journal", help="Opt-in read-only prior outcome evidence for AI context")
     if args.manage_demo and not args.execute_demo:parser.error("--manage-demo requires --execute-demo")
     if not math.isfinite(args.interval) or args.interval <= 0:
         parser.error("Interval must be finite and positive")
@@ -234,7 +238,7 @@ def main():
     services = [MarketService(s, args.data_dir, model=models[s],
                               broker=DeltaDemo(*accounts[s]) if args.execute_demo else None,
                               provider=Provider() if args.execute_demo else None,
-                              output=output,manage_demo=args.manage_demo) for s in symbols]
+                              output=output,manage_demo=args.manage_demo,learning_journal=args.learning_journal) for s in symbols]
     failures = []
     def worker(service):
         try:
