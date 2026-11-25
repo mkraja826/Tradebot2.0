@@ -34,6 +34,8 @@ def context_for(report,snapshot,product,now):
       "product":{"id":product["id"],"tick_size":str(tick),"symbol":symbol},
       "direction_engine":direction_for(report),"signals":report.get("signals",[]),
       "market":report.get("market_context",{}),"coverage":report.get("coverage",{})}
+    from .management_executor import identity
+    context["execution_identity"]=identity(snapshot)
     return compact_context(context)
 
 def validate(raw,context):

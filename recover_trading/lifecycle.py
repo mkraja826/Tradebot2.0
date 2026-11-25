@@ -11,7 +11,7 @@ POSITION_FIELDS = ("product_id", "product_symbol", "size", "entry_price", "margi
                    "created_at", "updated_at")
 ORDER_FIELDS = ("id", "client_order_id", "product_id", "side", "size", "unfilled_size",
                 "state", "average_fill_price", "stop_order_type", "stop_price",
-                "bracket_order", "reduce_only", "created_at", "updated_at", "paid_commission")
+                "bracket_order", "reduce_only", "created_at", "updated_at", "paid_commission","stop_trigger_method","cancellation_reason")
 FILL_FIELDS = ("id", "order_id", "product_id", "product_symbol", "side", "size",
                "price", "commission", "settling_asset_symbol", "fill_type", "created_at")
 NEW_POSITION_FIELDS = ("size", "margin", "entry_price", "realized_pnl",

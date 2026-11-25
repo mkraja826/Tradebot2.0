@@ -19,6 +19,7 @@ from .planner_shadow import packet,load_reference,ShadowJournal
 from .lifecycle import Lifecycle
 from .bracket_repair import BracketRepair
 from .management_shadow import ManagementShadow
+from .management_executor import ManagementExecutor
 from .execution import product_for
 from .market_quality import diagnostics
 from tradebot.market_data_v3 import MARKETS
@@ -37,7 +38,7 @@ def emit(event):
 
 class MarketService:
     def __init__(self, symbol, directory, *, model="", provider=None, broker=None,
-                 scan=scan_once, output=emit):
+                 scan=scan_once, output=emit, manage_demo=False):
         if symbol not in PREFIX:
             raise ValueError("Unsupported market")
         self.symbol = symbol
@@ -45,6 +46,8 @@ class MarketService:
         self.directory.mkdir(parents=True, exist_ok=True)
         self.model, self.provider, self.broker = model, provider, broker
         self.scan, self.output = scan, output
+        self.manage_demo=manage_demo
+        self.management_executor=None
         if broker is not None and (provider is None or not model):
             raise ValueError("Execution requires configured AI")
         self.decisions = self.orders = self.executor = self.lifecycle = self.repair = self.management = None
@@ -59,6 +62,7 @@ class MarketService:
             self.lifecycle = Lifecycle(self.broker, self.orders)
             self.repair = BracketRepair(self.broker,self.orders)
             self.management = ManagementShadow(self.orders.db)
+            self.management_executor=ManagementExecutor(self.broker,self.orders)
 
     def close(self):
         if self.orders is not None:
@@ -122,11 +126,22 @@ class MarketService:
         if self.management is not None and report.get("status")!="scan_error":
             try:management=self.management.capture(report,lifecycle,self.model,lambda s:product_for(self.broker,s))
             except Exception as exc:management={"status":"capture_error","error":type(exc).__name__,"execution_effect":"none"}
+        managed={"status":"execution_disabled","attempted":False}
+        # Explicit opt-in. Only newly captured, current proposals can execute.
+        if self.manage_demo and management and management.get("status")=="prepared" and management.get("context_bytes"):
+            try:
+                ident=management["id"]
+                outcome=self.management.evaluate(ident,self.provider)
+                managed=self.management_executor.execute(self.symbol,ident,enabled=True) if outcome["status"]=="proposed" else {"status":outcome["status"],"attempted":False}
+                managed["management_ai_calls"]=1
+            except Exception as exc:managed={"status":"management_error","error":type(exc).__name__,"attempted":False}
         execution_started=time.monotonic()
         if report.get("status") == "scan_error":
             result = {"status": "scan_error", "reason": report.get("reason")}
         elif self.executor is None:
             result = {"status": "preview", "signals": report["signals"], "ai_calls": 0}
+        elif self.manage_demo and (managed.get("attempted") or lifecycle.get("positions") or "positions" not in lifecycle):
+            result={"status":"position_management_cycle","ai_calls":0}
         else:
             result = evaluate_and_execute(report, self.decisions, self.provider,
                                           {self.symbol: self.model}, self.executor)
@@ -150,6 +165,7 @@ class MarketService:
                  "planner_shadow": planner,
                  "bracket_repair": repair,
                  "management_shadow": management,
+                 "management_execution": managed,
                  "error": summary.get("error", summary.get("reason")),
                  "reconciliation_error": reconciliation_error,
                  "lifecycle": {"new_fills": lifecycle.get("new_fills"),
@@ -181,7 +197,9 @@ def main():
     parser.add_argument("--interval", type=float, default=60, help="Target scan interval in seconds")
     parser.add_argument("--once", action="store_true")
     parser.add_argument("--execute-demo", action="store_true", help="Enable billable AI and demo orders")
+    parser.add_argument("--manage-demo",action="store_true",help="Enable recurring AI management and demo position mutations")
     args = parser.parse_args()
+    if args.manage_demo and not args.execute_demo:parser.error("--manage-demo requires --execute-demo")
     if not math.isfinite(args.interval) or args.interval <= 0:
         parser.error("Interval must be finite and positive")
     symbols = tuple(dict.fromkeys(args.symbol or MARKETS))
@@ -206,7 +224,7 @@ def main():
     services = [MarketService(s, args.data_dir, model=models[s],
                               broker=DeltaDemo(*accounts[s]) if args.execute_demo else None,
                               provider=Provider() if args.execute_demo else None,
-                              output=output) for s in symbols]
+                              output=output,manage_demo=args.manage_demo) for s in symbols]
     failures = []
     def worker(service):
         try:
