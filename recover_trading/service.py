@@ -23,9 +23,11 @@ from .open_excursion import report as open_excursion_report
 from .management_executor import ManagementExecutor
 from .execution import product_for
 from .market_quality import diagnostics
+from .department_feedback import attach
 from tradebot.market_data_v3 import MARKETS
 
 PREFIX = {"BTCUSD": "RECOVER_BTC", "XAUTUSD": "RECOVER_GOLD"}
+DEFAULT_MANAGEMENT_MODEL = "tb-deepseek-v4-pro"
 
 def credentials(symbol, env):
     prefix = PREFIX[symbol]
@@ -39,7 +41,8 @@ def emit(event):
 
 class MarketService:
     def __init__(self, symbol, directory, *, model="", provider=None, broker=None,
-                 scan=scan_once, output=emit, manage_demo=False):
+                 scan=scan_once, output=emit, manage_demo=False, learning_journal=None,
+                 management_model=None):
         if symbol not in PREFIX:
             raise ValueError("Unsupported market")
         self.symbol = symbol
@@ -48,6 +51,8 @@ class MarketService:
         self.model, self.provider, self.broker = model, provider, broker
         self.scan, self.output = scan, output
         self.manage_demo=manage_demo
+        self.management_model = management_model or (DEFAULT_MANAGEMENT_MODEL if manage_demo else model)
+        self.learning_journal=learning_journal
         self.management_executor=None
         if broker is not None and (provider is None or not model):
             raise ValueError("Execution requires configured AI")
@@ -99,6 +104,7 @@ class MarketService:
         report = self.scan(self.directory / "market.sqlite", symbols=(self.symbol,),
                            include_context=True)["markets"][self.symbol]
         scan_ms=round((time.monotonic()-scan_started)*1000)
+        report=attach(report,self.learning_journal)
         quality=None
         if report.get("status") != "scan_error":
             try:quality=diagnostics(report,self.directory / "market.sqlite")
@@ -126,7 +132,7 @@ class MarketService:
         excursion=open_excursion_report(self.directory,self.symbol,lifecycle,int(time.time())) if self.lifecycle is not None else None
         management=None
         if self.management is not None and report.get("status")!="scan_error":
-            try:management=self.management.capture(report,lifecycle,self.model,lambda s:product_for(self.broker,s),excursion=excursion)
+            try:management=self.management.capture(report,lifecycle,self.management_model,lambda s:product_for(self.broker,s),excursion=excursion)
             except Exception as exc:management={"status":"capture_error","error":type(exc).__name__,"execution_effect":"none"}
         managed={"status":"execution_disabled" if not self.manage_demo else "awaiting_next_sample","enabled":self.manage_demo,"attempted":False}
         if self.manage_demo and management:
@@ -175,6 +181,8 @@ class MarketService:
                  "management_shadow": management,
                  "open_excursion":excursion,
                  "management_execution": managed,
+                 "entry_model": self.model if self.executor else None,
+                 "management_model": self.management_model if self.manage_demo else None,
                  "management_reconciliation": management_reconciliation,
                  "error": summary.get("error", summary.get("reason")),
                  "reconciliation_error": reconciliation_error,
@@ -208,6 +216,9 @@ def main():
     parser.add_argument("--once", action="store_true")
     parser.add_argument("--execute-demo", action="store_true", help="Enable billable AI and demo orders")
     parser.add_argument("--manage-demo",action="store_true",help="Enable recurring AI management and demo position mutations")
+    parser.add_argument("--learning-journal", help="Opt-in read-only prior outcome evidence for AI context")
+    parser.add_argument("--management-model", default=os.environ.get("RECOVER_MANAGEMENT_MODEL") or DEFAULT_MANAGEMENT_MODEL,
+                        help="Position-management model, shared by both demo workers when enabled")
     args = parser.parse_args()
     if args.manage_demo and not args.execute_demo:parser.error("--manage-demo requires --execute-demo")
     if not math.isfinite(args.interval) or args.interval <= 0:
@@ -234,7 +245,8 @@ def main():
     services = [MarketService(s, args.data_dir, model=models[s],
                               broker=DeltaDemo(*accounts[s]) if args.execute_demo else None,
                               provider=Provider() if args.execute_demo else None,
-                              output=output,manage_demo=args.manage_demo) for s in symbols]
+                              output=output,manage_demo=args.manage_demo,learning_journal=args.learning_journal,
+                              management_model=args.management_model if args.manage_demo else None) for s in symbols]
     failures = []
     def worker(service):
         try:

@@ -1,0 +1,29 @@
+# Three-department connection (staging)
+- Entry: existing scanner and direction engine, AI planning and durable journal.
+- Position: existing optional --manage-demo path; current position identity and bracket checks remain unchanged. This branch does not enable that mode.
+- Learning: optional --learning-journal reads the outcome journal in SQLite read-only mode, same market and strictly prior to the current scan. Bounded typed observations only, no Kimi narrative, no forward windows, no claimed validated lessons. Both existing entry and management contexts receive the same evidence packet when enabled. Existing defaults remain unchanged.
+- No new provider call, no new order path, no automatic weight changes or model retraining. A missing journal cannot veto a trade.
+- Historical facts are not validated policy. Before activation compare prospective shadow plans with baseline, account for fees/funding, and test isolated demo management actions and reconciliation. No production rollout authorized by this branch.
+- Tests cover cross-market isolation, temporal cutoff, malformed rows, missing journal, and shared context contract. Full integration and broker validation remain required.
+
+## Offline integration checks
+CLI default and opt-in startup, BTC/Gold routing for flat/open/unknown positions, unavailable journal fallback, one management dispatch without a simultaneous entry dispatch. These are mocked routing tests, not exchange validation or proof of performance. No deployment or activation in this PR.
+
+## Position scenario coverage
+Synthetic BTC/Gold LONG/SHORT fixtures exercise exit geometry, persisted management proposals and lifecycle plans for stop-only profit retention, reduction/full close in a losing scenario, target-only extension, maintain, and rejection of invalid dual-leg amendments or oversize reductions. Mock responses intentionally select actions; tests do not establish that GPT would choose the correct action, actual fill prices, profitability, or exchange mutation compatibility. No production or demo broker is contacted.
+
+## Shared DeepSeek position manager
+When explicit demo management mode is enabled, both workers default to TopBilling `tb-deepseek-v4-pro` for their separate position-management proposals. Existing market entry model settings remain independent and unchanged. `RECOVER_MANAGEMENT_MODEL` or `--management-model` can override this shared model. Status events record entry and active management model names separately; disabled management has null active model. Existing five-minute sampling, journal reservation, current position verification and demo-only executor remain unchanged. No new calls in default mode. No additional model provider or autonomous Kimi/Opus calls added. This does not disable existing deployed Kimi timers. The management request is synchronous within its market worker; it can delay that worker's next scan, though not the other worker. Offline tests use mocks; paid provider response and isolated demo execution validation are outstanding.
+
+## Provider smoke probe (no exchange)
+`python -m recover_trading.management_probe --symbol BTCUSD --scenario profit_retention` previews a synthetic packet without any provider calls. With the existing TB_API_KEY already in the process environment, append `--call-provider` to authorize exactly one billable request. Other scenarios: loss_reduction, winner_extension; both symbols and directions supported. Output contains validated action, hypothetical resulting size, trigger proposal, latency, and redacted token diagnostics. It does not open/modify/close any position or write trading state. A valid response establishes schema compatibility only, not correct reasoning, profitability, or broker compatibility. Offline CI uses fake HTTP responses, including reasoning-only/truncated and timeout cases, and cannot establish actual provider latency. No paid request is triggered by CI or by default.
+
+A narrowly scoped PR #95 synchronization workflow runs one synthetic paid request only for the transition from the previous pinned head and only on the first workflow attempt. It uses the existing repository TopBilling secret only, has no Delta credentials, and does not run on subsequent branch pushes or reruns. A missing key fails without spending credits. This is a compatibility smoke test, not a performance benchmark.
+
+First paid smoke request (run 45720807662): provider returned a parsed completion in 8260 ms, 1190 prompt and 412 completion tokens. Local proposal validation or planning failed with ValueError, exact code unavailable. No broker access. This follow-up adds allowlisted diagnostic codes, safe response shape, explicit action-specific schema instructions and missing fixture repair state. It does not claim the original failure cause is known, does not relax the validator, and does not schedule another paid request.
+
+## Second paid compatibility result
+GitHub run 45721423980 passed. DeepSeek V4 Pro returned a valid `reduce` proposal for the synthetic profitable BTC short (10 to 5 contracts), with no unexpected fields. Latency 6855 ms; 1308 prompt tokens, 242 completion tokens, 1550 total. Offline run 45721424032 passed. This is a single synthetic proposal, not observed fills or demonstrated profitability. For market coverage, the next pinned one-call workflow tests a synthetic losing Gold long. Exactly one additional completion is permitted on the first attempt for the specific preceding commit; no automatic retries or exchange calls. No deployment or activation.
+
+## Gold paid compatibility result
+GitHub run 45721808724 passed. Synthetic losing Gold long: DeepSeek proposed reducing 10 to 7 contracts, validated with no extra fields; 4517 ms elapsed, 1311 prompt and 56 completion tokens, total 1367. Both markets have now passed one paid schema smoke check. Neither establishes realized performance or broker compatibility. Further paid checks are not scheduled.

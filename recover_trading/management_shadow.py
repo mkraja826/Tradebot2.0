@@ -5,6 +5,7 @@ from .position_preview import observe
 from .direction import compact_context,direction_for
 from .decision import encode,Provider,ProviderResponseError
 from .bracket_contract import repair_status
+from .department_feedback import copy_to_context
 
 VERSION="management-shadow-v3"
 SYSTEM="""You are evaluating an existing demo derivatives position, not opening a new trade.
@@ -25,6 +26,7 @@ and observed excursion. Assess whether retaining exposure still has a coherent r
 whether a prior favorable move has faded, and whether costs could erase a small price gain.
 Price distances are not probabilities, and observed excursions do not prove executable
 profit or exact giveback. Do not impose fixed profit targets, drawdown rules or forced exits.
+Return exactly the fields for the chosen action: maintain/close: symbol, action, reason only; reduce: those three fields plus contracts only; update_bracket/repair_bracket: those three fields plus stop_loss and take_profit only. Do not include extra fields, null placeholders, markdown, or numeric strings. Keep reason short (one sentence, preferably under 180 characters). For a bracket update, copy the unchanged trigger exactly from position.legs and change only the other trigger. A repair is not valid when matching legs are already observed.
 Maintain is valid when supported by current evidence; do not default to it merely because
 a bracket exists. Explain the current evidence for the selected action concisely."""
 def context_for(report,snapshot,product,now,excursion=None):
@@ -50,7 +52,7 @@ def context_for(report,snapshot,product,now,excursion=None):
         context["open_excursion"]=excursion
     from .exit_context import geometry
     context["exit_geometry"]=geometry(context["position"],context.get("open_excursion"),pos,context["direction_engine"]["direction"])
-    return compact_context(context)
+    return compact_context(copy_to_context(report,context))
 
 def validate(raw,context):
     if not isinstance(raw,dict) or raw.get("symbol")!=context["symbol"]:
