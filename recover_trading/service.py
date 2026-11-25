@@ -12,6 +12,7 @@ from .decision import DecisionJournal, Provider, configured_models
 from .engine import Journal
 from .execution import DemoExecutor, evaluate_and_execute
 from .scanner import scan_once
+from .direction import direction_for
 from .lifecycle import Lifecycle
 from tradebot.market_data_v3 import MARKETS
 
@@ -96,6 +97,7 @@ class MarketService:
                  "client_id": execution.get("client_id"),
                  "signal_count": len(report.get("signals", [])),
                  "coverage": report.get("coverage", {}),
+                 "direction_engine": direction_for(report) if report.get("status")!="scan_error" else None,
                  "error": summary.get("error", summary.get("reason")),
                  "reconciliation_error": reconciliation_error,
                  "lifecycle": {"new_fills": lifecycle.get("new_fills"),

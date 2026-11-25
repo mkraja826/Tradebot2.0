@@ -48,6 +48,7 @@ def report(root, symbol):
     for d in proposals or []:
         context = decode(d.pop("context")) or {}
         d["result"] = decode(d["result"])
+        d["direction_engine"] = context.get("direction_engine")
         d["signals"] = [{k:s.get(k) for k in ("id","direction","frame")} for s in context.get("new_signals",[])]
         decision_rows.append(d)
     entries = query(orders, "SELECT client_id,status,intent FROM orders WHERE symbol=? ORDER BY rowid DESC LIMIT 50", (symbol,))
