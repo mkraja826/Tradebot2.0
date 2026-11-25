@@ -125,6 +125,8 @@ function render(){
  $("positionPreviewNote").textContent="Position: "+human(pp.position_state)+" · Contracts: "+fmt(pp.size)+" · Bracket: "+human(pp.bracket_state)+" · Unresolved submissions: "+fmt(pp.unresolved_submissions);
  table("positionPreviewLegs",pp.legs??null,[["Leg",r=>human(r.type)],["Trigger",r=>r.trigger],["Remaining",r=>r.remaining],["Quantity matches",r=>r.matching_quantity?"Yes":"No"],["Side matches",r=>r.matching_side?"Yes":"No"],["Reduce only",r=>r.reduce_only?"Yes":"No"]]);
  const ox=m.open_excursion||{};
+ const eg=m.exit_geometry||{};
+ $("exitGeometry").textContent="Exit evidence: "+human(eg.status)+" · Mark to stop "+fmt(eg.mark_to_stop_bps)+" bps · Mark to target "+fmt(eg.mark_to_target_bps)+" bps · Remaining distance ratio "+fmt(eg.remaining_target_to_stop_distance_ratio)+" · Observed trade peak minus mark "+fmt(eg.observed_excursion?.observed_trade_peak_minus_current_mark_bps)+" bps (mixed price basis, not exact giveback) · Consensus "+human(eg.direction_consensus_relation);
  $("openExcursion").textContent="Open position: "+human(ox.status)+(ox.mfe_bps==null?"":" · MFE "+fmt(ox.mfe_bps)+" bps · MAE "+fmt(ox.mae_bps)+" bps · Mark return "+fmt(ox.current_mark_return_bps)+" bps · Interior coverage "+(ox.coverage==null?"—":fmt(ox.coverage*100)+"%"));
  const ex=m.trade_excursions||{};
  $("excursionNote").textContent="Observed lower bounds from completed interior candles; boundary candles excluded. Peak gap is descriptive, not missed executable profit. Capture is an upper bound. "+human(ex.status);

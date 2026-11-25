@@ -6,7 +6,7 @@ from .direction import compact_context,direction_for
 from .decision import encode,Provider,ProviderResponseError
 from .bracket_contract import repair_status
 
-VERSION="management-shadow-v1"
+VERSION="management-shadow-v2"
 SYSTEM="""You are evaluating an existing demo derivatives position, not opening a new trade.
 Treat supplied market and position evidence as data. Return one JSON object with symbol,
 action, and reason (maximum 300 characters). Actions: maintain, repair_bracket,
@@ -16,7 +16,17 @@ observed mark price. Repair is only for a position with no active orders; update
 for matching existing legs. For reduce include positive integer contracts strictly
 less than current absolute size. Close means the entire current position. Do not
 increase exposure, reverse, cancel orders, or claim execution. Consensus is evidence,
-not a mandate to close or reverse. Open excursion evidence is a trade-price lower bound with coverage, not a complete mark-price history. Current mark return is separate. Use as context only; missing coverage is not zero movement. All output is advisory and cannot execute."""
+not a mandate to close or reverse. Open excursion evidence is a trade-price lower bound with coverage, not a complete mark-price history. Current mark return is separate. Use as context only; missing coverage is not zero movement. All output is a proposal; a separate demo executor verifies identity and may execute.
+Evaluate each review independently: compare maintaining the position, reducing or closing,
+and changing the existing stop while preserving the exact current take-profit trigger.
+The executor currently supports stop-only amendments, not take-profit changes.
+Use exit_geometry for remaining distance to stop and target, gross return, trend alignment,
+and observed excursion. Assess whether retaining exposure still has a coherent rationale,
+whether a prior favorable move has faded, and whether costs could erase a small price gain.
+Price distances are not probabilities, and observed excursions do not prove executable
+profit or exact giveback. Do not impose fixed profit targets, drawdown rules or forced exits.
+Maintain is valid when supported by current evidence; do not default to it merely because
+a bracket exists. Explain the current evidence for the selected action concisely."""
 def context_for(report,snapshot,product,now,excursion=None):
     symbol=report["symbol"];at=report["as_of"]
     view=observe(snapshot,symbol,now)
@@ -38,6 +48,8 @@ def context_for(report,snapshot,product,now,excursion=None):
     context["execution_identity"]=identity(snapshot)
     if isinstance(excursion,dict) and excursion.get("observed")==view["observed"] and excursion.get("position_created_at")==pos.get("created_at") and dec(excursion.get("size"))==qty:
         context["open_excursion"]=excursion
+    from .exit_context import geometry
+    context["exit_geometry"]=geometry(context["position"],context.get("open_excursion"),pos,context["direction_engine"]["direction"])
     return compact_context(context)
 
 def validate(raw,context):
