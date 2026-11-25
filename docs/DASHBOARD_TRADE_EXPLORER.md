@@ -1,0 +1,2 @@
+# Trade explorer
+Read-only filters across the selected market's latest 50 submissions and recorded fills. Search is case-insensitive; buy/sell filters are order sides, not position directions. Counts distinguish unavailable data, empty journals and no matches. Filters persist across refresh and market changes until reset; performance and reconciliation remain unfiltered. No server, API, AI-provider or trading-worker changes.

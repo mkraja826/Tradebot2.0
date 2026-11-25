@@ -305,6 +305,30 @@ function labView(){
 for(const k of ["labSearch","labFamily","labState"])$(k).addEventListener(k==="labSearch"?"input":"change",labView);
 $("labReset").addEventListener("click",()=>{$("labSearch").value="";$("labFamily").value="all";$("labState").value="all";labView()});
 
+function historyView(m){
+ const query=$("historyQuery").value.trim().toLowerCase(),side=$("historySide").value;
+ const orderFields=r=>[r.client_id,r.status,r.exchange?.status,r.intent?.side,r.intent?.size,r.exchange?.filled_size,r.exchange?.order?.average_fill_price,r.intent?.stop_loss,r.intent?.take_profit];
+ const fillFields=r=>[r.id,r.order_id,r.created_at,r.side,r.size,r.price,r.commission,r.settling_asset_symbol];
+ const match=(fields,s)=> (side==="all"||String(s??"").toLowerCase()===side)&&(!query||fields.some(v=>v!=null&&String(v).toLowerCase().replaceAll("_"," ").includes(query.replaceAll("_"," "))));
+ const rawOrders=Array.isArray(m.orders)?m.orders.filter(Boolean):null,rawFills=Array.isArray(m.fills)?m.fills.filter(Boolean):null;
+ const orders=rawOrders?.filter(r=>match(orderFields(r),r.intent?.side))??null;
+ const fills=rawFills?.filter(r=>match(fillFields(r),r.side))??null;
+ const count=(name,rows,total)=>total===null?name+" unavailable":name+" "+rows.length+" of "+total.length;
+ $("historyCounts").textContent=m.symbol+" · "+count("Orders",orders,rawOrders)+" · "+count("Fills",fills,rawFills);
+ table("orders",orders,[["Client ID",r=>fmt(r.client_id)],["Submission",r=>human(r.status)],["Exchange state",r=>human(r.exchange?.status)],["Side",r=>r.intent?.side],["Size",r=>r.intent?.size],["Filled",r=>r.exchange?.filled_size],["Fill price",r=>r.exchange?.order?.average_fill_price],["SL",r=>r.intent?.stop_loss],["TP",r=>r.intent?.take_profit]]);
+ table("fills",fills,[["Time",r=>r.created_at],["Fill ID",r=>r.id],["Side",r=>r.side],["Size",r=>r.size],["Price",r=>r.price],["Fee",r=>r.commission],["Asset",r=>r.settling_asset_symbol],["Position realized P&L*",r=>r.new_position?.realized_pnl]]);
+ $("fills").append(el("p","* Exchange position metadata may be cumulative; not summed as per-trade profit.","empty"));
+ if(rawOrders?.length&&!orders.length)empty("orders","No orders match these filters");
+ if(rawFills?.length&&!fills.length)empty("fills","No fills match these filters");
+}
+function refreshHistoryView(){
+ const market=data?.markets.find(m=>m.symbol===chosen);
+ if(market)historyView(market);
+}
+$("historyQuery").addEventListener("input",refreshHistoryView);
+$("historySide").addEventListener("change",refreshHistoryView);
+$("historyReset").addEventListener("click",()=>{$("historyQuery").value="";$("historySide").value="all";refreshHistoryView()});
+
 function render(){
  if(!data)return;
  overviewView();
@@ -448,9 +472,7 @@ function render(){
  const hs=m.historical_submission_evidence||{};
  $("historicalSubmissionNote").textContent=human(hs.status)+" · "+fmt(hs.unknown_count)+" unresolved · "+fmt(hs.snapshot_window_count)+" archived snapshots examined";
  table("historicalSubmissionRows",hs.rows||[],[["Client ID",r=>r.client_id.slice(0,12)],["Evidence",r=>human(r.classification)],["Original HTTP",r=>fmt(r.original_http_status)],["Not-found observation times",r=>fmt(r.distinct_not_found_observation_times)],["Latest lookup",r=>human(r.last_lookup_code)]]);
- table("orders",m.orders,[["Client ID",r=>r.client_id.slice(0,12)],["Submission",r=>human(r.status)],["Exchange state",r=>human(r.exchange?.status)],["Side",r=>r.intent?.side],["Size",r=>r.intent?.size],["Filled",r=>r.exchange?.filled_size],["Fill price",r=>r.exchange?.order?.average_fill_price],["SL",r=>r.intent?.stop_loss],["TP",r=>r.intent?.take_profit]]);
- table("fills",m.fills?.filter(Boolean)??null,[["Time",r=>r.created_at],["Fill ID",r=>r.id],["Side",r=>r.side],["Size",r=>r.size],["Price",r=>r.price],["Fee",r=>r.commission],["Asset",r=>r.settling_asset_symbol],["Position realized P&L*",r=>r.new_position?.realized_pnl]]);
- $("fills").append(el("p","* Exchange position metadata may be cumulative; not summed as per-trade profit.","empty"));
+ historyView(m);
 }
 $("scopeRecover").addEventListener("click",()=>{scope="recover";render()});
 $("scopeAccount").addEventListener("click",()=>{scope="account";render()});
