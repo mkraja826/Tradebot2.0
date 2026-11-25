@@ -1,0 +1,13 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Recover Trading | Demo terminal</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script></head><body>
+<header><div class="brand"><span class="logo">R</span><div><strong>RECOVER</strong><small>TRADING TERMINAL</small></div></div><div class="top"><span class="pill">DEMO ONLY</span><span id="refresh" role="status">Connecting…</span></div></header>
+<main><div class="intro"><div><p class="eyebrow">MARKET OPERATIONS</p><h1>Trading overview</h1><p>Independent market intelligence and exchange observations.</p></div><div class="leverage"><strong>20×</strong><small>Configured leverage</small></div></div>
+<nav aria-label="Market"><button data-symbol="BTCUSD" aria-pressed="true">₿ Bitcoin <span>BTCUSD</span></button><button data-symbol="XAUTUSD" aria-pressed="false">◆ Gold <span>XAUTUSD</span></button></nav>
+<div id="warning" role="status"></div><section id="metrics" class="metrics" aria-label="Market metrics"></section>
+<div class="charts"><section class="panel"><h2>Market price <small>5-minute close</small></h2><div id="price"></div></section><section class="panel"><h2>Wallet balance <small>Per settlement asset</small></h2><div id="walletChart"></div></section></div>
+<section class="panel"><h2>Account balances</h2><div id="wallet"></div></section>
+<section class="panel"><h2>Positions and bracket evidence</h2><p id="brackets"></p><div id="positions"></div><h3>Active exchange orders</h3><div id="active"></div></section>
+<div class="charts"><section class="panel"><h2>Strategy activity</h2><div id="strategies"></div></section><section class="panel"><h2>Execution status</h2><div id="counts"></div></section></div>
+<section class="panel"><h2>AI decision history <small>Latest 40</small></h2><div id="decisions"></div></section>
+<section class="panel"><h2>Order journal <small>Latest 50 submissions</small></h2><div id="orders"></div></section>
+<section class="panel"><h2>Exchange fills <small>Latest 50 recorded</small></h2><div id="fills"></div></section>
+<footer>Read-only • Refreshes every 10 seconds • No live orders or account controls • Exact closed-trade P&amp;L and win rate not yet attributed.</footer></main></body></html>

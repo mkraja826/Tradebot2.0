@@ -53,6 +53,13 @@ class MarketService:
             self.orders.close()
         self.executor = self.orders = self.decisions = self.lifecycle = None
 
+    def publish(self, event):
+        # Atomic replacement keeps dashboard reads independent of worker writes.
+        temporary = self.directory / "status.tmp"
+        temporary.write_text(json.dumps(event, allow_nan=False), encoding="utf-8")
+        temporary.replace(self.directory / "status.json")
+        self.output(event)
+
     def cycle(self):
         if self.broker is not None and self.executor is None:
             raise RuntimeError("Open execution journals first")
@@ -94,7 +101,7 @@ class MarketService:
                  "lifecycle": {"new_fills": lifecycle.get("new_fills"),
                                "bracket_evidence": lifecycle.get("bracket_evidence"),
                                "errors": lifecycle.get("errors", {})}}
-        self.output(event)
+        self.publish(event)
         return event
 
     def run(self, stop, interval, *, once=False):
@@ -105,7 +112,7 @@ class MarketService:
                 try:
                     self.cycle()
                 except Exception as exc:
-                    self.output({"symbol": self.symbol, "status": "cycle_error",
+                    self.publish({"symbol": self.symbol, "status": "cycle_error",
                                  "error": type(exc).__name__, "timestamp": int(time.time())})
                 if once:
                     break

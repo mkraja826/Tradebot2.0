@@ -125,6 +125,14 @@ class Lifecycle:
             if any(decimal(p.get("size")) is None for p in selected):
                 raise ValueError("Missing position size")
             return [p for p in selected if decimal(p["size"]) != 0]
+        def wallet():
+            envelope = self.broker.wallet()
+            rows = envelope["result"]
+            if not isinstance(rows, list):
+                raise ValueError("Expected wallet list")
+            return [select(row, ("asset_symbol", "balance", "available_balance",
+                                 "position_margin", "order_margin")) for row in rows]
+        collect("wallets", wallet)
         collect("positions", positions)
         collect("active_orders", lambda: pages(self.broker.active_orders_page, pid))
         collect("fills", lambda: pages(self.broker.fills_page, pid))
