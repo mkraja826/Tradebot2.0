@@ -11,7 +11,9 @@ def position_state(account,product):
     if not isinstance(positions,list) or not positions:return "unavailable"
     vals=[]
     for p in positions:
-        if not isinstance(p,dict) or str(p.get("product_id"))!=str(product.get("id")):return "unavailable"
+        if not isinstance(p,dict) or ("product_id" in p and str(p["product_id"])!=str(product.get("id"))):return "unavailable"
+        # account_context obtains positions using the verified product-scoped GET;
+        # Delta may omit product_id in its response.
         n=dec(p.get("size"))
         if n is None:return "unavailable"
         vals.append(n)
@@ -40,7 +42,7 @@ def audit(orders,contexts):
             "misaligned_brackets":sum(x["tick_alignment"] is False for x in rows),
             "unknown_tick_alignment":sum(x["tick_alignment"] is None for x in rows),
             "recent":rows[-100:],"execution_effect":"none",
-            "limitations":["Position evidence is from decision time, not submission time.",
+            "limitations":["Position evidence is from decision time, not submission time; missing row product IDs inherit the archived product-scoped request identity.",
               "Association with existing positions is not proof of original failure cause.",
               "Unknown orders remain unknown; no retry, cancellation, or bracket change."]}
 

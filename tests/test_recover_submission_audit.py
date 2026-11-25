@@ -14,3 +14,9 @@ class SubmissionAuditTests(unittest.TestCase):
         self.assertEqual(r["misaligned_brackets"],0)
         self.assertEqual(r["unknown_tick_alignment"],1)
         self.assertEqual(r["execution_effect"],"none")
+
+    def test_product_scoped_position_without_row_id(self):
+        from recover_trading.submission_audit import position_state
+        self.assertEqual(position_state({"positions":[{"size":-50}]},{"id":84}),"short")
+        self.assertEqual(position_state({"positions":[{"size":0}]},{"id":84}),"flat")
+        self.assertEqual(position_state({"positions":[{"size":-50,"product_id":99}]},{"id":84}),"unavailable")
