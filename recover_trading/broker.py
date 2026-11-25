@@ -18,7 +18,17 @@ KNOWN_CODES=frozenset(("order_not_found","invalid_order","invalid_order_id",
     "signature_expired","rate_limit_exceeded","invalid_product",
     "invalid_bracket_order","invalid_order_type","invalid_request",
     "unauthorized","forbidden","not_found","internal_server_error",
-    "invalid_stop_loss_price","invalid_take_profit_price"))
+    "invalid_stop_loss_price","invalid_take_profit_price",
+    "position_bracket_exist_or_invalid_data","close_position_insufficient_margin",
+    "insufficient_commission","order_size_exceed_available","order_size_not_available_in_orderbook",
+    "close_order_position_unavailable","no_position_for_reduce_only","no_position_left_for_reduce_only",
+    "max_leverage_exceeded","min_leverage_exceeded","leverage_limit_exceeded","order_already_filled",
+    "less_than_order_min_size","order_max_size_exceeded","reduce_only_orders_allowed_sell_side",
+    "reduce_only_orders_allowed","trading_blocked","kyc_pending","trading_credits_breached",
+    "derivatives_trading_blocked","spot_trading_blocked","spot_blocked_country",
+    "account_risk_limits_breached","position_under_liquidation","no_open_position","stale_order",
+    "limit_order_not_allowed_for_binary_options","no_liquidity_for_market_order",
+    "trading_not_allowed_on_current_margin_mode","max_orders_count_exceeded"))
 def safe_exchange_code(data):
     error=data.get("error") if isinstance(data,dict) else None
     code=error.get("code") if isinstance(error,dict) else None

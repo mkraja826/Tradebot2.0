@@ -10,6 +10,7 @@ from urllib.parse import urlsplit
 
 from .performance import read_performance
 from .decision_review import read_review
+from .submission_audit import read_audit
 
 MARKETS = ("BTCUSD", "XAUTUSD")
 STATIC = Path(__file__).with_name("dashboard_static")
@@ -122,7 +123,7 @@ def report(root, symbol):
           FROM observations WHERE symbol=? GROUP BY rule_id,family,regime,horizon_s
           ORDER BY rule_id,regime,horizon_s""",(symbol,))
     performance=read_performance(root,symbol)
-    return {"symbol":symbol,"performance":performance,"decision_review":read_review(root,symbol,performance),"forward_validation":forward_report(root,symbol),"dual_market":dual_report(root,symbol),"reference_strategy":reference_strategy_report(root,symbol),"paired_forward":paired_forward_report(root,symbol),"planner_comparison":planner_comparison_report(root,symbol),"signal_research":research,"heartbeat":heartbeat,"snapshot":latest,"wallet_history":history,
+    return {"symbol":symbol,"performance":performance,"submission_audit":read_audit(root,symbol),"decision_review":read_review(root,symbol,performance),"forward_validation":forward_report(root,symbol),"dual_market":dual_report(root,symbol),"reference_strategy":reference_strategy_report(root,symbol),"paired_forward":paired_forward_report(root,symbol),"planner_comparison":planner_comparison_report(root,symbol),"signal_research":research,"heartbeat":heartbeat,"snapshot":latest,"wallet_history":history,
             "decisions":decision_rows,"orders":entries,"fills":[decode(f["detail"]) for f in fills] if fills is not None else None,
             "prices":points,"order_counts":counts,"decision_counts":dc,
             "availability":{"decisions":proposals is not None,"orders":entries is not None,
