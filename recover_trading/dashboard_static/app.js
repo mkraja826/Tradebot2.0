@@ -394,9 +394,10 @@ function learnLessonView(m){
  if(all.length&&!rows.length)empty("learningRows","No lessons match this outcome");
 }
 function kimiView(m){
- const k=m.kimi_review||{},r=k.review||{};$("kimiStatus").textContent=human(k.status||"not_reviewed");$("kimiMeta").textContent="Kimi K3 · TopBilling · "+fmt(k.evidence_count??0)+" recorded lessons"+(k.reviewed_at?" · "+time(k.reviewed_at):"");$("kimiSummary").textContent=k.status==="reviewed"?r.summary:"No verified Kimi report available yet.";
+ const k=m.kimi_review||{},r=k.review||{};const status=human(k.status||"not_reviewed");$("kimiStatus").textContent=status.charAt(0).toUpperCase()+status.slice(1);$("kimiMeta").textContent="Kimi K3 · TopBilling · "+fmt(k.evidence_count??0)+" recorded lessons"+(k.reviewed_at?" · "+time(k.reviewed_at):"");$("kimiSummary").textContent=k.status==="reviewed"?r.summary:"No verified Kimi report available yet.";
  $("kimiLessons").replaceChildren(...(k.status==="reviewed"?(r.lessons||[]):[]).map(x=>{const n=el("article",undefined,"kimi-lesson");n.append(el("strong",human(x.kind)),el("p",x.text),el("small","Evidence: "+(x.evidence_ids||[]).join(", ")));return n}));
  $("kimiLimits").replaceChildren(...(k.status==="reviewed"?(r.limitations||[]):[]).map(x=>el("p",x)));
+ table("kimiEvidence",k.status==="reviewed"?(k.evidence?.records||[]):[],[["Evidence ID",x=>fmt(x.id)],["Outcome",x=>human(x.outcome)],["Net before funding",x=>fmt(x.net_before_funding)],["Fees",x=>fmt(x.fees)]]);
 }
 function learnIntelligence(m){
  kimiView(m);
