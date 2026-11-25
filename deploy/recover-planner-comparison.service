@@ -1,0 +1,12 @@
+[Unit]
+Description=Recover Trading offline planner context comparison
+[Service]
+Type=oneshot
+User=recovertrading
+WorkingDirectory=/opt/recover-trading/current
+ExecStart=/usr/bin/python3 -m recover_trading.planner_comparison --data-dir /var/lib/recover-trading/demo
+Environment=PYTHONDONTWRITEBYTECODE=1
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateNetwork=true
+TimeoutStartSec=90

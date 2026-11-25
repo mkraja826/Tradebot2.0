@@ -103,6 +103,9 @@ function render(){
  const pairedBps=v=>finite(v)?Number(v).toFixed(3)+" bps":"—";
  const pairedRows=paired?paired.horizons.flatMap(r=>[{...r,scope:"All paired windows"},{...r.disagreement_only,horizon_s:r.horizon_s,scope:"Disagreement only"}]):null;
  table("pairedRows",pairedRows,[["Horizon",r=>r.horizon_s/60+"m"],["Scope",r=>r.scope],["Completed",r=>r.paired_windows],["Pending",r=>r.counts?.pending??"—"],["Demo entries",r=>r.demo_entries],["Reference entries",r=>r.reference_entries],["Demo / window",r=>pairedBps(r.mean_demo_net_bps_per_window)],["Reference / window",r=>pairedBps(r.mean_reference_net_bps_per_window)],["Paired difference",r=>pairedBps(r.mean_reference_minus_demo_bps)]]);
+ const pc=m.planner_comparison;
+ $("plannerComparisonNote").textContent=pc?"Started "+time(pc.start)+" · Prepared pairs "+fmt(pc.prepared_pairs)+" · Experimental proposals "+fmt(pc.experimental_proposals)+" · Latest evidence "+human(pc.latest?.evidence_status):"Planner comparison unavailable.";
+ bars("plannerComparisonCounts",Object.entries(pc?.evidence_counts||{}).map(([status,count])=>({status,count})));
  table("wallet",wallets??null,[["Asset",r=>r.asset_symbol],["Balance",r=>r.balance],["Available",r=>r.available_balance],["Position margin",r=>r.position_margin],["Order margin",r=>r.order_margin]]);
  $("brackets").textContent="Bracket evidence: "+human(snap.bracket_evidence)+" · Observed "+time(snap.observed)+" · Not a coverage guarantee.";
  table("positions",positions??null,[["Contracts",r=>r.size],["Entry",r=>r.entry_price],["Mark",r=>r.mark_price],["Margin",r=>r.margin],["Unrealized P&L",r=>r.unrealized_pnl],["Liquidation",r=>r.liquidation_price]]);

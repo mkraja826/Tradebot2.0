@@ -1,0 +1,8 @@
+[Unit]
+Description=Prepare offline planner input pairs every five minutes
+[Timer]
+OnActiveSec=5min
+OnUnitActiveSec=5min
+Unit=recover-planner-comparison.service
+[Install]
+WantedBy=timers.target
