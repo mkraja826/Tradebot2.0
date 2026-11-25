@@ -1,6 +1,7 @@
 """Explicit, journaled execution of capital-aware AI proposals on Delta India demo."""
 import hashlib
 import sqlite3
+import time
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from .broker import DeltaDemo, BrokerError, error_detail
@@ -58,6 +59,23 @@ class BracketIntent:
     stop_loss: float
     take_profit: float
 
+def mark_evidence(ticker, symbol, intent, now_us):
+    """Check exchange trigger-price geometry, not strategy or capital quality."""
+    if not isinstance(ticker,dict) or ticker.get("symbol")!=symbol or ticker.get("product_id")!=intent.product_id:
+        return {"status":"ticker_identity_unverified"}
+    stamp=ticker.get("timestamp")
+    if type(stamp) is not int or not 0<=now_us-stamp<=30_000_000:
+        return {"status":"ticker_stale_or_invalid"}
+    try:
+        mark=number(ticker.get("mark_price"))
+    except ValueError:
+        return {"status":"mark_unavailable"}
+    sl,tp=number(intent.stop_loss),number(intent.take_profit)
+    valid=sl<mark<tp if intent.side=="buy" else tp<mark<sl
+    return {"status":"compatible" if valid else "bracket_crossed_mark",
+            "mark_price":str(mark),"timestamp_us":stamp,
+            "age_ms":(now_us-stamp)//1000}
+
 class DemoExecutor:
     def __init__(self, broker: DeltaDemo, journal: Journal):
         self.broker, self.journal = broker, journal
@@ -93,6 +111,16 @@ class DemoExecutor:
         except Exception as exc:
             self.journal.finish(client_id, "preparation_failed", error_detail(exc))
             return {"status": "preparation_failed", "client_id": client_id}
+        # Bracket triggers are mark-price based. Validate a fresh demo mark
+        # immediately before sending, without silently repricing AI choices.
+        try:
+            check=mark_evidence(self.broker.ticker(symbol),symbol,intent,time.time_ns()//1000)
+        except Exception as exc:
+            self.journal.finish(client_id,"preparation_failed",{"phase":"mark_quote",**error_detail(exc)})
+            return {"status":"preparation_failed","client_id":client_id,"reason":"mark_quote_failed"}
+        if check["status"]!="compatible":
+            self.journal.finish(client_id,"preparation_failed",{"phase":"bracket_compatibility",**check})
+            return {"status":"preparation_failed","client_id":client_id,"reason":check["status"]}
         try:
             receipt = self.broker.submit_bracket(intent, client_id)
             if not isinstance(receipt, dict) or receipt.get("id") is None:
@@ -100,6 +128,7 @@ class DemoExecutor:
         except Exception as exc:
             self.journal.finish(client_id, "unknown", error_detail(exc))
             return {"status": "unknown", "client_id": client_id}
+        receipt={**receipt,"recover_pre_submit_mark":check}
         self.journal.finish(client_id, "acknowledged", receipt)
         return {"status": "acknowledged", "client_id": client_id, "receipt": receipt}
 

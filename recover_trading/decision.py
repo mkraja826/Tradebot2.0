@@ -22,6 +22,7 @@ Return one JSON object only. For action trade include symbol, side (buy or sell)
 size (positive integer contracts), leverage (exactly 20), entry_reference,
 stop_loss, take_profit (positive numeric prices), and reason (text). For action
 no_trade include symbol and reason. Do not invent unavailable market values.
+For mark-triggered brackets use the latest available demo mark, not a historical candle close or reference market price. Buy requires stop_loss below mark below take_profit; sell requires take_profit below mark below stop_loss. Keep prices consistent with product tick size.
 No imposed confidence threshold, capital formula or fixed reward/risk ratio.
 When demo_account is supplied, use its actual wallet balances, available margin,
 product contract details and positions. Include capital_allocation (positive numeric
