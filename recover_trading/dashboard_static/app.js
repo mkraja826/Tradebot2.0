@@ -114,6 +114,9 @@ function render(){
  const pp=m.position_preview||{};
  $("positionPreviewNote").textContent="Position: "+human(pp.position_state)+" · Contracts: "+fmt(pp.size)+" · Bracket: "+human(pp.bracket_state)+" · Unresolved submissions: "+fmt(pp.unresolved_submissions);
  table("positionPreviewLegs",pp.legs??null,[["Leg",r=>human(r.type)],["Trigger",r=>r.trigger],["Remaining",r=>r.remaining],["Quantity matches",r=>r.matching_quantity?"Yes":"No"],["Side matches",r=>r.matching_side?"Yes":"No"],["Reduce only",r=>r.reduce_only?"Yes":"No"]]);
+ const ex=m.trade_excursions||{};
+ $("excursionNote").textContent="Observed lower bounds from completed interior candles; boundary candles excluded. "+human(ex.status);
+ table("excursionRows",(ex.episodes||[]).slice().reverse(),[["Closed",r=>r.closed],["Direction",r=>r.direction],["MFE bps",r=>fmt(r.mfe_bps)],["MAE bps",r=>fmt(r.mae_bps)],["Coverage",r=>r.coverage==null?"—":fmt(r.coverage*100)+"%"],["Evidence",r=>human(r.status)]]);
  const mr=m.management_report||{};
  $("managementRuntime").textContent="Management: "+(mr.enabled===true?"Enabled":mr.enabled===false?"Disabled":"Unverified")+" · "+human(mr.runtime_status)+" · Latest: "+human(mr.latest?.status)+" "+human(mr.latest?.action);
  bars("managementEvaluations",Object.entries(mr.evaluations||{}).map(([status,count])=>({status,count})));

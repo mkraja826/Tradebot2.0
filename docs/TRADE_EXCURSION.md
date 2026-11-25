@@ -1,0 +1,2 @@
+# Trade excursion analysis
+Read-only closed reconciled episodes, single opening fill with reductions only. MFE/MAE are price-based observed lower bounds using actual fills and complete interior demo candles, preferring complete 1m then 5m coverage. Boundary candles excluded to prevent looking before entry or after exit. Coverage and unsupported episodes explicitly reported. No profit attribution, strategy changes, AI calls or execution changes. Demo candles may contain anomalies; no reference feed substitution.
