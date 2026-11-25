@@ -28,6 +28,54 @@ function bars(id,rows){if(!rows?.length){empty(id);return}const total=rows.reduc
 const finite=v=>v!==null&&v!==undefined&&v!==""&&Number.isFinite(Number(v));
 const money=(v,currency)=>finite(v)?Number(v).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:4})+" "+currency:"—";
 const percent=v=>finite(v)?(Number(v)*100).toFixed(1)+"%":"—";
+
+function advancedPerformance(m){
+ const p=m.performance_analytics||{},s=p[scope]||{},currency=p.currency||"USD",ready=s.status==="observed"||s.status==="empty";
+ $("advancedScopeNote").textContent=ready?fmt(s.episodes)+" of "+fmt(s.expected_reconciled_episodes)+" reconciled closed episodes · "+(s.truncated?"Recent subset; older episodes excluded":"All currently reconciled episodes in scope")+" · Advanced statistics exclude funding.":"Advanced performance unavailable.";
+ const pf=finite(s.profit_factor)?Number(s.profit_factor).toFixed(2):s.profit_factor_status==="no_losing_episodes"?"No losses":"—";
+ metrics([["Profit factor",pf,"Positive net / absolute negative net"],["Average net",money(s.average_net,currency),"Per closed episode"],["Average win",money(s.average_win,currency),"Positive closed episodes"],["Average loss",money(s.average_loss,currency),"Negative closed episodes"],["Max closed P&L drawdown",money(s.max_closed_pnl_drawdown,currency),"From prior cumulative peak; not equity"],["Sample size",fmt(s.episodes),"Recent reconciled subset"]],"advancedMetrics");
+ if(s.curve?.length){
+  const first=s.curve[0].closed;
+  chart("pnlChart",[[first,0],...s.curve.map(x=>[x.closed,x.cumulative_net])]);
+  $("pnlChart").append(el("p","Cumulative net before funding, starting at zero. X-axis follows closure events, not elapsed time. Not account equity.","empty"));
+  chart("drawdownChart",[[first,0],...s.curve.map(x=>[x.closed,-Number(x.drawdown)])]);
+  $("drawdownChart").append(el("p","Peak-to-trough decline in displayed cumulative closed P&L only, negative USD. Excludes open-position movement.","empty"));
+ }else{empty("drawdownChart","No reconciled closures");empty("pnlChart","No reconciled closures")}
+ const directions=$("directionResults");directions.replaceChildren();
+ for(const r of s.directions||[]){const row=el("div",undefined,"direction-result");row.append(el("strong",r.direction+" · "+r.episodes+" episodes"),el("strong",money(r.net,currency),finite(r.net)?Number(r.net)>=0?"gain":"loss":""),el("small",r.wins+" wins / "+r.losses+" losses"));directions.append(row)}
+ if(!directions.children.length)empty("directionResults","Unavailable");
+ const cal=$("profitCalendar");cal.replaceChildren();
+ const dates=s.calendar||[];if(dates.length){
+  const offset=(new Date(dates[0].date+"T00:00:00Z").getUTCDay()+6)%7;
+  for(const day of ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"])cal.append(el("span",day,"calendar-weekday"));
+  for(let i=0;i<offset;i++)cal.append(el("span",undefined,"calendar-spacer"));
+  for(const r of dates){const v=finite(r.net)?Number(r.net):null,cell=el("div",undefined,"calendar-cell "+(v===null?"calendar-empty":v>0?"calendar-win":v<0?"calendar-loss":"calendar-flat"));
+   cell.append(el("small",r.date.slice(8)),el("strong",v===null?"—":(v>0?"+":"")+v.toFixed(2)),el("small",r.episodes?r.episodes+" closed":"No record"));cell.title=r.date+" UTC · "+money(r.net,currency)+" · "+r.episodes+" recorded episodes";cal.append(cell)}
+ }else cal.append(el("p","Calendar unavailable","empty"));
+ const ret=s.retention||{};
+ $("retentionSummary").replaceChildren(el("p",fmt(ret.eligible_episodes)+" eligible episodes · Median observed capture upper bound: "+(finite(ret.median_capture_upper_bound_pct)?Number(ret.median_capture_upper_bound_pct).toFixed(1)+"%":"Unavailable"),"empty"));
+ const list=$("retentionRows");list.replaceChildren();
+ for(const r of (ret.rows||[]).slice().reverse()){
+  const row=el("div",undefined,"retention-row");row.append(el("small",r.direction+" · "+r.closed));
+  const bars=el("div",undefined,"retention-bars");
+  for(const [label,v,cls] of [["Observed MFE",r.mfe_bps,"neutral"],["Gross weighted exit",r.gross_exit_bps,"gain"]]){const b=el("div",undefined,"retention-bar"),pr=el("progress",undefined,cls);pr.max=r.mfe_bps;pr.value=v;pr.setAttribute("aria-label",label);b.append(el("span",label),pr,el("strong",v.toFixed(2)+" bps"));bars.append(b)}
+  row.append(bars,el("small","Capture upper bound "+r.capture_upper_bound_pct.toFixed(1)+"%","empty"));list.append(row)
+ }
+ if(!list.children.length)empty("retentionRows","No eligible excursion evidence");
+}
+function donutView(s){
+ const wrap=$("winLoss");if(!s.closed_episodes)return;
+ const ns="http://www.w3.org/2000/svg",svg=document.createElementNS(ns,"svg"),n=Number(s.closed_episodes);
+ svg.setAttribute("viewBox","0 0 220 140");svg.setAttribute("role","img");svg.setAttribute("aria-label","Closed episode outcomes");
+ const counts=[["Wins",s.wins_before_funding,"#29c99a"],["Losses",s.losses_before_funding,"#f27783"],["Breakeven",s.breakeven_before_funding,"#8190a3"]];
+ const circle=(c,frac,offset)=>{const r=document.createElementNS(ns,"circle");for(const [k,v] of Object.entries({cx:70,cy:70,r:46,fill:"none",stroke:c,"stroke-width":14,"pathLength":100,"stroke-dasharray":frac+" "+(100-frac),"stroke-dashoffset":-offset,transform:"rotate(-90 70 70)"}))r.setAttribute(k,String(v));svg.append(r)};
+ let offset=0;for(const [label,v,c] of counts){if(v>0){const share=100*v/n;circle(c,share,offset);offset+=share}}
+ const txt=(x,y,v,size,color,anchor)=>{const t=document.createElementNS(ns,"text");for(const [k,w] of Object.entries({x,y,"font-size":size,fill:color,"text-anchor":anchor}))t.setAttribute(k,String(w));t.textContent=v;svg.append(t)};
+ txt(70,68,String(n),23,"#eef2f6","middle");txt(70,84,"closed",10,"#9eabbc","middle");
+ counts.forEach(([label,v,c],i)=>txt(132,45+i*25,label+" "+fmt(v),11,c,"start"));
+ wrap.replaceChildren(svg);
+}
+
 function performanceView(m){
  const p=m.performance||{}, currency=p.currency||"USD", current=scope==="recover", s=(current?p.recover_attributed:p.all_reconciled)||{};
  $("scopeRecover").setAttribute("aria-pressed",String(current));$("scopeAccount").setAttribute("aria-pressed",String(!current));
@@ -60,6 +108,7 @@ function performanceView(m){
  table("closedEpisodes",episodes.slice().reverse(),[["Closed",r=>r.closed],["Direction",r=>r.direction],["Fills",r=>r.fills],["Gross",r=>money(r.gross_pnl,currency)],["Fees",r=>money(r.fees,currency)],["Net before funding",r=>money(r.net_before_funding,currency)],["Reported funding",r=>money(r.reported_funding,currency)],["Attribution",r=>human(r.attribution)]]);
  table("rulePerformance",Object.entries(p.active_rule_cooccurrence||{}).map(([rule,x])=>({rule,...x})),[["Rule",r=>r.rule],["Episodes",r=>r.closed_episodes],["Win rate",r=>percent(r.win_rate_before_funding)],["Net before funding",r=>money(r.net_before_funding,currency)]]);
  $("rulePerformance").append(el("p","Rules can overlap within a position; totals cannot be summed across rules. Associations do not establish causality.","empty"));
+ donutView(s);advancedPerformance(m);
 }
 function forwardView(m){
  const f=m.forward_validation;
