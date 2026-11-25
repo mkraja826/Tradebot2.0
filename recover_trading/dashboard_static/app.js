@@ -103,6 +103,12 @@ function render(){
  el("p","15m ATR (bps): "+fmt(atr?.atr_bps)+" · Nearest below: "+fmt(opp.nearest_below?.price)+" · Above: "+fmt(opp.nearest_above?.price)),
  el("p","Illustrative round-trip cost: "+fmt(opp.assumed_round_trip_cost_bps)+" bps. Research evidence only; not a trade instruction.","empty"));
  bars("counts",m.order_counts);
+ const review=m.decision_review||{};
+ $("reviewNote").textContent="Status: "+human(review.status)+" · Decisions: "+fmt(review.decision_count)+" · Entry deviation samples: "+fmt(review.entry_deviation_samples);
+ bars("reviewCounts",Object.entries(review.outcome_counts||{}).map(([status,count])=>({status,count})));
+ bars("reviewFailures",Object.entries(review.failure_counts||{}).map(([status,count])=>({status,count})));
+ const bps=v=>finite(v)?Number(v).toFixed(2):"—";
+ table("reviewRows",review.recent?.slice().reverse()??null,[["Time",r=>time(r.created)],["Outcome",r=>human(r.outcome)],["Direction",r=>r.direction],["Filled",r=>r.filled_contracts],["Entry deviation bps",r=>bps(r.entry_deviation_bps)],["Plan SL bps",r=>bps(r.planned_stop_bps)],["Plan TP bps",r=>bps(r.planned_target_bps)],["Reward/risk",r=>bps(r.planned_reward_risk)],["Net before funding",r=>money(r.net_before_funding,m.performance?.currency||"USD")]]);
  table("decisions",m.availability.decisions?m.decisions:null,[["Time",r=>time(r.created)],["Model",r=>r.model],["Decision",r=>human(r.result?.action||r.status)],["Side",r=>r.result?.side],["Capital budget",r=>r.result?.capital_allocation],["Size",r=>r.result?.size],["SL",r=>r.result?.stop_loss],["TP",r=>r.result?.take_profit],["Signals",r=>r.signals.map(s=>s.id+" "+s.frame).join(", ")],["Reason",r=>r.result?.reason||r.result?.error]]);
  table("orders",m.orders,[["Client ID",r=>r.client_id.slice(0,12)],["Submission",r=>human(r.status)],["Exchange state",r=>human(r.exchange?.status)],["Side",r=>r.intent?.side],["Size",r=>r.intent?.size],["Filled",r=>r.exchange?.filled_size],["Fill price",r=>r.exchange?.order?.average_fill_price],["SL",r=>r.intent?.stop_loss],["TP",r=>r.intent?.take_profit]]);
  table("fills",m.fills?.filter(Boolean)??null,[["Time",r=>r.created_at],["Fill ID",r=>r.id],["Side",r=>r.side],["Size",r=>r.size],["Price",r=>r.price],["Fee",r=>r.commission],["Asset",r=>r.settling_asset_symbol],["Position realized P&L*",r=>r.new_position?.realized_pnl]]);
