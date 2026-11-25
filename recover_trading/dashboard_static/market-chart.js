@@ -30,7 +30,7 @@
  function ensure(){
    if(chart)return true;
    if(!L?.createChart||!L.CandlestickSeries){id("marketChartStatus").textContent="Chart library unavailable · deployment asset missing";return false}
-   chart=L.createChart(root,{autoSize:true,layout:{background:{type:L.ColorType.Solid,color:"#141a22"},textColor:colors.muted,attributionLogo:true,panes:{separatorColor:"#303943",separatorHoverColor:"#49586a",enableResize:true}},grid:{vertLines:{color:colors.grid},horzLines:{color:colors.grid}},rightPriceScale:{borderColor:colors.grid,minimumWidth:74,scaleMargins:{top:.12,bottom:.24}},timeScale:{borderColor:colors.grid,timeVisible:true,secondsVisible:false,rightOffset:5,barSpacing:7,minBarSpacing:1},crosshair:{mode:L.CrosshairMode.Normal},handleScroll:{mouseWheel:true,pressedMouseMove:true,horzTouchDrag:true,vertTouchDrag:false},handleScale:{axisPressedMouseMove:true,mouseWheel:true,pinch:true}});
+   chart=L.createChart(root,{autoSize:true,localization:{locale:"en-US"},layout:{background:{type:L.ColorType.Solid,color:"#141a22"},textColor:colors.muted,attributionLogo:true,panes:{separatorColor:"#303943",separatorHoverColor:"#49586a",enableResize:true}},grid:{vertLines:{color:colors.grid},horzLines:{color:colors.grid}},rightPriceScale:{borderColor:colors.grid,minimumWidth:74,scaleMargins:{top:.12,bottom:.24}},timeScale:{borderColor:colors.grid,timeVisible:true,secondsVisible:false,rightOffset:5,barSpacing:7,minBarSpacing:1},crosshair:{mode:L.CrosshairMode.Normal},handleScroll:{mouseWheel:true,pressedMouseMove:true,horzTouchDrag:true,vertTouchDrag:false},handleScale:{axisPressedMouseMove:true,mouseWheel:true,pinch:true}});
    candles=chart.addSeries(L.CandlestickSeries,{upColor:colors.up,downColor:colors.down,wickUpColor:colors.up,wickDownColor:colors.down,borderVisible:false,priceLineVisible:false,lastValueVisible:true});
    volume=chart.addSeries(L.HistogramSeries,{priceScaleId:"volume",priceFormat:{type:"volume"},lastValueVisible:false,priceLineVisible:false});
    volume.priceScale().applyOptions({scaleMargins:{top:.83,bottom:0}});
@@ -99,7 +99,7 @@
      if(p.symbol!==s||p.frame!==f||!Array.isArray(p.candles)||!Number.isFinite(p.step))throw Error("chart identity");
      const reset=!packet;id("marketChartTitle").textContent=s+" · "+f;id("marketChartLast").textContent=p.candles.length?fmt(p.candles.at(-1).close)+" USD":"—";
      const age=p.last_close_age_s,stale=age===null||age>2*p.step||age<0,wide=p.candles.slice(-80).filter(x=>(x.high-x.low)/x.close>.02).length;
-     id("marketChartStatus").textContent=p.status==="observed"?(stale?"Stale archive":"Completed archive")+" · Last close "+age+"s ago · "+p.gap_count+" gaps · "+p.invalid_rows+" invalid rows · "+wide+" wide-range candles / last "+Math.min(80,p.candles.length):"No chart data available";
+     id("marketChartStatus").textContent=p.status==="observed"?(stale?"Stale archive":"Completed archive")+" · "+(p.source==="demo_public_completed_candles"?"Public demo cache":"Trading archive")+" · Last close "+age+"s ago · "+p.gap_count+" gaps · "+p.invalid_rows+" invalid rows · "+wide+" wide-range candles / last "+Math.min(80,p.candles.length):"No chart data available";
      id("marketChartStatus").className=stale||wide?"caution":"";
      renderPacket(p,reset);
    }catch(e){if(g===generation){id("marketChartStatus").textContent="Chart unavailable · retained data may be stale";id("marketChartStatus").className="caution";console.warn("Recover chart:",e.message)}}

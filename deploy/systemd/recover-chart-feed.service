@@ -1,0 +1,23 @@
+[Unit]
+Description=Recover dashboard public demo candle cache (display only)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=recovertrading
+Group=recovertrading
+WorkingDirectory=/opt/recover-dashboard/current
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/usr/bin/python3 -m recover_trading.chart_feed --cache-dir /var/lib/recover-chart-feed
+Restart=on-failure
+RestartSec=10
+StateDirectory=recover-chart-feed
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

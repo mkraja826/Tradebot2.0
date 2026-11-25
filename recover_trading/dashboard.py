@@ -185,7 +185,7 @@ def report(root, symbol):
             "win_rate":None,"realized_trade_pnl":None}
 
 CHART_FRAMES={"1m":60,"3m":180,"5m":300,"15m":900,"30m":1800,"1h":3600,"4h":14400,"1d":86400}
-def chart_data(root,symbol,frame,now):
+def chart_data(root,symbol,frame,now,cache_dir=None):
     if symbol not in MARKETS or frame not in CHART_FRAMES:
         raise ValueError("Unknown chart selection")
     step=CHART_FRAMES[frame]
@@ -201,13 +201,19 @@ def chart_data(root,symbol,frame,now):
         if not all(type(x) in (int,float) and math.isfinite(x) for x in (o,h,l,c,v)) or not 0<l<=min(o,c)<=max(o,c)<=h or v<0:
             invalid+=1;continue
         candles.append({"time":t,"open":o,"high":h,"low":l,"close":c,"volume":v})
+    source="demo_archived_completed_candles"
+    observed_at=None
+    from .chart_feed import read_cache
+    cached=read_cache(cache_dir,symbol,frame,now)
+    if cached and (not candles or cached["candles"][-1]["time"]>=candles[-1]["time"]):
+        candles=cached["candles"];invalid=cached["invalid_rows"];source=cached["source"];observed_at=cached["observed_at"]
     gaps=sum(b["time"]-a["time"]!=step for a,b in zip(candles,candles[1:]))
-    return {"symbol":symbol,"frame":frame,"step":step,"source":"demo_archived_completed_candles","generated":now,
-        "status":"unavailable" if rows is None else "observed" if candles else "empty",
+    return {"symbol":symbol,"frame":frame,"step":step,"source":source,"observed_at":observed_at,"generated":now,
+        "status":"observed" if candles else "unavailable" if rows is None else "empty",
         "candles":candles,"studies":chart_studies(candles,step),"invalid_rows":invalid,"gap_count":gaps,
         "last_close_age_s":now-candles[-1]["time"]-step if candles else None}
 
-def handler(root):
+def handler(root,cache_dir=None):
     class Handler(BaseHTTPRequestHandler):
         def send(self, status, content, mime):
             self.send_response(status)
@@ -240,7 +246,7 @@ def handler(root):
                 try:
                     q=parse_qs(urlsplit(self.path).query,strict_parsing=True,max_num_fields=2)
                     if set(q)!={"symbol","frame"} or any(len(v)!=1 for v in q.values()):raise ValueError("Invalid query")
-                    data=chart_data(root,q["symbol"][0],q["frame"][0],int(time.time()))
+                    data=chart_data(root,q["symbol"][0],q["frame"][0],int(time.time()),cache_dir)
                 except ValueError:
                     return self.send(400,b"Invalid chart selection","text/plain")
                 return self.send(200,json.dumps(data,allow_nan=False).encode(),"application/json")
@@ -254,8 +260,9 @@ def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument("--data-dir",default="data/recover-service")
     p.add_argument("--port",type=int,default=8765)
+    p.add_argument("--chart-cache-dir",default=None)
     args=p.parse_args()
-    with ThreadingHTTPServer(("127.0.0.1",args.port),handler(args.data_dir)) as server:
+    with ThreadingHTTPServer(("127.0.0.1",args.port),handler(args.data_dir,args.chart_cache_dir)) as server:
         print(f"Local dashboard: http://127.0.0.1:{server.server_port}",flush=True)
         try:
             server.serve_forever()
