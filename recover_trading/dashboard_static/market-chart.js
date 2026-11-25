@@ -117,8 +117,8 @@
  function sourceView(){
    id("chartSourceLabel").textContent=reference()?"PRODUCTION MARKET REFERENCE · ANALYSIS ONLY":"DEMO EXECUTION MARKET · COMPLETED CANDLES";
    id("chartReference").setAttribute("aria-pressed",String(reference()));id("chartDemo").setAttribute("aria-pressed",String(!reference()));
-   for(const name of ["chartLevels","chartFills","chartFillFilter","clearFillSelection"])id(name).disabled=reference();
-   id("chartExecutions").hidden=reference();
+   for(const name of ["chartLevels","chartFills","chartFillFilter"])id(name).disabled=reference();
+   id("chartExecutions").hidden=reference();id("clearFillSelection").disabled=reference()||!selectedFillId;
  }
  function quoteView(){
    const q=quote,age=q&&Number.isFinite(q.age_s)?q.age_s+Math.max(0,(performance.now()-quoteReceived)/1000):null;

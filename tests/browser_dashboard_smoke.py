@@ -79,6 +79,8 @@ def run(page,url,mobile=False):
     expect(page.locator("#chartReference")).to_have_attribute("aria-pressed","true")
     expect(page.locator("#chartLevels")).to_be_disabled()
     expect(page.locator("#chartSourceLabel")).to_contain_text("PRODUCTION MARKET REFERENCE")
+    expect(page.locator("#chartExecutions")).to_be_hidden()
+    expect(page.locator("#marketChartStatus")).to_contain_text("Production reference")
     page.locator("#chartDemo").click()
     expect(page.locator("#marketChartStatus")).to_contain_text("Trading archive")
     expect(page.locator("#scaleFocus")).to_have_attribute("aria-pressed","true")
@@ -149,7 +151,14 @@ def main():
     Path("browser-artifacts").mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory() as d:
         seed(d)
-        server=ThreadingHTTPServer(("127.0.0.1",0),handler(d))
+        from recover_trading.chart_feed import refresh,REFERENCE_SOURCE
+        reference=Path(d)/"reference";reference.mkdir()
+        class ReferenceFixture:
+            def candles(self,*,symbol,resolution,start,end):
+                step=CHART_FRAMES[resolution]
+                return [dict(time=t,open=3000,high=3002,low=2998,close=3001,volume=5) for t in range(end-100*step,end,step)]
+        refresh(reference,"XAUTUSD","15m",int(time.time()),ReferenceFixture,source=REFERENCE_SOURCE)
+        server=ThreadingHTTPServer(("127.0.0.1",0),handler(d,reference_dir=reference))
         thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
         try:
             with sync_playwright() as p:
