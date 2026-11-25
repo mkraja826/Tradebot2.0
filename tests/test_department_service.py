@@ -41,6 +41,7 @@ class DepartmentServiceTests(unittest.TestCase):
                         if state=="open" else {"status":"no_fresh_position"})
                     svc.management.evaluate.return_value={"status":"proposed"}
                     svc.management_executor=Mock()
+                    svc.management_executor.reconcile_pending.return_value={"checked":0,"resolved":0,"execution_effect":"none"}
                     svc.management_executor.execute.return_value={"status":"verified","attempted":True}
                     svc.research=Mock()
                     svc.research.record.return_value={}
