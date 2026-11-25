@@ -250,6 +250,15 @@ def handler(root,cache_dir=None):
                 except ValueError:
                     return self.send(400,b"Invalid chart selection","text/plain")
                 return self.send(200,json.dumps(data,allow_nan=False).encode(),"application/json")
+            if path == "/api/chart-quote":
+                try:
+                    q=parse_qs(urlsplit(self.path).query,strict_parsing=True,max_num_fields=1)
+                    if set(q)!={"symbol"} or len(q["symbol"])!=1 or q["symbol"][0] not in MARKETS:raise ValueError("Invalid symbol")
+                    from .chart_quote import read_quote
+                    data=read_quote(cache_dir,q["symbol"][0],int(time.time()))
+                except ValueError:
+                    return self.send(400,b"Invalid chart quote selection","text/plain")
+                return self.send(200,json.dumps(data,allow_nan=False).encode(),"application/json")
             if path == "/api/overview":
                 data={"generated":int(time.time()),"markets":[report(root,s) for s in MARKETS]}
                 return self.send(200,json.dumps(data,allow_nan=False).encode(),"application/json")

@@ -45,6 +45,7 @@ def run(page,url,mobile=False):
             assert page.evaluate("""() => {const b=document.querySelector('#workspaceNav [data-page="performance"]');const r=b.getBoundingClientRect();return b.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))}"""),"Performance navigation covered on "+name
             assert page.evaluate("document.documentElement.scrollWidth <= innerWidth + 1"),"Horizontal document overflow on "+name
     route("live")
+    expect(page.locator("#chartLiveState")).to_contain_text("unavailable")
     expect(page.locator("#marketChart canvas").first).to_be_visible(timeout=20000)
     page.locator('[data-frame="15m"]').click()
     expect(page.locator("#marketChartTitle")).to_have_text("BTCUSD · 15m")

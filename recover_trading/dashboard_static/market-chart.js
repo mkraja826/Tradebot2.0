@@ -2,6 +2,7 @@
 (()=>{
  const id=x=>document.getElementById(x),root=id("marketChart"),L=window.LightweightCharts;
  let symbol=document.querySelector("[data-symbol][aria-pressed=true]")?.dataset.symbol||"BTCUSD",frame="5m",packet=null,selected=new Set(),generation=0,busy=false,levels=true,showFills=true,overlays=new Map(),dockKey="",chart=null,candles=null,volume=null,markers=null,priceLines=[],studySeries=[],studyKey="",crossTime=null,displayed=[],rowsByTime=new Map();
+ let quote=null,quoteLine=null,quoteBusy=false,quoteGeneration=0,quoteReceived=0,quoteFailed=false;
  const colors={up:"#29c99a",down:"#f27783",grid:"#303943",muted:"#a1aebb"};
  const fmt=(n,d=2)=>Number.isFinite(n)?n.toLocaleString(undefined,{minimumFractionDigits:d,maximumFractionDigits:d}):"—";
  function visible(){return !root.closest("[data-workspace]").hidden}
@@ -26,7 +27,7 @@
    id("chartReadout").textContent=row?new Date(row.time*1000).toLocaleString()+" · O "+fmt(row.open)+" · H "+fmt(row.high)+" · L "+fmt(row.low)+" · C "+fmt(row.close)+" · V "+fmt(row.volume,0):"Open · High · Low · Close · Volume";
    id("studyLegend").replaceChildren(...[...selected].flatMap(k=>defs[k]).map(([key,label])=>{const n=document.createElement("span");n.textContent=label+" "+fmt(s?.[key]);return n}));
  }
- function dispose(){if(chart)chart.remove();chart=null;candles=null;volume=null;markers=null;priceLines=[];studySeries=[];studyKey="";root.replaceChildren();}
+ function dispose(){quoteLine=null;if(chart)chart.remove();chart=null;candles=null;volume=null;markers=null;priceLines=[];studySeries=[];studyKey="";root.replaceChildren();}
  function ensure(){
    if(chart)return true;
    if(!L?.createChart||!L.CandlestickSeries){id("marketChartStatus").textContent="Chart library unavailable · deployment asset missing";return false}
@@ -43,8 +44,32 @@
    for(const row of rows){if(previous!==null&&row.time>previous+step)result.push({time:previous+step});result.push(map(row));previous=row.time}
    return result;
  }
+ function quoteView(){
+   const q=quote,age=q&&Number.isFinite(q.age_s)?q.age_s+Math.max(0,(performance.now()-quoteReceived)/1000):null;
+   const current=q?.symbol===symbol&&q.status==="observed"&&age!==null&&age>=-2&&age<=15&&!quoteFailed;
+   id("chartLivePrice").textContent=q?.symbol===symbol&&Number.isFinite(q.last_price)?fmt(q.last_price)+" USD":"—";
+   id("chartLiveMark").textContent=q?.symbol===symbol&&Number.isFinite(q.mark_price)?"Mark "+fmt(q.mark_price):"Mark —";
+   id("chartLiveState").textContent=current?"Public demo last price · "+Math.max(0,Math.round(age))+"s old":q?.last_price!=null?"Last observed quote · stale / disconnected":"Public demo last price · unavailable";
+   id("quoteDot").classList.toggle("quote-active",Boolean(current));
+   if(quoteLine&&candles){candles.removePriceLine(quoteLine);quoteLine=null}
+   if(current&&candles&&packet&&chart.timeScale().scrollPosition()>=-2){
+     quoteLine=candles.createPriceLine({price:q.last_price,color:"#53d6ae",lineWidth:1,lineStyle:L.LineStyle.Dotted,axisLabelVisible:true,title:"LAST"});
+   }
+ }
+ async function loadQuote(){
+   if(!visible()||quoteBusy)return;
+   quoteBusy=true;const g=++quoteGeneration,s=symbol;
+   try{
+     const response=await fetch("/api/chart-quote?symbol="+encodeURIComponent(s),{cache:"no-store"});
+     if(!response.ok)throw Error("quote unavailable");
+     const p=await response.json();if(g!==quoteGeneration||symbol!==s)return;
+     if(p.symbol!==s||p.source!=="demo_public_ticker")throw Error("quote identity");
+     quote=p;quoteReceived=performance.now();quoteFailed=false;quoteView();
+   }catch(e){if(g===quoteGeneration){quoteFailed=true;quoteView()}}
+   finally{if(g===quoteGeneration)quoteBusy=false}
+ }
  function overlayView(){
-   dock();if(!chart||!packet)return;
+   dock();quoteView();if(!chart||!packet)return;
    for(const line of priceLines)candles.removePriceLine(line);priceLines=[];
    const o=overlay(),fresh=isFresh(o),live=levels&&fresh&&o.status==="position_observed";
    const atLatest=chart.timeScale().scrollPosition()>=-2;
@@ -109,7 +134,7 @@
  function zoom(factor){if(chart){const scale=chart.timeScale(),r=scale.getVisibleLogicalRange();if(r){const center=(r.from+r.to)/2,half=Math.max(5,Math.min(180,(r.to-r.from)*factor/2));scale.setVisibleLogicalRange({from:center-half,to:center+half})}}}
  function latest(){if(chart){chart.timeScale().scrollToRealTime();overlayView()}load()}
  document.addEventListener("recover:overview",e=>{overlays=new Map(e.detail.map(o=>[o.symbol,o]));if(visible())overlayView()});
- document.addEventListener("recover:market",e=>{if(symbol!==e.detail){symbol=e.detail;clearSelection();dock()}});
+ document.addEventListener("recover:market",e=>{if(symbol!==e.detail){symbol=e.detail;quoteGeneration++;quoteBusy=false;quote=null;quoteFailed=false;clearSelection();quoteView();loadQuote();dock()}});
  for(const b of document.querySelectorAll("[data-frame]"))b.addEventListener("click",()=>{if(frame===b.dataset.frame)return;frame=b.dataset.frame;for(const a of document.querySelectorAll("[data-frame]"))a.setAttribute("aria-pressed",String(a===b));clearSelection()});
  id("chartZoomIn").addEventListener("click",()=>zoom(.8));id("chartZoomOut").addEventListener("click",()=>zoom(1.25));id("chartLeft").addEventListener("click",()=>pan(-15));id("chartRight").addEventListener("click",()=>pan(15));id("chartReset").addEventListener("click",latest);
  id("chartLevels").addEventListener("click",()=>{levels=!levels;id("chartLevels").setAttribute("aria-pressed",String(levels));overlayView()});id("chartFills").addEventListener("click",()=>{showFills=!showFills;id("chartFills").setAttribute("aria-pressed",String(showFills));overlayView()});
@@ -118,6 +143,6 @@
  id("marketFullscreen").addEventListener("click",()=>expand(!id("marketTerminal").classList.contains("expanded-chart")));
  document.addEventListener("keydown",e=>{if(e.key==="Escape"&&id("marketTerminal").classList.contains("expanded-chart"))expand(false)});
  root.addEventListener("keydown",e=>{if(e.key==="ArrowLeft")pan(-5);else if(e.key==="ArrowRight")pan(5);else if(e.key==="+"||e.key==="=")zoom(.8);else if(e.key==="-")zoom(1.25);else return;e.preventDefault()});
- window.addEventListener("hashchange",()=>{if(visible()){load(true);dock()}else{generation++;busy=false;expand(false)}});
- load();setInterval(load,10000);
+ window.addEventListener("hashchange",()=>{if(visible()){load(true);loadQuote();dock()}else{generation++;busy=false;quoteGeneration++;quoteBusy=false;expand(false)}});
+ load();loadQuote();setInterval(load,10000);setInterval(loadQuote,3000);
 })();

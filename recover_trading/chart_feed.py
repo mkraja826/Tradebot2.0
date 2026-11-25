@@ -10,6 +10,8 @@ import math
 import os
 from pathlib import Path
 import time
+import threading
+from .chart_quote import quote_loop
 
 from tradebot.market_data_v3 import MARKETS, FRAMES, public_client
 
@@ -113,6 +115,8 @@ def main():
     args = p.parse_args()
     directory = Path(args.cache_dir)
     directory.mkdir(parents=True, exist_ok=True)
+    if not args.once:
+        threading.Thread(target=quote_loop,args=(directory,threading.Event()),daemon=True,name="display-quotes").start()
     last_attempt = {}
     pairs = [(s,f) for s in MARKETS for f in FRAMES]
     while True:
