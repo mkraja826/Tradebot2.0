@@ -10,7 +10,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   smoke:
-    if: ${{ github.repository == 'mkraja826/Tradebot2.0' && github.event.pull_request.number == 95 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'recover/three-department-integration' && github.event.before == '04b6b66822ddfcaf20a72de78c03ec3588f759cf' && github.run_attempt == 1 }}
+    if: ${{ github.repository == 'mkraja826/Tradebot2.0' && github.event.pull_request.number == 95 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'recover/three-department-integration' && github.event.before == '8fbfeb5c1534d26fd69d7511dfd3c7f09a70a498' && github.run_attempt == 1 }}
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
@@ -26,4 +26,4 @@ jobs:
             echo "SKIPPED: repository TopBilling secret not available"
             exit 1
           fi
-          python -m recover_trading.management_probe --model tb-deepseek-v4-pro --symbol BTCUSD --scenario profit_retention --direction SHORT --call-provider
+          python -m recover_trading.management_probe --model tb-deepseek-v4-pro --symbol XAUTUSD --scenario loss_reduction --direction LONG --call-provider
