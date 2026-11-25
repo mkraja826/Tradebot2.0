@@ -8,6 +8,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from .performance import read_performance
+
 MARKETS = ("BTCUSD", "XAUTUSD")
 STATIC = Path(__file__).with_name("dashboard_static")
 
@@ -73,7 +75,8 @@ def report(root, symbol):
           round(avg(return_bps),3) AS avg_mark_return_bps
           FROM observations WHERE symbol=? GROUP BY rule_id,family,regime,horizon_s
           ORDER BY rule_id,regime,horizon_s""",(symbol,))
-    return {"symbol":symbol,"signal_research":research,"heartbeat":heartbeat,"snapshot":latest,"wallet_history":history,
+    performance=read_performance(root,symbol)
+    return {"symbol":symbol,"performance":performance,"signal_research":research,"heartbeat":heartbeat,"snapshot":latest,"wallet_history":history,
             "decisions":decision_rows,"orders":entries,"fills":[decode(f["detail"]) for f in fills] if fills is not None else None,
             "prices":points,"order_counts":counts,"decision_counts":dc,
             "availability":{"decisions":proposals is not None,"orders":entries is not None,
