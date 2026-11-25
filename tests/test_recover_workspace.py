@@ -6,7 +6,7 @@ class WorkspaceTests(unittest.TestCase):
         ids=re.findall(r'\bid="([^"]+)"',html)
         self.assertEqual(len(ids),len(set(ids)))
         self.assertTrue(set(re.findall(r'\$\("([^"]+)"\)',js))<=set(ids))
-        self.assertEqual(len(re.findall(r'<section class="panel\b',html)),44)
+        self.assertEqual(len(re.findall(r'<section class="panel\b',html)),45)
     def test_routes_and_market_controls(self):
         html=(STATIC/"index.html").read_text()
         self.assertEqual(set(re.findall(r'data-page="([^"]+)"',html)),set(re.findall(r'data-workspace="([^"]+)"',html)))
@@ -34,3 +34,14 @@ class WorkspaceTests(unittest.TestCase):
         self.assertIn("x.id===e.decision_id",js)
         self.assertIn("matches.length!==1",js)
         self.assertIn("Final observed exit fill",js)
+
+    def test_learning_intelligence_workspace(self):
+        html=(STATIC/"index.html").read_text();js=(STATIC/"app.js").read_text()
+        learning=html.split('data-workspace="learning"',1)[1].split('data-workspace="health"',1)[0]
+        for identifier in ("learnSummary","learnMetrics","learnDistribution","learnPatterns","learnHypotheses","learnComparison","learnOutcomeFilter","learnFilterCount"):
+            self.assertIn(f'id="{identifier}"',learning)
+        self.assertIn("learnIntelligence(m);",js)
+        self.assertIn("x.prospective_nonoverlap_samples",js)
+        self.assertIn("x.mean_alternative_net_bps",js)
+        self.assertIn("r.outcome===filter",js)
+        self.assertIn("followups below remain unfiltered",js)

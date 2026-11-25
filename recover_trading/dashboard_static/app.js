@@ -379,6 +379,54 @@ $("historyQuery").addEventListener("input",refreshHistoryView);
 $("historySide").addEventListener("change",refreshHistoryView);
 $("historyReset").addEventListener("click",()=>{$("historyQuery").value="";$("historySide").value="all";refreshHistoryView()});
 
+
+function learnLessonView(m){
+ const ol=m.outcome_learning||{},all=ol.lessons||[],filter=$("learnOutcomeFilter").value;
+ const rows=all.filter(r=>filter==="all"||r.outcome===filter);
+ $("learnFilterCount").textContent=rows.length+" of "+all.length+" recent lessons shown · followups below remain unfiltered";
+ table("learningRows",rows,[["Decision",r=>fmt(r.decision_id).slice(0,12)],["Outcome",r=>human(r.outcome)],["Net before funding",r=>fmt(r.net_before_funding)],["Entry deviation bps",r=>fmt(r.entry_evidence?.entry_deviation_bps)],["Observed exit gap bps",r=>fmt(r.exit_evidence?.observed_favorable_gap_bps)]]);
+ if(all.length&&!rows.length)empty("learningRows","No lessons match this outcome");
+}
+function learnIntelligence(m){
+ const ol=m.outcome_learning||{},lm=m.learning_memory||{},mc=m.memory_comparison||{},lessons=ol.lessons||[];
+ const counts=["win","loss","breakeven"].map(k=>({status:k,count:lessons.filter(r=>r.outcome===k).length}));
+ const unknown=lessons.length-counts.reduce((sum,x)=>sum+x.count,0);
+ if(unknown)counts.push({status:"unknown",count:unknown});
+ const follow=ol.followup_counts||{},validated=Array.isArray(lm.statistically_supported_lessons)?lm.statistically_supported_lessons.length:null;
+ $("learnSummary").textContent=m.symbol+" · Learning journal: "+human(ol.status)+" · Memory: "+human(lm.status)+" · "+(lm.model_feedback_enabled===false?"Automatic model feedback disabled":"Model feedback status unavailable");
+ metrics([["Recorded lessons",fmt(ol.lesson_count),"Journal total"],["Observed followups",fmt(follow.observed??(ol.status==="observed"?0:null)),"Journal total · all timing classes"],["Process categories",fmt(lm.process_observations?.length),"Reported observations"],["Validated lessons",fmt(validated),"Statistical evidence only"]],"learnMetrics");
+ const dist=$("learnDistribution");
+ if(!lessons.length)empty("learnDistribution","No recorded lessons in the recent window");
+ else{
+  const track=el("div",undefined,"learn-distribution"),legend=el("div",undefined,"legend");
+  track.setAttribute("role","img");track.setAttribute("aria-label",counts.map(x=>x.status+" "+x.count).join(", "));
+  for(const x of counts){const cls=x.status==="win"?"gain":x.status==="loss"?"loss":"neutral";if(x.count){const part=el("div",undefined,"learn-segment "+cls);part.style.flexGrow=String(x.count);track.append(part)}legend.append(el("span",human(x.status)+" "+x.count,cls))}
+  dist.replaceChildren(track,legend);
+ }
+ const patterns=(lm.process_observations||[]).filter(x=>Number.isInteger(x.count)&&x.count>0).slice().sort((a,b)=>b.count-a.count);
+ if(!patterns.length)empty("learnPatterns","No process observations reported");
+ else{
+  const max=patterns[0].count;
+  $("learnPatterns").replaceChildren(...patterns.map(x=>{const row=el("div",undefined,"learn-pattern"),head=el("div",undefined,"learn-pattern-head"),bar=el("progress");head.append(el("strong",human(x.kind)),el("strong",x.count));bar.max=max;bar.value=x.count;bar.setAttribute("aria-label",human(x.kind)+" "+x.count+" observations");row.append(head,bar,el("small",human(x.evidence_grade)+" · "+fmt(x.scope)));return row}));
+ }
+ function horizonLabel(s){return finite(s)?Number(s)/60+" min":"Unknown horizon"}
+ function bps(v){return finite(v)?Number(v).toFixed(2)+" bps":"—"}
+ function signedBar(label,value,max){
+  const row=el("div",undefined,"learn-signed"),track=el("div",undefined,"learn-signed-track"),bar=el("span",undefined,Number(value)<0?"loss":"gain");
+  row.append(el("span",label),track,el("strong",bps(value),finite(value)?Number(value)>0?"gain":Number(value)<0?"loss":"neutral":"neutral"));
+  if(finite(value)){bar.style.width=(Math.abs(Number(value))/max*50)+"%";bar.style.left=Number(value)<0?(50-Math.abs(Number(value))/max*50)+"%":"50%";track.append(bar)}
+  track.setAttribute("aria-hidden","true");return row;
+ }
+ const hy=lm.hypotheses||[],hyMax=Math.max(1,...hy.filter(x=>finite(x.mean_gross_directional_bps)).map(x=>Math.abs(Number(x.mean_gross_directional_bps))));
+ if(!hy.length)empty("learnHypotheses","No hypothesis data available");
+ else $("learnHypotheses").replaceChildren(...hy.map(x=>{const card=el("div",undefined,"learn-horizon");card.append(el("strong",horizonLabel(x.horizon_s)),el("small",fmt(x.prospective_nonoverlap_samples)+" prospective samples · "+human(x.evidence_grade)),signedBar("Mean gross",x.mean_gross_directional_bps,hyMax),el("small","Positive "+fmt(x.positive_count)+" · Negative "+fmt(x.negative_count)));return card}));
+ const pairs=mc.horizons||[],pairMax=Math.max(1,...pairs.flatMap(x=>[x.mean_baseline_net_bps,x.mean_alternative_net_bps]).filter(finite).map(v=>Math.abs(Number(v))));
+ if(!pairs.length)empty("learnComparison","No prospective comparison data available");
+ else $("learnComparison").replaceChildren(...pairs.map(x=>{const card=el("div",undefined,"learn-horizon");card.append(el("strong",horizonLabel(x.horizon_s)),el("small",fmt(x.observed_pairs)+" observed pairs · "+fmt(x.disagreements)+" disagreements"),signedBar("Baseline",x.mean_baseline_net_bps,pairMax),signedBar("Proxy",x.mean_alternative_net_bps,pairMax),el("small","Mean paired difference: "+bps(x.mean_difference_bps)));return card}));
+ learnLessonView(m);
+}
+$("learnOutcomeFilter").addEventListener("change",()=>{const m=data?.markets.find(x=>x.symbol===chosen);if(m)learnLessonView(m)});
+
 function render(){
  if(!data)return;
  overviewView();
@@ -496,7 +544,7 @@ function render(){
  table("decisions",m.availability.decisions?m.decisions:null,[["Time",r=>time(r.created)],["Model",r=>r.model],["Decision",r=>human(r.result?.action||r.status)],["Side",r=>r.result?.side],["Capital budget",r=>r.result?.capital_allocation],["Size",r=>r.result?.size],["SL",r=>r.result?.stop_loss],["TP",r=>r.result?.take_profit],["Signals",r=>r.signals.map(s=>s.id+" "+s.frame).join(", ")],["Reason",r=>r.result?.reason||r.result?.error]]);
  const ol=m.outcome_learning||{};
  $("learningNote").textContent=human(ol.status)+" · "+fmt(ol.lesson_count)+" recorded closed-trade lessons · observation only";
- table("learningRows",ol.lessons||[],[["Decision",r=>r.decision_id.slice(0,12)],["Outcome",r=>human(r.outcome)],["Net before funding",r=>fmt(r.net_before_funding)],["Entry deviation bps",r=>fmt(r.entry_evidence?.entry_deviation_bps)],["Observed exit gap bps",r=>fmt(r.exit_evidence?.observed_favorable_gap_bps)]]);
+ learnIntelligence(m);
  table("learningFollowups",ol.followups||[],[["Decision",r=>r.decision_id.slice(0,12)],["Horizon min",r=>fmt(r.horizon_s/60)],["Timing",r=>human(r.timing)],["Status",r=>human(r.status)],["Directional return bps",r=>fmt(r.evidence?.gross_directional_price_return_bps)]]);
  const mc=m.memory_comparison||{};
  $("memoryCompareNote").textContent=human(mc.status)+" · "+human(mc.validation)+" · "+fmt(mc.additional_ai_calls)+" extra AI requests · "+(mc.latest?human(mc.latest.reason):"Awaiting eligible new proposal");
