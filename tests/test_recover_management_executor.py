@@ -15,7 +15,11 @@ class Fake(DeltaDemo):
         self.calls+=1
         if self.unknown:raise TimeoutError()
         if method=="PUT":
-            self.sl=kw["payload"]["stop_price"];return {"id":1,"stop_price":self.sl}
+            payload=kw["payload"]
+            if payload["id"]==1:self.sl=payload["stop_price"]
+            elif payload["id"]==2:self.tp=payload["stop_price"]
+            else:raise AssertionError("unknown leg")
+            return {"id":payload["id"],"stop_price":payload["stop_price"]}
         self.sl=kw["payload"]["stop_loss_order"]["stop_price"];self.tp=kw["payload"]["take_profit_order"]["stop_price"];return {"success":True}
     def submit(self,intent,cid):
         self.calls+=1
@@ -49,7 +53,10 @@ class ManagementExecutorTests(unittest.TestCase):
         self.assertEqual(self.e.execute("BTCUSD",i,enabled=True)["status"],"verified")
         self.assertEqual(self.b.sl,"104.9")
         i=self.proposal("update_bracket",stop_loss=104.9,take_profit=94)
-        self.assertEqual(self.e.execute("BTCUSD",i,enabled=True)["status"],"take_profit_amendment_not_verified")
+        self.assertEqual(self.e.execute("BTCUSD",i,enabled=True)["status"],"verified")
+        self.assertEqual(self.b.tp,"94")
+        self.assertEqual(self.b.sl,"104.9")
+        self.assertEqual(self.b.calls,2)
     def test_repair(self):
         self.b.sl=None
         i=self.proposal("repair_bracket",stop_loss=105,take_profit=95)
@@ -85,4 +92,23 @@ class ManagementExecutorTests(unittest.TestCase):
         self.b.unknown=True;i=self.proposal("reduce",contracts=1)
         self.e.execute("BTCUSD",i,enabled=True)
         self.assertEqual(self.e.reconcile_pending("BTCUSD")["unresolved"],1)
+        self.assertEqual(self.b.calls,1)
+
+    def test_tp_timeout_reconciles_without_replay(self):
+        self.b.unknown=True;i=self.proposal("update_bracket",stop_loss=105,take_profit=94.9)
+        self.assertEqual(self.e.execute("BTCUSD",i,enabled=True)["status"],"outcome_unverified")
+        self.b.tp="94.9"
+        self.assertEqual(self.e.reconcile_pending("BTCUSD")["resolved"],1)
+        self.assertEqual(self.b.calls,1)
+    def test_two_leg_change_not_submitted(self):
+        i=self.proposal("update_bracket",stop_loss=104.9,take_profit=94.9)
+        self.assertEqual(self.e.execute("BTCUSD",i,enabled=True)["status"],"preparation_error")
+        self.assertEqual(self.b.calls,0)
+    def test_tp_sibling_change_not_verified(self):
+        original=self.b._request
+        def mutate(method,path,**kw):
+            r=original(method,path,**kw);self.b.sl="106";return r
+        self.b._request=mutate
+        i=self.proposal("update_bracket",stop_loss=105,take_profit=94.9)
+        self.assertEqual(self.e.execute("BTCUSD",i,enabled=True)["status"],"outcome_unverified")
         self.assertEqual(self.b.calls,1)

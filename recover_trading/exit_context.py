@@ -4,7 +4,7 @@ VERSION="exit-context-v1"
 
 def geometry(position,excursion=None,raw_position=None,direction=None):
     out={"version":VERSION,"status":"unavailable","execution_effect":"none",
-        "capabilities":{"update_bracket":"stop_loss_only_keep_existing_take_profit","reduce":"positive_integer_less_than_position","close":"full_reduce_only","repair_bracket":"no_active_orders_only"}}
+        "capabilities":{"update_bracket":"single_leg_stop_or_target_keep_other_trigger_unchanged","reduce":"positive_integer_less_than_position","close":"full_reduce_only","repair_bracket":"no_active_orders_only"}}
     e,m,q=(dec(position.get(k)) for k in ("entry_price","mark_price","size"))
     if any(v is None for v in (e,m,q)) or min(e,m)<=0 or not q:return out
     sign=1 if q>0 else -1

@@ -9,8 +9,9 @@ from .lifecycle import pages,normalize_fill
 from .management_lifecycle import plan,current_match,reconcile
 from .position_preview import observe
 from .performance import dec
+from .target_amendment_preview import plan as target_plan, verify as target_verify
 
-VERSION="management-executor-v1"
+VERSION="management-executor-v2"
 
 def identity(snapshot):
     pos=snapshot["positions"][0]
@@ -55,7 +56,7 @@ class ManagementExecutor:
             ident_before=identity(before)
             if ident_before is None or c.get("execution_identity")!=ident_before:return result("position_or_order_identity_changed")
             q=p["before_size"];cid=hashlib.sha256(("management:"+ident).encode()).hexdigest()[:32]
-            payload=None;leg_id=None
+            payload=None;tp_plan=None;amended_leg=None
             if action in ("update_bracket","repair_bracket"):
                 d=p["desired_triggers"];sl,tp=dec(d["stop_loss"]),dec(d["take_profit"])
                 t=self.broker.ticker(symbol);ts=t.get("timestamp")
@@ -66,16 +67,23 @@ class ManagementExecutor:
                     if len(orders)!=2 or any(o.get("stop_trigger_method")!="mark_price" for o in orders):return result("existing_orders_unverified")
                     legs={o["stop_order_type"]:o for o in orders}
                     a,b=legs["stop_loss_order"],legs["take_profit_order"]
-                    if dec(b["stop_price"])!=tp:return result("take_profit_amendment_not_verified")
-                    if dec(a["stop_price"])==sl:return result("no_change_requested")
-                    leg_id=a["id"]
-                    payload={"id":leg_id,"product_id":pid,"size":abs(q),"stop_price":format(sl,"f")}
+                    sl_changed=dec(a["stop_price"])!=sl
+                    tp_changed=dec(b["stop_price"])!=tp
+                    if sl_changed and tp_changed:return result("single_leg_amendment_required")
+                    if not sl_changed and not tp_changed:return result("no_change_requested")
+                    if tp_changed:
+                        tp_plan=target_plan(before,symbol,int(time.time()),product,tp)
+                        payload=tp_plan["payload"];amended_leg="take_profit_order"
+                    else:
+                        payload={"id":a["id"],"product_id":pid,"size":abs(q),"stop_price":format(sl,"f")}
+                        amended_leg="stop_loss_order"
             elif action not in ("reduce","close"):return result("unsupported_action")
             # Position identity is checked again immediately before durable reservation.
             latest=self.reader.observe(symbol,pid)
             if identity(latest)!=ident_before or current_match(p,latest,int(time.time()))!="matching_observation_not_execution_authority":return result("position_or_order_identity_changed")
         except Exception as e:return result("preparation_error",**error_detail(e))
-        detail={"plan":p,"identity":ident_before,"client_id":cid,"payload":payload}
+        detail={"plan":p,"identity":ident_before,"client_id":cid,"payload":payload,"amended_leg":amended_leg}
+        if tp_plan is not None:detail["target_plan"]=tp_plan
         try:
             with self.db:self.db.execute("INSERT INTO management_attempts VALUES (?,?,?,?,?,?)",(ident,symbol,int(time.time()),action,"attempting",json.dumps(detail)))
         except sqlite3.IntegrityError:return result("already_recorded")
@@ -91,7 +99,7 @@ class ManagementExecutor:
         with self.db:self.db.execute("UPDATE management_attempts SET detail=? WHERE proposal_id=?",(json.dumps(detail),ident))
         status,detail=self._verify(symbol,detail)
         with self.db:self.db.execute("UPDATE management_attempts SET status=?,detail=? WHERE proposal_id=?",(status,json.dumps(detail),ident))
-        return {"version":VERSION,"status":status,"action":action,"attempted":True}
+        return {"version":VERSION,"status":status,"action":action,"attempted":True,"amended_leg":amended_leg}
 
     def _verify(self,symbol,detail):
         """Read-only re-observation; never resubmit or amend an order."""
@@ -106,6 +114,11 @@ class ManagementExecutor:
             if view["position_state"] in ("long","short") and (after["positions"][0].get("created_at")!=ident_before["created_at"] or dec(view.get("entry_price"))!=dec(p["entry_price"])):
                 return "outcome_unverified",{**detail,"evidence":"position_lineage_changed","last_reconciled":int(time.time())}
             if action in ("repair_bracket","update_bracket"):
+                if detail.get("target_plan") is not None:
+                    evidence=target_verify(detail["target_plan"],after,int(time.time()))
+                    detail["evidence"]=evidence
+                    detail["observed_size"]=view.get("size");detail["bracket_state"]=view.get("bracket_state")
+                    return ("verified" if evidence=="matching_target_and_unchanged_stop_observed" else "outcome_unverified"),detail
                 d=p["desired_triggers"]
                 evidence=verify_fixture(after,symbol,int(time.time()),q,d["stop_loss"],d["take_profit"])
                 detail["evidence"]=evidence

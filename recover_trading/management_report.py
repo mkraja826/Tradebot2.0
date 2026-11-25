@@ -31,6 +31,15 @@ def evidence(root):
                 if {l.get("stop_order_type") for l in legs}!={"stop_loss_order","take_profit_order"} or any(dec(l.get("unfilled_size"))!=abs(q) or l.get("reduce_only") is not True for l in legs):continue
                 out.append({"kind":kind,"status":"recorded_exchange_verified","order_id":o.get("id"),"remaining_contracts":str(abs(q))})
             else:
+                if status=="matching_target_and_unchanged_stop_observed":
+                    v=d.get("verification") or {};p=d.get("plan") or {};before=p.get("before") or {};o=d.get("receipt") or {}
+                    legs=v.get("legs") or [];positions=v.get("positions") or [];q=dec(before.get("position_size"))
+                    if d.get("response")!="acknowledged" or v.get("status")!=status or q is None or not q or len(positions)!=1 or dec(positions[0].get("size"))!=q or dec(positions[0].get("entry_price"))!=dec(before.get("entry_price")) or len(legs)!=2:continue
+                    by={l.get("stop_order_type"):l for l in legs};a=by.get("stop_loss_order",{});b=by.get("take_profit_order",{})
+                    if a.get("id")!=before.get("stop_order_id") or b.get("id")!=before.get("target_order_id") or o.get("id")!=b.get("id") or dec(a.get("stop_price"))!=dec(before.get("stop_price")) or dec(b.get("stop_price"))!=dec(p.get("desired_target")) or dec(o.get("stop_price"))!=dec(p.get("desired_target")):continue
+                    if any(l.get("reduce_only") is not True or l.get("stop_trigger_method")!="mark_price" or dec(l.get("unfilled_size"))!=abs(q) for l in legs):continue
+                    out.append({"kind":"take_profit_order_amendment","status":"recorded_exchange_verified","order_id":o["id"],"trigger":str(o["stop_price"])})
+                    continue
                 o=d.get("result") or {};v=d.get("observed") or {};legs=v.get("legs") or []
                 q=dec(v.get("position_size"))
                 if status!="matching_triggers_observed" or d.get("response")!="acknowledged" or v.get("verification")!=status or v.get("bracket_state")!="matching_legs_observed" or q is None or not q or len(legs)!=2:continue

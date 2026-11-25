@@ -7,7 +7,7 @@ from .performance import dec
 VERSION="management-lifecycle-v1"
 
 def plan(context,raw):
-    if context.get("version")!=SHADOW_VERSION:raise ValueError("context_version")
+    if context.get("version") not in (SHADOW_VERSION,"management-shadow-v1","management-shadow-v2"):raise ValueError("context_version")
     proposal=validate(raw,context)
     p=context["position"];q=p["size"];pid=context["product"]["id"]
     if type(q) is not int or not q or type(pid) is not int or pid<=0:raise ValueError("position_identity")

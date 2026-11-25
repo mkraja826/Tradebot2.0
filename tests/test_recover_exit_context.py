@@ -24,4 +24,4 @@ class ExitContextTests(unittest.TestCase):
         r,s,p=fixture();c=context_for(r,s,p,1001)
         self.assertIn("exit_geometry",c)
         self.assertEqual(c["exit_geometry"]["current_gross_mark_return_bps"],-100)
-        self.assertIn("stop-only amendments",SYSTEM)
+        self.assertIn("single-leg amendments",SYSTEM)
