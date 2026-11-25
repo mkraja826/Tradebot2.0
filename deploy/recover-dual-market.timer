@@ -1,0 +1,8 @@
+[Unit]
+Description=Compare demo and reference indicators every 15 minutes
+[Timer]
+OnBootSec=45s
+OnUnitActiveSec=15min
+Unit=recover-dual-market.service
+[Install]
+WantedBy=timers.target

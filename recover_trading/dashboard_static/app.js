@@ -90,6 +90,10 @@ function render(){
  const asset=wallets?.[0]?.asset_symbol;
  chart("walletChart",asset?m.wallet_history.map(p=>[p.observed,p.wallets.find(w=>w.asset_symbol===asset)?.balance]):[]);
  if(asset)$("walletChart").append(el("p","Chart asset: "+asset,"empty"));
+ const dual=m.dual_market, df=Object.entries(dual?.frames||{}).map(([frame,r])=>({frame,...r}));
+ $("dualNote").textContent=dual?"Collected "+time(dual.generated)+" · Reference and demo sources remain separate.":"Reference comparison unavailable.";
+ table("dualFrames",dual?df:null,[["Frame",r=>r.frame],["Status",r=>human(r.status)],["Close time",r=>time(r.closed_at)],["Lag s",r=>r.lag_s],["Demo close",r=>r.demo_close],["Reference close",r=>r.reference_close],["Difference bps",r=>finite(r.signed_close_difference_bps)?Number(r.signed_close_difference_bps).toFixed(2):"—"],["Agreement",r=>finite(r.comparable_count)?r.agreement_count+"/"+r.comparable_count:"—"]]);
+ table("dualIndicators",dual?df.flatMap(r=>Object.entries(r.indicators||{}).map(([indicator,v])=>({frame:r.frame,indicator,...v}))):null,[["Frame",r=>r.frame],["Indicator",r=>human(r.indicator)],["Demo",r=>finite(r.demo)?Number(r.demo).toFixed(4):"—"],["Reference",r=>finite(r.reference)?Number(r.reference).toFixed(4):"—"]]);
  table("wallet",wallets??null,[["Asset",r=>r.asset_symbol],["Balance",r=>r.balance],["Available",r=>r.available_balance],["Position margin",r=>r.position_margin],["Order margin",r=>r.order_margin]]);
  $("brackets").textContent="Bracket evidence: "+human(snap.bracket_evidence)+" · Observed "+time(snap.observed)+" · Not a coverage guarantee.";
  table("positions",positions??null,[["Contracts",r=>r.size],["Entry",r=>r.entry_price],["Mark",r=>r.mark_price],["Margin",r=>r.margin],["Unrealized P&L",r=>r.unrealized_pnl],["Liquidation",r=>r.liquidation_price]]);

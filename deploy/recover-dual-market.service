@@ -1,0 +1,11 @@
+[Unit]
+Description=Recover Trading public reference indicator comparison
+[Service]
+Type=oneshot
+User=recovertrading
+WorkingDirectory=/opt/recover-trading/current
+ExecStart=/usr/bin/python3 -m recover_trading.dual_market --data-dir /var/lib/recover-trading/demo
+Environment=PYTHONDONTWRITEBYTECODE=1
+NoNewPrivileges=true
+PrivateTmp=true
+TimeoutStartSec=180
