@@ -8,7 +8,11 @@ class KimiReviewTests(unittest.TestCase):
         data={"status":"observed","lessons":[{"symbol":"BTCUSD","decision_id":"private","closed":"date","outcome":"loss","net_before_funding":"-2","api_key":"secret"}]}
         p=packet("BTCUSD",data)
         self.assertNotIn("private",str(p));self.assertNotIn("secret",str(p))
-        review={"summary":"Small sample","lessons":[{"kind":"observation","text":"One loss","evidence_ids":["R1"]}],"limitations":["No causal evidence"]}
+        self.assertIn("data_notes",p)
+        data["lessons"][0]["entry_evidence"]={"entry_deviation_bps":175.53}
+        p=packet("BTCUSD",data)
+        self.assertEqual(p["records"][0]["entry_evidence"]["worse_than_planned_entry_pct"],1.7553)
+        review={"summary":"Small sample","method":"I compare the recorded trades.","lessons":[{"kind":"observation","title":"One trade lost money","text":"One loss","how":"I checked the recorded result.","why":"The result is worth checking.","next":"Compare more trades.","evidence_ids":["R1"]}],"limitations":["No causal evidence"]}
         self.assertEqual(validate(review,p),review)
         with tempfile.TemporaryDirectory() as d,patch("recover_trading.kimi_review.outcomes",return_value=data):
             calls=[]

@@ -394,10 +394,28 @@ function learnLessonView(m){
  if(all.length&&!rows.length)empty("learningRows","No lessons match this outcome");
 }
 function kimiView(m){
- const k=m.kimi_review||{},r=k.review||{};const status=human(k.status||"not_reviewed");$("kimiStatus").textContent=status.charAt(0).toUpperCase()+status.slice(1);$("kimiMeta").textContent="Kimi K3 · TopBilling · "+fmt(k.evidence_count??0)+" recorded lessons"+(k.reviewed_at?" · "+time(k.reviewed_at):"");$("kimiSummary").textContent=k.status==="reviewed"?r.summary:"No verified Kimi report available yet.";
- $("kimiLessons").replaceChildren(...(k.status==="reviewed"?(r.lessons||[]):[]).map(x=>{const n=el("article",undefined,"kimi-lesson");n.append(el("strong",human(x.kind)),el("p",x.text),el("small","Evidence: "+(x.evidence_ids||[]).join(", ")));return n}));
- $("kimiLimits").replaceChildren(...(k.status==="reviewed"?(r.limitations||[]):[]).map(x=>el("p",x)));
- table("kimiEvidence",k.status==="reviewed"?(k.evidence?.records||[]):[],[["Evidence ID",x=>fmt(x.id)],["Outcome",x=>human(x.outcome)],["Net before funding",x=>fmt(x.net_before_funding)],["Fees",x=>fmt(x.fees)]]);
+ const k=m.kimi_review||{},r=k.review||{},ready=k.status==="reviewed";
+ const names={not_reviewed:"Not reviewed",reviewed:"Review ready",request_reserved:"Review in progress",review_failed:"Review unavailable",provider_unconfigured:"Connection not configured",insufficient_evidence:"Not enough completed trades"};
+ $("kimiStatus").textContent=names[k.status]||"Not reviewed";
+ $("kimiMeta").textContent="Kimi K3 · "+fmt(k.evidence_count??0)+" completed trades reviewed"+(k.reviewed_at?" · "+time(k.reviewed_at):"");
+ $("kimiSummary").textContent=ready?r.summary:"No verified Kimi report available yet.";
+ $("kimiMethod").textContent=ready?r.method:"Kimi compares completed trade records and later price movement. It does not change the trading engine.";
+ const records=k.evidence?.records||[];
+ $("kimiLessons").replaceChildren(...(ready?(r.lessons||[]):[]).map((x,i)=>{
+   const n=el("article",undefined,"kimi-lesson"),head=el("div",undefined,"kimi-lesson-head");
+   head.append(el("span","Lesson "+(i+1),"kimi-number"),el("span",x.kind==="hypothesis"?"Still investigating":"Observed in records","kimi-type"));
+   n.append(head,el("h4",x.title));
+   for(const [label,value] of [["What I learned",x.text],["How I learned it",x.how],["Why it matters",x.why],["What I'm checking next",x.next]]){
+     const section=el("div",undefined,"kimi-explanation");section.append(el("strong",label),el("p",value));n.append(section);
+   }
+   const d=el("details",undefined,"kimi-evidence-detail");d.append(el("summary","See supporting trade records"));
+   for(const record of records.filter(v=>(x.evidence_ids||[]).includes(v.id))){
+     const p=el("p",record.id+" · "+human(record.outcome)+" · Result before funding: "+fmt(record.net_before_funding));d.append(p);
+   }
+   n.append(d);return n;
+ }));
+ $("kimiLimits").replaceChildren(...(ready?(r.limitations||[]):[]).map(x=>el("p",x)));
+ table("kimiEvidence",ready?records:[],[["Trade",x=>fmt(x.id)],["Result",x=>human(x.outcome)],["Profit/loss before funding",x=>fmt(x.net_before_funding)],["Fees",x=>fmt(x.fees)]]);
 }
 function learnIntelligence(m){
  kimiView(m);
