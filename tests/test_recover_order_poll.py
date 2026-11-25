@@ -36,3 +36,11 @@ class PollTests(unittest.TestCase):
         self.assertEqual(calls,["a"]);self.assertEqual(r["order_poll_schedule"]["checked"],1)
         self.assertEqual(j.db.execute("SELECT status FROM orders").fetchone()[0],"acknowledged")
         l.refresh("BTCUSD");self.assertEqual(calls,["a"])
+
+    def test_wrong_side_never_acknowledged(self):
+        j=Journal(":memory:");self.addCleanup(j.close);b=Broker();l=Lifecycle(b,j)
+        j.begin("a","BTCUSD",OrderIntent(1,"buy",10));j.finish("a","unknown",{})
+        b.order=lambda i:{"id":42,"product_id":1,"client_order_id":i,"side":"sell","size":10,"unfilled_size":0,"state":"closed"}
+        r=l.refresh("BTCUSD")
+        self.assertEqual(j.db.execute("SELECT status FROM orders").fetchone()[0],"unknown")
+        self.assertEqual(r["order_lookup_diagnostics"]["a"]["error"],"ValueError")

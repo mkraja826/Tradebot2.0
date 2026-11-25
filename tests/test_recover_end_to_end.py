@@ -26,7 +26,7 @@ class Exchange(Fake):
         if path.startswith("/v2/orders/client_order_id/") and self.entry:
             self.calls.append((method,path,kwargs))
             return {"id":42,"product_id":self.pid,
-                    "client_order_id":self.entry["client_order_id"],
+                    "client_order_id":self.entry["client_order_id"],"side":self.entry["side"],
                     "size":90,"unfilled_size":0,"state":"closed","average_fill_price":"100"}
         if method == "GET" and path == "/v2/positions/margined" and self.entry:
             return [{"product_id":self.pid,"size":-90,"margin":"45","entry_price":"100"}]
@@ -51,6 +51,7 @@ class EndToEndTests(unittest.TestCase):
                 self.assertEqual(events[0]["execution_status"],"unknown")
                 self.assertEqual(events[1]["status"],"already_evaluated")
                 self.assertEqual(provider.calls,1)
+                self.assertEqual(sum(p.startswith("/v2/orders/client_order_id/") for m,p,k in broker.calls),1)
                 self.assertEqual(sum(m=="POST" and p=="/v2/orders" for m,p,k in broker.calls),1)
                 r=dashboard_report(d,symbol)
                 self.assertEqual(r["orders"][0]["status"],"acknowledged")
