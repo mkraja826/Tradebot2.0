@@ -193,6 +193,69 @@ function aiTimelineView(m){
 }
 for(const b of document.querySelectorAll("[data-ai-filter]"))b.addEventListener("click",()=>{aiFilter=b.dataset.aiFilter;for(const x of document.querySelectorAll("[data-ai-filter]"))x.setAttribute("aria-pressed",String(x===b));const m=data?.markets?.find(x=>x.symbol===chosen);if(m)aiTimelineView(m)});
 
+
+let labSelected=null,labMatrixKey="",labFamilyKey="";
+const labLabels={LONG:"Long",SHORT:"Short",CONFLICT:"Conflict",inactive:"Inactive",no_vote_unverified:"No vote / unverified",stale_or_unavailable:"Stale / unavailable",deferred:"Deferred"};
+const labClass=s=>({LONG:"lab-long",SHORT:"lab-short",CONFLICT:"lab-conflict",inactive:"lab-inactive",deferred:"lab-deferred"}[s]||"lab-unknown");
+const labNum=v=>finite(v)?Number(v).toLocaleString(undefined,{maximumFractionDigits:2}):"—";
+function labMarkets(){
+ return (data?.markets||[]).map(m=>({symbol:m.symbol,lab:m.strategy_lab||{},regime:m.regime_performance||{},overlap:m.combination_intelligence?.overlap||{}}));
+}
+function labInspector(markets){
+ const wrap=$("labDetails");wrap.replaceChildren();
+ const market=markets.find(m=>(m.lab.rules||[]).some(r=>r.id===labSelected));
+ const r=market?.lab.rules.find(x=>x.id===labSelected);
+ if(!r){wrap.append(el("p","Choose a combination in the matrix.","empty"));return}
+ const title=el("div",undefined,"lab-detail-head");title.append(el("h2",r.id+" · "+human(r.name)),el("span",labLabels[r.state]||"Unavailable","lab-state "+labClass(r.state)));wrap.append(title);
+ const facts=el("dl",undefined,"ai-event-fields");
+ for(const [k,v] of [["Market",market.symbol],["Family",human(r.family)],["Implementation",human(r.implementation)],["Configured timeframes",(r.frames||[]).join(" / ")||"—"],["Active vote timeframes",(r.active_frames||[]).join(" / ")||"—"],["Worker observation",market.lab.fresh?time(market.lab.observed):"Stale / unavailable"],["Missing dependency",r.missing_dependency||"—"]])facts.append(el("dt",k),el("dd",v));
+ wrap.append(facts,el("h3","Required strategy inputs"));
+ const inputs=el("div",undefined,"lab-inputs");
+ for(const f of r.required_inputs||[])inputs.append(el("span",f));
+ if(!inputs.children.length)inputs.append(el("p","No live rule inputs registered.","empty"));wrap.append(inputs);
+ if(r.deferred_evidence){const e=r.deferred_evidence;wrap.append(el("h3","Deferred research"),el("p",human(e.stage)+" · "+human(e.status)+" · execution disabled","caution"))}
+ wrap.append(el("h3","Fixed-horizon research · assumed 15 bps cost"));
+ const horizon=el("div",undefined,"lab-horizons");
+ for(const h of r.research||[]){
+  const c=el("article",undefined,"lab-horizon");c.append(el("small",h.horizon_s/60+" min horizon"),el("strong",labNum(h.mean_net_bps)+" bps",finite(h.mean_net_bps)?Number(h.mean_net_bps)>=0?"gain":"loss":""),el("small",fmt(h.valid_samples)+" nonoverlapping samples"),el("small","Positive windows: "+percent(h.positive_rate)));horizon.append(c);
+ }
+ if(!horizon.children.length)horizon.append(el("p","Research unavailable.","empty"));wrap.append(horizon);
+ const a=r.actual_cooccurrence;
+ wrap.append(el("h3","Actual attributed trade associations"),el("p",a?fmt(a.closed_episodes)+" closed episodes · "+money(a.net_before_funding,"USD")+" net before funding · "+percent(a.win_rate_before_funding)+" winning episodes":"No attributed association reported.","empty"));
+ const regimes=(market.regime.research||[]).filter(x=>x.level==="rule"&&x.id===r.id);
+ if(regimes.length){
+  wrap.append(el("h3","Observed regime breakdown"));const list=el("div",undefined,"lab-mini-list");
+  for(const x of regimes.slice(0,18))list.append(el("p",human(x.regime)+" / "+human(x.volatility)+" · "+x.horizon_s/60+"m · "+fmt(x.valid_samples)+" samples · "+labNum(x.mean_net_bps)+" bps"));wrap.append(list)
+ }
+ const pairs=(market.overlap.pairs||[]).filter(p=>p.rules?.includes(r.id)).slice(0,8);
+ if(pairs.length){wrap.append(el("h3","Frequently co-active combinations"));const list=el("div",undefined,"lab-mini-list");for(const p of pairs)list.append(el("p",p.rules.filter(i=>i!==r.id).join(" + ")+" · "+fmt(p.together)+" shared observations · "+labNum(100*p.jaccard)+"% Jaccard overlap"));wrap.append(list)}
+ wrap.append(el("p","Research outcomes are unleveraged mark-price observations, not actual trades. Trade associations overlap and do not establish causal contribution. Required inputs are not a full condition specification.","empty"));
+}
+function labView(){
+ const markets=labMarkets(),all=markets.flatMap(m=>m.lab.rules||[]);
+ if(!labSelected||!all.some(r=>r.id===labSelected))labSelected=all[0]?.id||null;
+ const families=[...new Set(all.map(r=>r.family))].sort(),familyKey=families.join("|"),family=$("labFamily");
+ if(familyKey!==labFamilyKey){const old=family.value;family.replaceChildren(el("option","All families"));family.firstChild.value="all";for(const f of families){const o=el("option",human(f));o.value=f;family.append(o)}family.value=families.includes(old)?old:"all";labFamilyKey=familyKey}
+ const q=$("labSearch").value.trim().toLowerCase(),state=$("labState").value;
+ const match=r=>(family.value==="all"||r.family===family.value)&&(state==="all"||r.state===state)&&(!q||(r.id+" "+r.name+" "+human(r.name)).toLowerCase().includes(q));
+ const available=markets.length===2&&markets.every(m=>m.lab.fresh&&finite(m.lab.evaluable_rules))?markets.reduce((n,m)=>n+Number(m.lab.evaluable_rules),0):null;
+ $("labSummary").textContent=all.length+" registered · "+all.filter(match).length+" shown · "+fmt(available)+" evaluable (fresh)";
+ const key=JSON.stringify([labSelected,q,state,family.value,all.map(r=>[r.id,r.name,r.family,r.state])]);
+ if(key!==labMatrixKey){
+  labMatrixKey=key;const wrap=$("labMatrix");wrap.replaceChildren();
+  for(const m of markets){
+   const rows=(m.lab.rules||[]).filter(match),section=el("div",undefined,"lab-market");
+   section.append(el("h3",(m.symbol==="BTCUSD"?"Bitcoin":"Gold")+" · "+rows.length+" / 50"));
+   const grid=el("div",undefined,"lab-matrix");
+   for(const r of rows){const b=el("button",r.id,"lab-cell "+labClass(r.state));b.setAttribute("aria-pressed",String(r.id===labSelected));b.setAttribute("aria-label",r.id+" "+human(r.name)+" "+(labLabels[r.state]||"Unavailable"));b.title=r.id+" · "+human(r.name)+" · "+(labLabels[r.state]||"Unavailable");b.addEventListener("click",()=>{labSelected=r.id;labView();const target=Array.from($("labMatrix").querySelectorAll("button")).find(n=>n.textContent===r.id);target?.focus({preventScroll:true})});grid.append(b)}
+   if(!rows.length)grid.append(el("p","No matching combinations","empty"));section.append(grid);wrap.append(section)
+  }
+ }
+ labInspector(markets);
+}
+for(const k of ["labSearch","labFamily","labState"])$(k).addEventListener(k==="labSearch"?"input":"change",labView);
+$("labReset").addEventListener("click",()=>{$("labSearch").value="";$("labFamily").value="all";$("labState").value="all";labView()});
+
 function render(){
  if(!data)return;
  overviewView();
@@ -208,7 +271,7 @@ function render(){
  $("warning").textContent=alerts.join(" • ");
  const sum=rows=>rows?.reduce((s,r)=>s+r.count,0)??null;
  metrics([["Market price",fmt(m.prices.at(-1)?.close),"Last recorded 5m close"],["Open positions",positions?.length??"—","Exchange observation"],["AI decisions",fmt(sum(m.decision_counts)),"Journal count"],["Order submissions",fmt(sum(m.order_counts)),"Not completed trades"],["Recover win rate",percent(m.performance?.recover_attributed?.win_rate_before_funding),"Reconciled, before funding"],["Recover net P&L",money(m.performance?.recover_attributed?.net_before_funding,m.performance?.currency||"USD"),"Closed episodes, before funding"]]);
- performanceView(m);forwardView(m);aiEvidence(m);aiTimelineView(m);
+ performanceView(m);forwardView(m);aiEvidence(m);aiTimelineView(m);labView();
  const dr=m.deferred_research||{};
  $("deferredNote").textContent="Independent data and experimental frameworks · "+fmt(dr.rules?.length)+" deferred candidates";
  table("deferredRows",dr.rules||[],[["Rule",r=>r.id],["Stage",r=>human(r.stage)],["Evidence",r=>human(r.status)],["Source",r=>human(r.source_status)],["Consensus",r=>human(r.consensus_status)],["Execution",r=>r.execution_enabled?"Enabled":"Not enabled"]]);

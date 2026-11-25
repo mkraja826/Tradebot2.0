@@ -1,0 +1,2 @@
+# Strategy laboratory
+All 100 registered combinations, including five deferred. Fresh consensus vote state; inactive only when aggregate evidence proves all implemented rules evaluable and no active vote. Otherwise no vote/unverified, or stale/unavailable. Catalogue survives research journal absence. Filter by state/family/name and inspect required inputs, timeframes, existing research horizons, trade associations, regime and overlap summaries. No thresholds rewritten, no strategy changes or order actions.
