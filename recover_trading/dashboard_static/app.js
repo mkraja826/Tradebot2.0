@@ -90,6 +90,13 @@ function render(){
  table("deferredRows",dr.rules||[],[["Rule",r=>r.id],["Stage",r=>human(r.stage)],["Evidence",r=>human(r.status)],["Source",r=>human(r.source_status)],["Consensus",r=>human(r.consensus_status)],["Execution",r=>r.execution_enabled?"Enabled":"Not enabled"]]);
  const rp=dr.positioning||{}, liq=rp.liquidations||{}, q=rp.latest||{};
  $("deferredFeed").textContent=m.symbol==="BTCUSD"?"Reference positioning: "+human(rp.status)+" · OI BTC "+fmt(q.open_interest_btc_both_sides)+" · indicative funding % "+fmt(q.indicative_funding_percent)+" · liquidation connection "+human(liq.status)+" · recorded batches "+fmt(liq.batches)+" · completeness unverified":"Official release probe: "+fmt(dr.economic?.last_probe_epoch?time(dr.economic.last_probe_epoch):null)+" · G25 calendar "+human(dr.reopening?.calendar_connection)+" · trade feed "+human(dr.reopening?.licensed_trade_feed);
+ const rp=m.regime_performance||{};
+ $("regimePerfNote").textContent=human(rp.status)+" · Regimes: "+(rp.observed_regimes||[]).join(", ")+" · Volatility: "+(rp.observed_volatility||[]).join(", ")+" · Descriptive only";
+ table("regimePerfCoverage",rp.coverage||[],[["Regime",r=>human(r.regime)],["Volatility",r=>human(r.volatility)],["Status",r=>human(r.status)],["Raw records",r=>fmt(r.count)]]);
+ const regimeCols=[["Rule/family",r=>human(r.id)],["Regime",r=>human(r.regime)],["Volatility",r=>human(r.volatility)],["Horizon min",r=>fmt(r.horizon_s/60)],["Nonoverlap samples",r=>fmt(r.valid_samples)],["Mean net bps",r=>fmt(r.mean_net_bps)],["Positive %",r=>r.positive_rate==null?"—":fmt(100*r.positive_rate)]];
+ table("regimePerfFamilies",(rp.research||[]).filter(r=>r.level==="family"),regimeCols);
+ table("regimePerfRules",(rp.research||[]).filter(r=>r.level==="rule"),regimeCols);
+ table("regimePerfActual",rp.actual||[],[["Regime",r=>human(r.regime)],["Volatility",r=>human(r.volatility)],["Closed trades",r=>fmt(r.closed_episodes)],["Net before funding",r=>fmt(r.net_before_funding)]]);
  const se=m.strategy_evidence||{};
  $("strategyEvidenceNote").textContent=human(se.status)+" · "+fmt(se.implemented)+" implemented · "+fmt(se.deferred)+" deferred · assumed research cost "+fmt(se.assumed_cost_bps)+" bps. Associations are not causal. Research is not executed P&L.";
  table("strategySets",se.exact_entry_rule_sets||[],[["Entry rules",r=>r.rules.join(", ")],["Closed",r=>fmt(r.closed_episodes)],["Net before funding",r=>money(r.net_before_funding,m.performance?.currency||"USD")]]);
