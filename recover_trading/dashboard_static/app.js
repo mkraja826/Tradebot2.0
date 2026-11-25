@@ -169,6 +169,9 @@ function render(){
  $("learningNote").textContent=human(ol.status)+" · "+fmt(ol.lesson_count)+" recorded closed-trade lessons · observation only";
  table("learningRows",ol.lessons||[],[["Decision",r=>r.decision_id.slice(0,12)],["Outcome",r=>human(r.outcome)],["Net before funding",r=>fmt(r.net_before_funding)],["Entry deviation bps",r=>fmt(r.entry_evidence?.entry_deviation_bps)],["Observed exit gap bps",r=>fmt(r.exit_evidence?.observed_favorable_gap_bps)]]);
  table("learningFollowups",ol.followups||[],[["Decision",r=>r.decision_id.slice(0,12)],["Horizon min",r=>fmt(r.horizon_s/60)],["Timing",r=>human(r.timing)],["Status",r=>human(r.status)],["Directional return bps",r=>fmt(r.evidence?.gross_directional_price_return_bps)]]);
+ const mc=m.memory_comparison||{};
+ $("memoryCompareNote").textContent=human(mc.status)+" · "+human(mc.validation)+" · "+fmt(mc.additional_ai_calls)+" extra AI requests · "+(mc.latest?human(mc.latest.reason):"Awaiting eligible new proposal");
+ table("memoryCompareRows",mc.horizons||[],[["Horizon min",r=>fmt(r.horizon_s/60)],["Observed pairs",r=>fmt(r.observed_pairs)],["Disagreements",r=>fmt(r.disagreements)],["Baseline net bps",r=>fmt(r.mean_baseline_net_bps)],["Proxy net bps",r=>fmt(r.mean_alternative_net_bps)],["Mean difference bps",r=>fmt(r.mean_difference_bps)]]);
  const lm=m.learning_memory||{};
  $("memoryNote").textContent=human(lm.status)+" · "+fmt(lm.verified_observations?.length)+" observations · "+fmt(lm.process_observations?.length)+" process categories · "+fmt(lm.statistically_supported_lessons?.length)+" validated trading lessons";
  table("memoryFacts",lm.verified_observations||[],[["Observation",r=>human(r.kind)],["Count",r=>fmt(r.count??1)],["Net before funding",r=>fmt(r.net_before_funding)],["Evidence",r=>human(r.evidence_grade)]]);
