@@ -82,11 +82,7 @@ class MarketService:
         if self.broker is not None and self.executor is None:
             raise RuntimeError("Open execution journals first")
         reconciliation_error = None
-        if self.executor is not None:
-            try:
-                self.executor.reconcile()
-            except Exception as exc:
-                reconciliation_error = type(exc).__name__
+        # Lifecycle.refresh now performs the single scheduled reconciliation pass.
         lifecycle = {}
         if self.lifecycle is not None:
             try:
@@ -184,7 +180,7 @@ class MarketService:
                  "reconciliation_error": reconciliation_error,
                  "lifecycle": {"new_fills": lifecycle.get("new_fills"),
                                "bracket_evidence": lifecycle.get("bracket_evidence"),
-                               "errors": lifecycle.get("errors", {})}}
+                               "errors": lifecycle.get("errors", {}), "order_poll_schedule":lifecycle.get("order_poll_schedule")}}
         self.publish(event)
         return event
 

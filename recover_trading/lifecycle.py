@@ -4,6 +4,7 @@ import time
 from decimal import Decimal, InvalidOperation
 from .execution import product_for
 from .broker import error_detail
+from .order_poll import Schedule
 
 POSITION_FIELDS = ("product_id", "product_symbol", "size", "entry_price", "margin",
                    "liquidation_price", "mark_price", "margin_mode", "unrealized_pnl",
@@ -109,6 +110,8 @@ class Lifecycle:
                 client_id TEXT PRIMARY KEY, symbol TEXT NOT NULL, observed INTEGER NOT NULL,
                 detail TEXT NOT NULL)""")
 
+        self.schedule=Schedule(self.db)
+
     def refresh(self, symbol):
         pid = product_for(self.broker, symbol)["id"]
         now = int(time.time())
@@ -158,32 +161,36 @@ class Lifecycle:
             if "positions" in result:
                 result["bracket_evidence"] = bracket_evidence(result["positions"], orders, complete)
         result.setdefault("bracket_evidence", "unverified")
-        # Track unresolved and acknowledged entries until exchange reports a terminal state.
-        pending = self.db.execute("""SELECT o.client_id FROM orders o
-             WHERE o.symbol=? AND o.status IN ('submitting','unknown','acknowledged')
-             ORDER BY o.rowid DESC""", (symbol,)).fetchall()
-        checked = 0
-        lookup_diagnostics = {}
-        for (client_id,) in pending:
-            old = self.db.execute("SELECT detail FROM observed_orders WHERE client_id=?",
-                                  (client_id,)).fetchone()
-            if old and json.loads(old[0])["status"] in ("filled","cancelled","cancelled_partial"):
-                continue
-            if checked >= 25:
-                errors["order_poll"] = "BatchLimit"
-                break
-            checked += 1
+        # One shared lookup path for reconciliation and lifecycle observation.
+        self.schedule.seed(symbol)
+        pending=[]
+        for client_id,status,raw in self.db.execute("SELECT client_id,status,intent FROM orders WHERE symbol=? AND status IN ('submitting','unknown','acknowledged')",(symbol,)):
+            old=self.db.execute("SELECT detail FROM observed_orders WHERE client_id=?",(client_id,)).fetchone()
+            if status=="acknowledged" and old and json.loads(old[0])["status"] in ("filled","cancelled","cancelled_partial"):continue
+            pending.append((client_id,status,json.loads(raw)))
+        selected,poll=self.schedule.select(pending,int(time.time()))
+        checked=0;lookup_diagnostics={}
+        if poll["due_remaining"]:errors["order_poll"]="BatchLimit"
+        for client_id,status,intent in selected:
+            checked+=1
             try:
-                row = self.broker.order(client_id)
-                if not same_product(row, pid) or row.get("client_order_id") != client_id:
-                    raise ValueError("Order identity mismatch")
-                detail = order_state(row)
+                row=self.broker.order(client_id)
+                if not same_product(row,pid) or row.get("client_order_id")!=client_id or row.get("id") is None:raise ValueError("Order identity mismatch")
+                if status!="acknowledged":
+                    if str(intent.get("product_id"))!=str(pid) or row.get("side")!=intent.get("side") or decimal(row.get("size"))!=decimal(intent.get("size")):raise ValueError("Reconciliation intent mismatch")
+                detail=order_state(row)
                 with self.db:
-                    self.db.execute("INSERT OR REPLACE INTO observed_orders VALUES (?,?,?,?)",
-                                    (client_id, symbol, now, json.dumps(detail, allow_nan=False)))
+                    if status!="acknowledged":
+                        receipt=select(row,ORDER_FIELDS+("bracket_stop_loss_price","bracket_take_profit_price","bracket_stop_trigger_method"))
+                        self.db.execute("UPDATE orders SET status='acknowledged',detail=? WHERE client_id=? AND status IN ('unknown','submitting')",(json.dumps(receipt,allow_nan=False),client_id))
+                    self.db.execute("INSERT OR REPLACE INTO observed_orders VALUES (?,?,?,?)",(client_id,symbol,int(time.time()),json.dumps(detail,allow_nan=False)))
+                self.schedule.record(client_id,int(time.time()),{})
             except Exception as exc:
-                errors["order_poll"] = type(exc).__name__
-                lookup_diagnostics[client_id] = error_detail(exc)
+                lookup_diagnostics[client_id]=error_detail(exc)
+                self.schedule.record(client_id,int(time.time()),lookup_diagnostics[client_id])
+                if lookup_diagnostics[client_id].get("exchange_code")!="order_not_found":errors["order_poll"]=type(exc).__name__
+        poll["checked"]=checked
+        result["order_poll_schedule"]=poll
         result.update({"symbol": symbol, "observed": now, "errors": errors,
                        "new_fills": new_fills, "orders_checked": checked,
                        "order_lookup_diagnostics": lookup_diagnostics})
