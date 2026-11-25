@@ -117,8 +117,8 @@ function render(){
  const ox=m.open_excursion||{};
  $("openExcursion").textContent="Open position: "+human(ox.status)+(ox.mfe_bps==null?"":" · MFE "+fmt(ox.mfe_bps)+" bps · MAE "+fmt(ox.mae_bps)+" bps · Mark return "+fmt(ox.current_mark_return_bps)+" bps · Interior coverage "+(ox.coverage==null?"—":fmt(ox.coverage*100)+"%"));
  const ex=m.trade_excursions||{};
- $("excursionNote").textContent="Observed lower bounds from completed interior candles; boundary candles excluded. "+human(ex.status);
- table("excursionRows",(ex.episodes||[]).slice().reverse(),[["Closed",r=>r.closed],["Direction",r=>r.direction],["MFE bps",r=>fmt(r.mfe_bps)],["MAE bps",r=>fmt(r.mae_bps)],["Coverage",r=>r.coverage==null?"—":fmt(r.coverage*100)+"%"],["Evidence",r=>human(r.status)]]);
+ $("excursionNote").textContent="Observed lower bounds from completed interior candles; boundary candles excluded. Peak gap is descriptive, not missed executable profit. Capture is an upper bound. "+human(ex.status);
+ table("excursionRows",(ex.episodes||[]).slice().reverse(),[["Closed",r=>r.closed],["Direction",r=>r.direction],["MFE bps",r=>fmt(r.mfe_bps)],["MAE bps",r=>fmt(r.mae_bps)],["Weighted exit bps",r=>fmt(r.gross_weighted_exit_return_bps)],["Observed peak gap bps",r=>fmt(r.observed_favorable_gap_bps)],["Capture upper bound",r=>r.observed_capture_upper_bound_pct==null?"—":fmt(r.observed_capture_upper_bound_pct)+"%"],["Coverage",r=>r.coverage==null?"—":fmt(r.coverage*100)+"%"],["Evidence",r=>human(r.status)]]);
  const mr=m.management_report||{};
  $("managementRuntime").textContent="Management: "+(mr.enabled===true?"Enabled":mr.enabled===false?"Disabled":"Unverified")+" · "+human(mr.runtime_status)+" · Latest: "+human(mr.latest?.status)+" "+human(mr.latest?.action);
  bars("managementEvaluations",Object.entries(mr.evaluations||{}).map(([status,count])=>({status,count})));

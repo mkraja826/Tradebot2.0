@@ -1,0 +1,2 @@
+# Exit efficiency
+Quantity-weighted exit prices for supported single-opening-fill episodes, gross weighted return, difference from observed favorable excursion and positive capture upper bound where interior candle coverage is complete. MFE remains a lower bound, so the ratio is an upper bound and not proof of attainable profit. No post-exit lookahead or causal premature-exit diagnosis. No trading behavior, AI billing or order mutation changes.

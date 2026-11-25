@@ -23,3 +23,21 @@ class ExcursionTests(unittest.TestCase):
         ep["fills"]=3
         f.insert(1,{"created_at":"2026-11-25T00:01:30Z","side":"buy","size":1,"price":100,"new_position":{"size":3}})
         self.assertEqual(measure(ep,f,b,60)["status"],"multi_entry_or_reversal_not_supported")
+
+    def test_weighted_exit_and_observed_gap(self):
+        ep,f,b=self.fixture(1)
+        ep["fills"]=3
+        f.insert(1,{"created_at":"2026-11-25T00:01:30Z","side":"sell","size":1,"price":104,"new_position":{"size":1}})
+        f[-1]["size"]=1
+        r=measure(ep,f,b,60)
+        self.assertEqual(r["weighted_exit_price"],"102.5")
+        self.assertEqual(r["gross_weighted_exit_return_bps"],250)
+        self.assertEqual(r["observed_favorable_gap_bps"],350)
+        self.assertAlmostEqual(r["observed_capture_upper_bound_pct"],100*250/600)
+        self.assertIsNone(measure(ep,f,{},60)["observed_capture_upper_bound_pct"])
+    def test_loss_does_not_claim_capture(self):
+        ep,f,b=self.fixture(-1)
+        r=measure(ep,f,b,60)
+        self.assertEqual(r["gross_weighted_exit_return_bps"],-100)
+        self.assertEqual(r["observed_favorable_gap_bps"],400)
+        self.assertIsNone(r["observed_capture_upper_bound_pct"])

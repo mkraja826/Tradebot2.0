@@ -15,15 +15,16 @@ def measure(episode,fills,bars,step):
     rows.sort(key=lambda x:x[0])
     if len(rows)!=episode.get("fills") or len(rows)<2 or rows[0][0]!=start or rows[-1][0]!=end or len({t for t,f in rows})!=len(rows):return out
     sign=1 if episode.get("direction")=="LONG" else -1 if episode.get("direction")=="SHORT" else 0
-    entry=dec(rows[0][1].get("price"));prev=0;prices=[]
+    entry=dec(rows[0][1].get("price"));prev=0;prices=[];exit_qty=0;exit_value=0
     for i,(t,f) in enumerate(rows):
         size=dec(f.get("size"));price=dec(f.get("price"));after=dec((f.get("new_position") or {}).get("size"))
         side=1 if f.get("side")=="buy" else -1 if f.get("side")=="sell" else 0
         if not sign or not side or size is None or size<=0 or price is None or price<=0 or after is None or after!=prev+side*size:return out
         if i==0 and side!=sign:return out
         if i>0 and (side==sign or abs(after)>=abs(prev) or after*sign<0):out["status"]="multi_entry_or_reversal_not_supported";return out
+        if i>0:exit_qty+=size;exit_value+=size*price
         prev=after;prices.append(price)
-    if prev!=0:return out
+    if prev!=0 or not exit_qty:return out
     a,b=start.timestamp(),end.timestamp()
     first=math.ceil(a/step)*step;last=math.floor(b/step)*step
     expected=max(0,(last-first)//step);available=0;extremes=list(prices)
@@ -35,7 +36,18 @@ def measure(episode,fills,bars,step):
         available+=1;extremes.extend([h,l])
     favorable=max(0,sign*(max(extremes) - entry) if sign>0 else entry-min(extremes))
     adverse=max(0,entry-min(extremes) if sign>0 else max(extremes)-entry)
-    out.update(status="complete_interior_lower_bound" if expected and available==expected else "partial_coverage_lower_bound" if available else "fills_only_lower_bound",
+    weighted=exit_value/exit_qty
+    realized=sign*(weighted-entry)/entry*10000
+    mfe=favorable/entry*10000
+    # MFE is a lower bound, so positive capture against it is an upper bound.
+    # Only show the ratio when all interior candles exist and the exit is profitable.
+    complete=expected>0 and available==expected
+    out.update(weighted_exit_price=str(weighted),gross_weighted_exit_return_bps=float(realized),
+        observed_favorable_gap_bps=float(max(0,mfe-realized)),
+        observed_capture_upper_bound_pct=float(realized/mfe*100) if complete and mfe>0 and realized>0 else None,
+        realized_net_before_funding=episode.get("net_before_funding"),
+        exit_efficiency_basis="observed_price_gap_not_executable_profit",
+        status="complete_interior_lower_bound" if expected and available==expected else "partial_coverage_lower_bound" if available else "fills_only_lower_bound",
         frame_seconds=step,expected_interior_bars=expected,observed_interior_bars=available,
         coverage=available/expected if expected else None,entry_price=str(entry),
         mfe_bps=float(favorable/entry*10000),mae_bps=float(adverse/entry*10000),
@@ -61,6 +73,7 @@ def report(root,symbol,performance):
             limitations=["Trade-price OHLC, not mark-price or liquidation path. Excludes partial boundary candles; extremes are observed lower bounds, not exact excursions.",
             "Only reconciled closed episodes with one opening fill and subsequent reductions; no multi-entry, reversal or open-position inference.",
             "Demo feed anomalies may affect extrema. No interpolation, public-reference substitution, fee or leverage adjustment.",
-            "Exit excursion refers to final fill, not weighted realized return for partial exits."])
+            "Final-fill excursion and quantity-weighted gross exit return are distinct. Capture is an upper bound relative to observed MFE, not a proven attainable return.",
+            "Observed favorable gap is descriptive; no causal classification of premature exits, missed profits, or executable peak prices."])
     except (sqlite3.Error,ValueError,KeyError,TypeError,AttributeError,ArithmeticError):pass
     return out
