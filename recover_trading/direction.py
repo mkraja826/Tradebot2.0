@@ -1,5 +1,6 @@
 """Deterministic demo direction consensus over the recovered strategy registry."""
 from collections import defaultdict
+from .regime import market_regime, weighted_votes, FAMILIES
 from tradebot.bitcoin_strategies_v3 import RULES as BTC_RULES, DEFERRED as BTC_DEFERRED
 from tradebot.gold_strategies_v3 import RULES as GOLD_RULES, DEFERRED as GOLD_DEFERRED
 
@@ -23,11 +24,16 @@ def direction_for(report):
         side = next(iter(sides)) if len(sides)==1 else "CONFLICT"
         groups[side].append({"id":ident,"name":registered[ident].name,"frames":sorted(frames[ident])})
     longs, shorts = len(groups["LONG"]), len(groups["SHORT"])
-    side = "LONG" if longs>shorts else "SHORT" if shorts>longs else "NEUTRAL"
-    return {"version":"equal-rule-v1","direction":side,"long_votes":longs,"short_votes":shorts,
+    regime=market_regime(report.get("market_context",report.get("market",{})))
+    totals,families=weighted_votes(groups,regime)
+    side = "LONG" if totals["LONG"]>totals["SHORT"] else "SHORT" if totals["SHORT"]>totals["LONG"] else "NEUTRAL"
+    raw=totals["LONG"]+totals["SHORT"]
+    return {"version":"regime-weighted-v2","direction":side,"long_votes":longs,"short_votes":shorts,
+            "regime":regime,"family_scores":families,"long_score":totals["LONG"]/100,"short_score":totals["SHORT"]/100,
+            "long_share":round(totals["LONG"]/raw,4) if raw else None,
             "conflicting_rules":len(groups["CONFLICT"]),"votes":groups,
             "implemented_rules":len(rules),"deferred_rules":len(deferred),
-            "reason":"majority_of_distinct_rules" if side!="NEUTRAL" else
+            "reason":"regime_weighted_family_consensus" if side!="NEUTRAL" else
                      "balanced_or_conflicting" if votes else "no_active_signal"}
 
 def compact_context(context):

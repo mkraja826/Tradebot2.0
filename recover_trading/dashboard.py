@@ -66,7 +66,14 @@ def report(root, symbol):
             points.append({"time":c["stamp"],"close":p.get("close")})
     counts = query(orders,"SELECT status,count(*) AS count FROM orders WHERE symbol=? GROUP BY status",(symbol,))
     dc = query(decisions,"SELECT status,count(*) AS count FROM decisions WHERE symbol=? GROUP BY status",(symbol,))
-    return {"symbol":symbol,"heartbeat":heartbeat,"snapshot":latest,"wallet_history":history,
+    research=query(root/"signal_research.sqlite", """SELECT rule_id,family,regime,horizon_s,
+          count(*) AS samples, sum(status=\'observed\') AS observed, sum(status=\'pending\') AS pending,
+          sum(status=\'missed\') AS missed,
+          sum(CASE WHEN return_bps>0 THEN 1 ELSE 0 END) AS positive,
+          round(avg(return_bps),3) AS avg_mark_return_bps
+          FROM observations WHERE symbol=? GROUP BY rule_id,family,regime,horizon_s
+          ORDER BY rule_id,regime,horizon_s""",(symbol,))
+    return {"symbol":symbol,"signal_research":research,"heartbeat":heartbeat,"snapshot":latest,"wallet_history":history,
             "decisions":decision_rows,"orders":entries,"fills":[decode(f["detail"]) for f in fills] if fills is not None else None,
             "prices":points,"order_counts":counts,"decision_counts":dc,
             "availability":{"decisions":proposals is not None,"orders":entries is not None,

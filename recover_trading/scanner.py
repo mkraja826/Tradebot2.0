@@ -95,9 +95,9 @@ def scan_market(store, client, symbol, *, clock=time.time,
         "evaluation_statuses": dict(Counter(r["status"] for r in rows)),
         "missing_features": dict(Counter(k for r in rows for k in r.get("missing", []))),
     }
-    report["direction_engine"] = direction_for(report)
+    report["direction_engine"] = direction_for({**report,"market_context":data["markets"][symbol]})
     report["trigger_ai"] = report["direction_engine"]["direction"] != "NEUTRAL"
-    report["signal_rule"] = "equal-rule-v1"
+    report["signal_rule"] = "regime-weighted-v2"
     report["feed_health"] = health
     report["candle_as_of"] = as_of
     if include_context:

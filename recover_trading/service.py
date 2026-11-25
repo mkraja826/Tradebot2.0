@@ -13,6 +13,7 @@ from .engine import Journal
 from .execution import DemoExecutor, evaluate_and_execute
 from .scanner import scan_once
 from .direction import direction_for
+from .research import SignalResearch
 from .lifecycle import Lifecycle
 from tradebot.market_data_v3 import MARKETS
 
@@ -43,6 +44,7 @@ class MarketService:
         self.decisions = self.orders = self.executor = self.lifecycle = None
 
     def open(self):
+        self.research = SignalResearch(self.directory / "signal_research.sqlite")
         if self.broker is not None:
             self.decisions = DecisionJournal(self.directory / "decisions.sqlite")
             self.orders = Journal(self.directory / "orders.sqlite")
@@ -77,7 +79,15 @@ class MarketService:
             except Exception as exc:
                 lifecycle = {"errors": {"refresh": type(exc).__name__}}
         report = self.scan(self.directory / "market.sqlite", symbols=(self.symbol,),
-                           include_context=self.executor is not None)["markets"][self.symbol]
+                           include_context=True)["markets"][self.symbol]
+        direction = None
+        research = None
+        if report.get("status") != "scan_error":
+            direction = direction_for(report)
+            try:
+                research = self.research.record(report,direction)
+            except Exception as exc:
+                research = {"status":"research_error","error":type(exc).__name__}
         if report.get("status") == "scan_error":
             result = {"status": "scan_error", "reason": report.get("reason")}
         elif self.executor is None:
@@ -97,7 +107,8 @@ class MarketService:
                  "client_id": execution.get("client_id"),
                  "signal_count": len(report.get("signals", [])),
                  "coverage": report.get("coverage", {}),
-                 "direction_engine": direction_for(report) if report.get("status")!="scan_error" else None,
+                 "direction_engine": direction,
+                 "research": research,
                  "error": summary.get("error", summary.get("reason")),
                  "reconciliation_error": reconciliation_error,
                  "lifecycle": {"new_fills": lifecycle.get("new_fills"),
