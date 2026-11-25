@@ -48,7 +48,7 @@ def summarize(rows):
             "mean_net_bps":sum(r["net_bps"] for r in rows)/n if n else None}
 
 def replay(database,symbol,start,end,*,stride=900,cost_bps=15.0,split=None,
-           make_snapshot=snapshot):
+           make_snapshot=snapshot, checkpoint=None, max_snapshots=None):
     if symbol not in MARKETS or any(type(x) is not int or x%STEP for x in (start,end,stride)) or not 0<start<end or stride<STEP:
         raise ValueError("invalid replay window")
     if not math.isfinite(cost_bps) or cost_bps<0:
@@ -57,9 +57,24 @@ def replay(database,symbol,start,end,*,stride=900,cost_bps=15.0,split=None,
     if type(split) is not int or split%STEP or not start<split<end:
         raise ValueError("invalid split")
     bars=load_bars(database,symbol,start,end)
-    seen=set(); busy={}; coverage=Counter(); regimes=Counter(); counts=Counter()
-    results=defaultdict(list); events=[]
-    for at in range(start,end,stride):
+    config={"symbol":symbol,"start":start,"end":end,"stride":stride,"cost_bps":cost_bps,"split":split}
+    if checkpoint is not None and checkpoint.get("config")!=config:
+        raise ValueError("checkpoint configuration mismatch")
+    state=checkpoint or {}
+    seen={tuple(x) for x in state.get("seen",[])}
+    busy={(x[0],x[1]):x[2] for x in state.get("busy",[])}
+    coverage=Counter(state.get("coverage",{})); regimes=Counter(state.get("regimes",{})); counts=Counter(state.get("counts",{}))
+    results=defaultdict(list); events=list(state.get("events",[]))
+    for r in events:
+        results[(r["rule_id"],r["horizon_s"],r["partition"],"all")].append(r)
+        results[(r["rule_id"],r["horizon_s"],r["partition"],r["regime"])].append(r)
+    cursor=state.get("next_at",start)
+    if type(cursor) is not int or not start<=cursor<=end or (cursor!=end and (cursor-start)%stride):
+        raise ValueError("invalid checkpoint cursor")
+    if max_snapshots is not None and (type(max_snapshots) is not int or max_snapshots<=0):
+        raise ValueError("invalid batch length")
+    stop=end if max_snapshots is None else min(end,cursor+stride*max_snapshots)
+    for at in range(cursor,stop,stride):
         data=make_snapshot(database,at,symbols=(symbol,),candle_as_of=at)
         report=SCANNERS[symbol](data)
         report["market_context"]=data["markets"][symbol]
@@ -110,9 +125,11 @@ def replay(database,symbol,start,end,*,stride=900,cost_bps=15.0,split=None,
     rules,deferred=REGISTRY[symbol]
     return {"version":"historical-replay-v1","symbol":symbol,"start":start,"end":end,"split":split,
             "stride_s":stride,"cost_bps_round_trip":cost_bps,"horizons_s":HORIZONS,
-            "entry_delay_s":STEP,"counts":dict(counts),"regimes":dict(regimes),
+            "entry_delay_s":STEP,"complete":stop==end,"counts":dict(counts),"regimes":dict(regimes),
             "coverage":[{"id":r.id,"family":FAMILIES[r.id],"evaluable_snapshots":coverage[r.id]} for r in rules],
             "deferred":sorted(deferred),"results":rows,"events":events,
+            "checkpoint":{"config":config,"next_at":stop,"seen":sorted(seen),"busy":[[k[0],k[1],v] for k,v in sorted(busy.items())],
+                          "coverage":dict(coverage),"regimes":dict(regimes),"counts":dict(counts),"events":events},
             "limitations":["fixed-horizon unleveraged price returns, not AI trade P&L",
                 "cost assumption is illustrative, funding and liquidation excluded",
                 "no macro reconstruction; missing feeds remain unavailable",

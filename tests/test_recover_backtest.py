@@ -40,3 +40,22 @@ class ReplayTests(unittest.TestCase):
                 self.assertLessEqual(event["exit_at"]+300,split if event["partition"]=="development" else end)
             self.assertGreater(result["counts"]["overlap_excluded"],0)
             self.assertGreater(result["counts"]["boundary_excluded"],0)
+
+    def test_checkpoint_matches_single_run(self):
+        start=1800000000; end=start+14400
+        with tempfile.TemporaryDirectory() as tmp:
+            p=Path(tmp)/"historical.sqlite"; st=MarketStore(p)
+            bars=[{"time":t,"open":100,"high":100,"low":100,"close":100,"volume":1} for t in range(start,end+300,300)]
+            st.candles("BTCUSD","5m",bars,as_of=end+300)
+            def snap(database,at,*,symbols,candle_as_of):
+                return {"as_of":at,"markets":{"BTCUSD":{"frames":{},"context":{},"quotes":{}}}}
+            def scanner(data):
+                at=data["as_of"]
+                return {"symbol":"BTCUSD","as_of":at,"signals":[{"id":"B01","frame":"5m","direction":"LONG","closed_at":at//900*900}],"results":[{"id":"B01","status":"triggered"}]}
+            with patch.dict("recover_trading.backtest.SCANNERS",{"BTCUSD":scanner}):
+                opts=dict(stride=300,make_snapshot=snap)
+                full=replay(p,"BTCUSD",start,end,**opts)
+                partial=replay(p,"BTCUSD",start,end,max_snapshots=13,**opts)
+                self.assertFalse(partial["complete"])
+                final=replay(p,"BTCUSD",start,end,checkpoint=partial["checkpoint"],**opts)
+                self.assertEqual(full,final)
