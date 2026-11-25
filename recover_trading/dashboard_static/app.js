@@ -85,13 +85,13 @@ function route(page){if(location.hash==="#"+page)navigate(page,true);else locati
 for(const b of document.querySelectorAll("[data-page],[data-route]"))b.addEventListener("click",()=>route(b.dataset.page||b.dataset.route));
 $("morePages").addEventListener("click",()=>{const open=$("workspaceNav").classList.toggle("expanded");$("morePages").setAttribute("aria-expanded",String(open))});
 document.addEventListener("keydown",e=>{if(e.key==="Escape"&&$("workspaceNav").classList.contains("expanded")){$("workspaceNav").classList.remove("expanded");$("morePages").setAttribute("aria-expanded","false");$("morePages").focus()}});
-window.addEventListener("hashchange",()=>navigate(location.hash.slice(1),true));
+window.addEventListener("hashchange",()=>{if(location.hash!=="#workspace")navigate(location.hash.slice(1),true)});
 navigate(location.hash.slice(1));
 function chooseMarket(symbol){if(!["BTCUSD","XAUTUSD"].includes(symbol))return;chosen=symbol;for(const x of document.querySelectorAll("[data-symbol]"))x.setAttribute("aria-pressed",String(x.dataset.symbol===symbol));render()}
 function ageLabel(h){const age=Date.now()/1000-Number(h?.timestamp);return finite(h?.timestamp)&&age>=-5&&age<=180&&h.status!=="cycle_error"?"Recent heartbeat":finite(h?.timestamp)?"Check worker":"Unverified"}
 function overviewView(){
  const ms=data.markets||[], stats=ms.map(m=>m.performance?.recover_attributed||{}), currency=ms.length===2&&ms.every(m=>m.performance?.currency==="USD")?"USD":null;
- const complete=currency&&stats.every(s=>finite(s.closed_episodes)&&Number(s.closed_episodes)>=0&&(Number(s.closed_episodes)===0||finite(s.net_before_funding)));
+ const complete=currency&&ms.every(m=>m.performance?.status==="reconciled_subset")&&stats.every(s=>finite(s.closed_episodes)&&Number(s.closed_episodes)>=0&&(Number(s.closed_episodes)===0||finite(s.net_before_funding)));
  const total=complete?stats.reduce((a,s)=>a+(Number(s.closed_episodes)===0?0:Number(s.net_before_funding)),0):null;
  $("overviewNet").textContent=money(total,"USD");$("overviewNet").className=finite(total)?Number(total)>=0?"gain":"loss":"";
  $("overviewClosed").textContent=complete?String(stats.reduce((a,s)=>a+Number(s.closed_episodes),0)):"—";
