@@ -164,6 +164,9 @@ function render(){
  const sa=m.submission_audit||{};
  $("submissionNote").textContent="Status: "+human(sa.status)+" · Misaligned brackets: "+fmt(sa.misaligned_brackets)+" · Unknown alignment: "+fmt(sa.unknown_tick_alignment);
  table("submissionRows",sa.recent?.slice().reverse()??null,[["Submission",r=>human(r.status)],["Position at decision",r=>human(r.position_at_decision)],["Side",r=>r.side],["Tick alignment",r=>r.tick_alignment===null?"Unknown":r.tick_alignment?"Aligned":"Misaligned"],["HTTP status",r=>r.http_status],["Exchange code",r=>r.exchange_code]]);
+ const hs=m.historical_submission_evidence||{};
+ $("historicalSubmissionNote").textContent=human(hs.status)+" · "+fmt(hs.unknown_count)+" unresolved · "+fmt(hs.snapshot_window_count)+" archived snapshots examined";
+ table("historicalSubmissionRows",hs.rows||[],[["Client ID",r=>r.client_id.slice(0,12)],["Evidence",r=>human(r.classification)],["Original HTTP",r=>fmt(r.original_http_status)],["Not-found observation times",r=>fmt(r.distinct_not_found_observation_times)],["Latest lookup",r=>human(r.last_lookup_code)]]);
  table("orders",m.orders,[["Client ID",r=>r.client_id.slice(0,12)],["Submission",r=>human(r.status)],["Exchange state",r=>human(r.exchange?.status)],["Side",r=>r.intent?.side],["Size",r=>r.intent?.size],["Filled",r=>r.exchange?.filled_size],["Fill price",r=>r.exchange?.order?.average_fill_price],["SL",r=>r.intent?.stop_loss],["TP",r=>r.intent?.take_profit]]);
  table("fills",m.fills?.filter(Boolean)??null,[["Time",r=>r.created_at],["Fill ID",r=>r.id],["Side",r=>r.side],["Size",r=>r.size],["Price",r=>r.price],["Fee",r=>r.commission],["Asset",r=>r.settling_asset_symbol],["Position realized P&L*",r=>r.new_position?.realized_pnl]]);
  $("fills").append(el("p","* Exchange position metadata may be cumulative; not summed as per-trade profit.","empty"));

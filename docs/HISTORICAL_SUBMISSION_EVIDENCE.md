@@ -1,0 +1,2 @@
+# Historical ambiguous submissions
+Read-only classification using last 200 lifecycle snapshots and exact observed order identity. Distinguish original HTTP 400 plus latest order_not_found, lookup not_found without original HTTP evidence, and conflicting/insufficient evidence. Original order state remains unchanged; absence is not proof of no execution. No broker requests or replay. Existing reconciliation polling limits remain unchanged.
