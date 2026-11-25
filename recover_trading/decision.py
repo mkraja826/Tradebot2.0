@@ -25,7 +25,7 @@ product contract details and positions. Include capital_allocation (positive num
 amount in the identified settlement asset) as your intended initial margin budget,
 consistent with your chosen contracts at 20x, excluding fees. Do not assume all
 capital is available or mix currencies. The result is a proposal, not an order.
-Do not claim execution."""
+Do not claim execution. Keep reason under 300 characters. Output only the complete JSON object, with no commentary, reasoning trace or Markdown."""
 
 
 def encode(value):
@@ -81,30 +81,78 @@ def validate(raw, symbol, *, require_capital=False):
     return out
 
 
+class ProviderResponseError(ValueError):
+    def __init__(self, code):
+        super().__init__(code)
+        self.code = code
+
+
+def parse_completion(envelope):
+    """Accept one complete JSON object, optionally in a single Markdown fence."""
+    try:
+        choice = envelope["choices"][0]
+        finish = choice.get("finish_reason")
+        if finish not in (None, "stop"):
+            raise ProviderResponseError("completion_limit" if finish == "length" else "incomplete_completion")
+        content = choice["message"]["content"]
+    except (KeyError, IndexError, TypeError, AttributeError):
+        raise ProviderResponseError("invalid_envelope") from None
+    if not isinstance(content, str) or not content.strip():
+        raise ProviderResponseError("empty_content")
+    content = content.strip()
+    if content.startswith("```") and content.endswith("```"):
+        first, sep, rest = content.partition("\n")
+        if sep and first.strip().lower() in ("```json", "```"):
+            content = rest[:-3].strip()
+    try:
+        result = json.loads(content)
+    except ValueError:
+        raise ProviderResponseError("invalid_json") from None
+    if not isinstance(result, dict):
+        raise ProviderResponseError("not_object")
+    return result
+
+
 class Provider:
     def __init__(self, *, api_key=None, opener=None):
         self.key = os.environ.get("TB_API_KEY","") if api_key is None else api_key
         self.opener = opener or build_opener(NoRedirect())
+        self.diagnostics = {}
 
     def propose(self, model, context):
+        self.diagnostics = {}
         if not self.key or not model:
             raise ValueError("AI runtime configuration missing")
         body={"model":model,"messages":[{"role":"system","content":SYSTEM},
-             {"role":"user","content":encode(context)}],"max_completion_tokens":2048}
+             {"role":"user","content":encode(context)}],"max_completion_tokens":8192}
         req=Request(PROVIDER, data=encode(body).encode(), method="POST",
                     headers={"Authorization":"Bearer "+self.key,"Content-Type":"application/json"})
-        with self.opener.open(req, timeout=45) as response:
-            raw=response.read(1_000_001)
+        started = time.monotonic()
+        self.diagnostics["request_bytes"] = len(req.data)
+        try:
+            with self.opener.open(req, timeout=90) as response:
+                raw=response.read(1_000_001)
+        finally:
+            self.diagnostics["elapsed_ms"] = round((time.monotonic()-started)*1000)
         if len(raw)>1_000_000:
-            raise ValueError("Provider response too large")
-        envelope=json.loads(raw)
-        content=envelope["choices"][0]["message"]["content"]
-        if not isinstance(content,str):
-            raise ValueError("Missing proposal text")
-        content=content.strip()
-        if content.startswith("```json") and content.endswith("```"):
-            content=content[7:-3].strip()
-        return json.loads(content)
+            raise ProviderResponseError("response_too_large")
+        try:
+            envelope=json.loads(raw)
+        except ValueError:
+            raise ProviderResponseError("invalid_provider_json") from None
+        if isinstance(envelope, dict):
+            choices = envelope.get("choices")
+            if isinstance(choices, list) and choices and isinstance(choices[0], dict):
+                choice = choices[0]
+                finish = choice.get("finish_reason")
+                self.diagnostics["finish_reason"] = finish if finish in ("stop","length","content_filter","tool_calls") else "other"
+                message = choice.get("message")
+                content = message.get("content") if isinstance(message, dict) else None
+                self.diagnostics["content_chars"] = len(content) if isinstance(content,str) else 0
+            usage=envelope.get("usage")
+            if isinstance(usage,dict):
+                self.diagnostics["usage"]={k:usage[k] for k in ("prompt_tokens","completion_tokens","total_tokens") if type(usage.get(k)) is int}
+        return parse_completion(envelope)
 
 
 class DecisionJournal:
@@ -163,6 +211,10 @@ def evaluate_report(report, journal, provider, models, *, account=None):
     except Exception as exc:
         # Never replay a potentially billed request after an ambiguous failure.
         outcome={"error":type(exc).__name__}
+        if isinstance(exc,ProviderResponseError):
+            outcome["response_error"]=exc.code
+        if isinstance(provider,Provider):
+            outcome["diagnostics"]=provider.diagnostics
         journal.finish(ident,"failed",outcome)
         return {"symbol":symbol,"status":"failed","decision_id":ident,"ai_calls":1,**outcome}
     journal.finish(ident,"proposed",result)
