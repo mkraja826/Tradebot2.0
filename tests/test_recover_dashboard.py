@@ -28,3 +28,14 @@ class DashboardTests(unittest.TestCase):
     def test_assets_present(self):
         for name in ("index.html","app.js","style.css"):
             self.assertTrue((STATIC/name).is_file())
+
+    def test_forward_report_market_identity(self):
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d)/"BTCUSD";root.mkdir()
+            p=root/"forward_validation.json"
+            p.write_text(json.dumps({"symbol":"XAUTUSD","version":"forward-reference-v1"}))
+            self.assertIsNone(report(d,"BTCUSD")["forward_validation"])
+            p.write_text(json.dumps({"symbol":"BTCUSD","version":"forward-reference-v1","outcomes":[]}))
+            self.assertEqual(report(d,"BTCUSD")["forward_validation"]["outcomes"],[])
+            p.write_text("{")
+            self.assertIsNone(report(d,"BTCUSD")["forward_validation"])

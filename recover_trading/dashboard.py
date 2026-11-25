@@ -29,6 +29,15 @@ def decode(value):
     except (ValueError, TypeError):
         return None
 
+def forward_report(root,symbol):
+    try:
+        result=decode((root/"forward_validation.json").read_text(encoding="utf-8"))
+        if isinstance(result,dict) and result.get("symbol")==symbol and result.get("version")=="forward-reference-v1":
+            return result
+    except OSError:
+        pass
+    return None
+
 def report(root, symbol):
     if symbol not in MARKETS:
         raise ValueError("Unknown market")
@@ -76,7 +85,7 @@ def report(root, symbol):
           FROM observations WHERE symbol=? GROUP BY rule_id,family,regime,horizon_s
           ORDER BY rule_id,regime,horizon_s""",(symbol,))
     performance=read_performance(root,symbol)
-    return {"symbol":symbol,"performance":performance,"signal_research":research,"heartbeat":heartbeat,"snapshot":latest,"wallet_history":history,
+    return {"symbol":symbol,"performance":performance,"forward_validation":forward_report(root,symbol),"signal_research":research,"heartbeat":heartbeat,"snapshot":latest,"wallet_history":history,
             "decisions":decision_rows,"orders":entries,"fills":[decode(f["detail"]) for f in fills] if fills is not None else None,
             "prices":points,"order_counts":counts,"decision_counts":dc,
             "availability":{"decisions":proposals is not None,"orders":entries is not None,

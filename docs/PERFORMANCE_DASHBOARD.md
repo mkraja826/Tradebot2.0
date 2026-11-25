@@ -1,0 +1,2 @@
+# Performance dashboard
+Read-only terminal, default Recover-attributed scope with an explicit all-reconciled account scope. Shows net before funding, commissions, win/loss counts, recent closed-episode cumulative P&L (not equity), wallet balance observations and noncausal rule associations. Forward validation shows frozen protocol status and horizon counts separately from actual fills. Missing values remain unavailable. No trade or account controls.\n
