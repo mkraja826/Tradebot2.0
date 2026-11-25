@@ -94,7 +94,11 @@ def run(root,symbol,now,fetch=candles):
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument("--data-dir",required=True);a=p.parse_args()
+    failures=0
     for s in MARKETS:
         try:print(json.dumps(run(a.data_dir,s,int(time.time())),allow_nan=False),flush=True)
-        except Exception as exc:print(json.dumps({"symbol":s,"error":type(exc).__name__}),flush=True)
-if __name__=="__main__":main()
+        except Exception as exc:
+            failures+=1
+            print(json.dumps({"symbol":s,"error":type(exc).__name__}),flush=True)
+    return int(bool(failures))
+if __name__=="__main__":raise SystemExit(main())

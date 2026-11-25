@@ -82,6 +82,10 @@ function render(){
  const sum=rows=>rows?.reduce((s,r)=>s+r.count,0)??null;
  metrics([["Market price",fmt(m.prices.at(-1)?.close),"Last recorded 5m close"],["Open positions",positions?.length??"—","Exchange observation"],["AI decisions",fmt(sum(m.decision_counts)),"Journal count"],["Order submissions",fmt(sum(m.order_counts)),"Not completed trades"],["Recover win rate",percent(m.performance?.recover_attributed?.win_rate_before_funding),"Reconciled, before funding"],["Recover net P&L",money(m.performance?.recover_attributed?.net_before_funding,m.performance?.currency||"USD"),"Closed episodes, before funding"]]);
  performanceView(m);forwardView(m);
+ const quality=h.market_quality||{}, recent=quality.recent_24h, timing=h.cycle_timing_ms||{};
+ $("qualityNote").textContent="Demo source only · "+(recent?recent.rows+" / "+recent.expected_rows+" five-minute candles · "+recent.opening_gaps_gt_1pct+" opening gaps >1% · "+recent.ranges_gt_2pct+" ranges >2%":"Candle quality unavailable")+" · Cycle duration: "+fmt(timing.total)+" ms. Diagnostic only; no execution effect.";
+ table("qualityFrames",Object.entries(quality.frames||{}).map(([frame,r])=>({frame,...r})),[["Timeframe",r=>r.frame],["Collection",r=>human(r.collection_status)],["Snapshot",r=>human(r.snapshot_status)],["Last close",r=>time(r.closed_at)],["Lag at scan (s)",r=>r.lag_at_scan_s],["Lag at observation (s)",r=>r.lag_at_observation_s],["Reason",r=>human(r.collection_reason)]]);
+ table("qualityQuotes",Object.entries(quality.quotes||{}).map(([feed,r])=>({feed,...r})),[["Feed",r=>r.feed],["Collection",r=>human(r.collection_status)],["Age (s)",r=>r.age_s]]);
  chart("price",m.prices.map(p=>[p.time,p.close]));
  const asset=wallets?.[0]?.asset_symbol;
  chart("walletChart",asset?m.wallet_history.map(p=>[p.observed,p.wallets.find(w=>w.asset_symbol===asset)?.balance]):[]);

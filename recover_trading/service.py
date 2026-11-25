@@ -17,6 +17,7 @@ from .research import SignalResearch
 from .opportunity import opportunity
 from .planner_shadow import packet,load_reference,ShadowJournal
 from .lifecycle import Lifecycle
+from .market_quality import diagnostics
 from tradebot.market_data_v3 import MARKETS
 
 PREFIX = {"BTCUSD": "RECOVER_BTC", "XAUTUSD": "RECOVER_GOLD"}
@@ -67,6 +68,7 @@ class MarketService:
         self.output(event)
 
     def cycle(self):
+        started=time.monotonic()
         if self.broker is not None and self.executor is None:
             raise RuntimeError("Open execution journals first")
         reconciliation_error = None
@@ -81,8 +83,15 @@ class MarketService:
                 lifecycle = self.lifecycle.refresh(self.symbol)
             except Exception as exc:
                 lifecycle = {"errors": {"refresh": type(exc).__name__}}
+        lifecycle_ms=round((time.monotonic()-started)*1000)
+        scan_started=time.monotonic()
         report = self.scan(self.directory / "market.sqlite", symbols=(self.symbol,),
                            include_context=True)["markets"][self.symbol]
+        scan_ms=round((time.monotonic()-scan_started)*1000)
+        quality=None
+        if report.get("status") != "scan_error":
+            try:quality=diagnostics(report,self.directory / "market.sqlite")
+            except Exception as exc:quality={"status":"diagnostics_error","error":type(exc).__name__,"execution_effect":"none"}
         direction = None
         research = None
         evidence = None
@@ -103,6 +112,7 @@ class MarketService:
                 planner=self.planner.record(packet(report,direction,reference))
             except Exception as exc:
                 planner={"status":"shadow_error","error":type(exc).__name__,"execution_effect":"none"}
+        execution_started=time.monotonic()
         if report.get("status") == "scan_error":
             result = {"status": "scan_error", "reason": report.get("reason")}
         elif self.executor is None:
@@ -125,6 +135,8 @@ class MarketService:
                  "direction_engine": direction,
                  "research": research,
                  "opportunity": evidence,
+                 "market_quality": quality,
+                 "cycle_timing_ms":{"lifecycle":lifecycle_ms,"scan":scan_ms,"decision_execution":round((time.monotonic()-execution_started)*1000),"total":round((time.monotonic()-started)*1000)},
                  "planner_shadow": planner,
                  "error": summary.get("error", summary.get("reason")),
                  "reconciliation_error": reconciliation_error,

@@ -1,0 +1,2 @@
+# Market quality diagnostics
+Observation-only scan collection statuses, snapshot cutoff vs actual observation boundary, quote ages, recent demo 5m opening gaps and ranges, cycle phase timing. No feed replacement or admission gates. Missing data remains unavailable. Forward timer now exits nonzero on uncaught per-market errors while attempting both markets; expected unavailable reference feed remains a recorded state. No protocol changes.\n
