@@ -29,7 +29,7 @@ class DeltaDemo:
         self._secret = api_secret
         self._opener = opener or build_opener(NoRedirect())
 
-    def _request(self, method, path, *, params=None, payload=None, auth=False):
+    def _request(self, method, path, *, params=None, payload=None, auth=False, envelope=False):
         query = "?" + urlencode(params) if params else ""
         body = json.dumps(payload, separators=(",", ":")) if payload is not None else ""
         headers = {"Accept": "application/json", "Content-Type": "application/json",
@@ -49,7 +49,7 @@ class DeltaDemo:
             raise BrokerError(f"Demo request failed: {type(exc).__name__}") from None
         if not isinstance(data, dict) or data.get("success") is not True or "result" not in data:
             raise BrokerError("Demo exchange rejected request or returned invalid response")
-        return data["result"]
+        return data if envelope else data["result"]
 
     def ticker(self, symbol):
         return self._request("GET", "/v2/tickers/" + quote(symbol, safe=""))
@@ -63,3 +63,25 @@ class DeltaDemo:
     def order(self, client_order_id):
         return self._request("GET", "/v2/orders/client_order_id/" +
                              quote(client_order_id, safe=""), auth=True)
+
+    def product(self, symbol):
+        return self._request("GET", "/v2/products/" + quote(symbol, safe=""))
+
+    def wallet(self):
+        return self._request("GET", "/v2/wallet/balances", auth=True, envelope=True)
+
+    def positions(self, product_id):
+        return self._request("GET", "/v2/positions", params={"product_id": product_id}, auth=True)
+
+    def set_order_leverage(self, product_id):
+        return self._request("POST", f"/v2/products/{product_id}/orders/leverage",
+                             payload={"leverage": 20}, auth=True)
+
+    def submit_bracket(self, intent, client_order_id):
+        payload = {"product_id": intent.product_id, "side": intent.side,
+                   "size": intent.size, "order_type": "market_order",
+                   "reduce_only": False, "client_order_id": client_order_id,
+                   "bracket_stop_loss_price": str(intent.stop_loss),
+                   "bracket_take_profit_price": str(intent.take_profit),
+                   "bracket_stop_trigger_method": "mark_price"}
+        return self._request("POST", "/v2/orders", payload=payload, auth=True)
