@@ -114,6 +114,13 @@ function render(){
  const pp=m.position_preview||{};
  $("positionPreviewNote").textContent="Position: "+human(pp.position_state)+" · Contracts: "+fmt(pp.size)+" · Bracket: "+human(pp.bracket_state)+" · Unresolved submissions: "+fmt(pp.unresolved_submissions);
  table("positionPreviewLegs",pp.legs??null,[["Leg",r=>human(r.type)],["Trigger",r=>r.trigger],["Remaining",r=>r.remaining],["Quantity matches",r=>r.matching_quantity?"Yes":"No"],["Side matches",r=>r.matching_side?"Yes":"No"],["Reduce only",r=>r.reduce_only?"Yes":"No"]]);
+ const mr=m.management_report||{};
+ $("managementRuntime").textContent="Management: "+(mr.enabled===true?"Enabled":mr.enabled===false?"Disabled":"Unverified")+" · "+human(mr.runtime_status)+" · Latest: "+human(mr.latest?.status)+" "+human(mr.latest?.action);
+ bars("managementEvaluations",Object.entries(mr.evaluations||{}).map(([status,count])=>({status,count})));
+ bars("managementActions",Object.entries(mr.actions||{}).map(([status,count])=>({status,count})));
+ $("managementLatency").textContent="Median provider response: "+(mr.median_response_ms==null?"Unavailable":fmt(mr.median_response_ms/1000)+" s")+" · "+fmt(mr.latency_samples)+" timed responses";
+ table("managementAttemptTable",mr.autonomous_attempts||[],[["Action",r=>human(r.action)],["Status",r=>human(r.status)],["Count",r=>fmt(r.count)]]);
+ table("manualManagementEvidence",mr.manual_exchange_evidence||[],[["Test",r=>human(r.kind)],["Status",r=>human(r.status)],["Order ID",r=>r.order_id],["Trigger / remaining",r=>r.trigger??r.remaining_contracts]]);
  const mc=m.management_compat||{};
  $("managementNote").textContent="Status: "+human(mc.status)+" · Amendment: "+human(mc.amendment)+" · Close: "+human(mc.reduce_only_close)+" · Historical fills: "+fmt(mc.historical_fills);
  bars("managementCounts",Object.entries(mc.fill_transitions||{}).map(([status,count])=>({status,count})));
