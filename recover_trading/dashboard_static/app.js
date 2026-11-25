@@ -70,8 +70,52 @@ function forwardView(m){
  metrics([["Observed horizons",fmt(count("observed")),"Not unique trades"],["Pending horizons",fmt(count("pending")),"Awaiting future prices"],["Neutral / overlap",f?count("neutral")+count("overlap"):"—","Recorded nonentries"],["Missing reference",fmt(count("missing_reference")),"Not counted as losses"],["New demo fills",fmt(f?.actual_demo?.fills),"Observed since protocol start"]],"forwardMetrics");
  table("forwardRows",f?rows:null,[["Horizon",r=>r.horizon_s/60+" min"],["Status",r=>human(r.status)],["Outcomes",r=>r.count],["Avg net return",r=>finite(r.mean_net_bps)?Number(r.mean_net_bps).toFixed(3)+" bps":"—"],["Positive outcomes",r=>r.status==="observed"?r.wins:"—"]]);
 }
+
+// Application navigation and two-account overview. No trading mutations.
+const workspacePages=Array.from(document.querySelectorAll("[data-workspace]"));
+function navigate(page,focus=false){
+ const target=workspacePages.find(n=>n.dataset.workspace===page)||workspacePages[0];
+ for(const n of workspacePages)n.hidden=n!==target;
+ for(const b of document.querySelectorAll("[data-page]")){if(b.dataset.page===target.dataset.workspace)b.setAttribute("aria-current","page");else b.removeAttribute("aria-current")}
+ $("pageTitle").textContent=target.dataset.title;$("pageSubtitle").textContent=target.dataset.description;
+ $("workspaceNav").classList.remove("expanded");$("morePages").setAttribute("aria-expanded","false");
+ if(focus){$("workspace").focus({preventScroll:true});window.scrollTo({top:0,behavior:"instant"})}
+}
+function route(page){if(location.hash==="#"+page)navigate(page,true);else location.hash=page}
+for(const b of document.querySelectorAll("[data-page],[data-route]"))b.addEventListener("click",()=>route(b.dataset.page||b.dataset.route));
+$("morePages").addEventListener("click",()=>{const open=$("workspaceNav").classList.toggle("expanded");$("morePages").setAttribute("aria-expanded",String(open))});
+document.addEventListener("keydown",e=>{if(e.key==="Escape"&&$("workspaceNav").classList.contains("expanded")){$("workspaceNav").classList.remove("expanded");$("morePages").setAttribute("aria-expanded","false");$("morePages").focus()}});
+window.addEventListener("hashchange",()=>navigate(location.hash.slice(1),true));
+navigate(location.hash.slice(1));
+function chooseMarket(symbol){if(!["BTCUSD","XAUTUSD"].includes(symbol))return;chosen=symbol;for(const x of document.querySelectorAll("[data-symbol]"))x.setAttribute("aria-pressed",String(x.dataset.symbol===symbol));render()}
+function ageLabel(h){const age=Date.now()/1000-Number(h?.timestamp);return finite(h?.timestamp)&&age>=-5&&age<=180&&h.status!=="cycle_error"?"Recent heartbeat":finite(h?.timestamp)?"Check worker":"Unverified"}
+function overviewView(){
+ const ms=data.markets||[], stats=ms.map(m=>m.performance?.recover_attributed||{}), currency=ms.length===2&&ms.every(m=>m.performance?.currency==="USD")?"USD":null;
+ const complete=currency&&stats.every(s=>finite(s.closed_episodes)&&Number(s.closed_episodes)>=0&&(Number(s.closed_episodes)===0||finite(s.net_before_funding)));
+ const total=complete?stats.reduce((a,s)=>a+(Number(s.closed_episodes)===0?0:Number(s.net_before_funding)),0):null;
+ $("overviewNet").textContent=money(total,"USD");$("overviewNet").className=finite(total)?Number(total)>=0?"gain":"loss":"";
+ $("overviewClosed").textContent=complete?String(stats.reduce((a,s)=>a+Number(s.closed_episodes),0)):"—";
+ $("overviewWorkers").textContent=ms.length?ms.filter(m=>ageLabel(m.heartbeat)==="Recent heartbeat").length+"/"+ms.length:"—";
+ $("overviewCoverage").textContent=ms.length===2&&ms.every(m=>finite(m.heartbeat?.coverage?.evaluable_rules))?ms.reduce((a,m)=>a+Number(m.heartbeat.coverage.evaluable_rules),0)+"/100":"—";
+ const cards=ms.map(m=>{
+  const p=m.position_preview||{},h=m.heartbeat||{},s=m.performance?.recover_attributed||{},pos=m.snapshot?.positions;
+  const card=el("article",undefined,"account-card"),top=el("div",undefined,"account-top"),coin=el("span",m.symbol==="BTCUSD"?"₿":"Au","coin "+(m.symbol==="BTCUSD"?"btc":"gold")),label=el("div",undefined,"account-name");
+  label.append(el("strong",m.symbol==="BTCUSD"?"Bitcoin":"Gold"),el("small",m.symbol));
+  const status=ageLabel(h);top.append(coin,label,el("span",status,"account-status "+(status==="Recent heartbeat"?"gain":"caution")));
+  const val=el("div",undefined,"account-value");val.append(el("small","Recover net · before funding"),el("strong",money(s.net_before_funding,m.performance?.currency||"USD"),finite(s.net_before_funding)?Number(s.net_before_funding)>=0?"gain":"loss":""));
+  const fields=el("dl",undefined,"account-fields");
+  const side=finite(p.size)&&Number(p.size)!==0?(Number(p.size)>0?"LONG":"SHORT")+" · "+Math.abs(Number(p.size))+" contracts":Array.isArray(pos)&&pos.length===0?"Flat":"Unverified";
+  const raw=Array.isArray(pos)&&pos.length===1?pos[0]:null;
+  for(const [k,v] of [["Position",side],["Mark price",money(p.mark_price,"USD")],["Unrealized P&L*",money(raw?.unrealized_pnl,"USD")],["SL / TP",p.bracket_state==="matching_legs_observed"?"Matching legs observed":human(p.bracket_state)],["Market regime",human(h.direction_engine?.regime?.regime)]]){fields.append(el("dt",k),el("dd",v))}
+  const open=el("button","View market →","quiet-button");open.addEventListener("click",()=>{chooseMarket(m.symbol);route("live")});card.append(top,val,fields,open);return card;
+ });
+ $("overviewAccounts").replaceChildren(...cards);
+ if(cards.length)$("overviewAccounts").append(el("p","* Exchange-reported unrealized P&L; not realized return. Heartbeat status does not guarantee execution readiness.","empty overview-footnote"));
+}
+
 function render(){
  if(!data)return;
+ overviewView();
  const m=data.markets.find(x=>x.symbol===chosen);if(!m)return;
  const snap=m.snapshot||{},h=m.heartbeat||{},wallets=snap.wallets,positions=snap.positions;
  const alerts=[];if(!h.timestamp)alerts.push("Worker heartbeat unavailable");else if(Date.now()/1000-h.timestamp>180)alerts.push("Worker observation older than 3 minutes");
@@ -88,8 +132,8 @@ function render(){
  const dr=m.deferred_research||{};
  $("deferredNote").textContent="Independent data and experimental frameworks · "+fmt(dr.rules?.length)+" deferred candidates";
  table("deferredRows",dr.rules||[],[["Rule",r=>r.id],["Stage",r=>human(r.stage)],["Evidence",r=>human(r.status)],["Source",r=>human(r.source_status)],["Consensus",r=>human(r.consensus_status)],["Execution",r=>r.execution_enabled?"Enabled":"Not enabled"]]);
- const rp=dr.positioning||{}, liq=rp.liquidations||{}, q=rp.latest||{};
- $("deferredFeed").textContent=m.symbol==="BTCUSD"?"Reference positioning: "+human(rp.status)+" · OI BTC "+fmt(q.open_interest_btc_both_sides)+" · indicative funding % "+fmt(q.indicative_funding_percent)+" · liquidation connection "+human(liq.status)+" · recorded batches "+fmt(liq.batches)+" · completeness unverified":"Official release probe: "+fmt(dr.economic?.last_probe_epoch?time(dr.economic.last_probe_epoch):null)+" · G25 calendar "+human(dr.reopening?.calendar_connection)+" · trade feed "+human(dr.reopening?.licensed_trade_feed);
+ const referencePositioning=dr.positioning||{}, liq=referencePositioning.liquidations||{}, q=referencePositioning.latest||{};
+ $("deferredFeed").textContent=m.symbol==="BTCUSD"?"Reference positioning: "+human(referencePositioning.status)+" · OI BTC "+fmt(q.open_interest_btc_both_sides)+" · indicative funding % "+fmt(q.indicative_funding_percent)+" · liquidation connection "+human(liq.status)+" · recorded batches "+fmt(liq.batches)+" · completeness unverified":"Official release probe: "+fmt(dr.economic?.last_probe_epoch?time(dr.economic.last_probe_epoch):null)+" · G25 calendar "+human(dr.reopening?.calendar_connection)+" · trade feed "+human(dr.reopening?.licensed_trade_feed);
  const of=m.overlap_forward||{},ofl=of.latest||{};
  $("overlapForwardNote").textContent=human(of.status)+" · "+human(of.validation)+" · "+(ofl.score?ofl.score.baseline_direction+" vs "+ofl.score.research_direction:"Awaiting eligible packet")+" · "+fmt(of.additional_ai_calls)+" additional AI calls";
  table("overlapForwardRows",of.horizons||[],[["Horizon min",r=>fmt(r.horizon_s/60)],["Pending",r=>fmt(r.counts?.pending||0)],["Overlap excluded",r=>fmt(r.counts?.overlap||0)],["Missing",r=>fmt(r.counts?.missing_candles||0)],["Observed",r=>fmt(r.observed_pairs)],["Disagreements",r=>fmt(r.disagreements)],["Original net bps",r=>fmt(r.mean_baseline_net_bps)],["Adjusted net bps",r=>fmt(r.mean_alternative_net_bps)],["Difference bps",r=>fmt(r.mean_difference_bps)],["Disagreement difference",r=>fmt(r.disagreement_mean_difference_bps)]]);
@@ -159,9 +203,9 @@ function render(){
  $("managementLatency").textContent="Median provider response: "+(mr.median_response_ms==null?"Unavailable":fmt(mr.median_response_ms/1000)+" s")+" · "+fmt(mr.latency_samples)+" timed responses";
  table("managementAttemptTable",mr.autonomous_attempts||[],[["Action",r=>human(r.action)],["Status",r=>human(r.status)],["Count",r=>fmt(r.count)]]);
  table("manualManagementEvidence",mr.manual_exchange_evidence||[],[["Test",r=>human(r.kind)],["Status",r=>human(r.status)],["Order ID",r=>r.order_id],["Trigger / remaining",r=>r.trigger??r.remaining_contracts]]);
- const mc=m.management_compat||{};
- $("managementNote").textContent="Status: "+human(mc.status)+" · Amendment: "+human(mc.amendment)+" · Close: "+human(mc.reduce_only_close)+" · Historical fills: "+fmt(mc.historical_fills);
- bars("managementCounts",Object.entries(mc.fill_transitions||{}).map(([status,count])=>({status,count})));
+ const managementCompat=m.management_compat||{};
+ $("managementNote").textContent="Status: "+human(managementCompat.status)+" · Amendment: "+human(managementCompat.amendment)+" · Close: "+human(managementCompat.reduce_only_close)+" · Historical fills: "+fmt(managementCompat.historical_fills);
+ bars("managementCounts",Object.entries(managementCompat.fill_transitions||{}).map(([status,count])=>({status,count})));
  table("positions",positions??null,[["Contracts",r=>r.size],["Entry",r=>r.entry_price],["Mark",r=>r.mark_price],["Margin",r=>r.margin],["Unrealized P&L",r=>r.unrealized_pnl],["Liquidation",r=>r.liquidation_price]]);
  table("active",snap.active_orders??null,[["Type",r=>human(r.stop_order_type)],["Side",r=>r.side],["Size",r=>r.size],["Trigger",r=>r.stop_price],["State",r=>human(r.state)]]);
  const coverage=h.coverage||{}; $("strategies").replaceChildren(el("p","Latest cycle: "+human(h.status)),el("p","Signals: "+fmt(h.signal_count)+" · Evaluable: "+fmt(coverage.evaluable_rules)+" / "+fmt(coverage.implemented_rules)+" · Deferred: "+fmt(coverage.deferred_rules)));
@@ -218,6 +262,6 @@ function render(){
 }
 $("scopeRecover").addEventListener("click",()=>{scope="recover";render()});
 $("scopeAccount").addEventListener("click",()=>{scope="account";render()});
-for(const b of document.querySelectorAll("nav button"))b.addEventListener("click",()=>{chosen=b.dataset.symbol;for(const x of document.querySelectorAll("nav button"))x.setAttribute("aria-pressed",String(x===b));render()});
+for(const b of document.querySelectorAll("[data-symbol]"))b.addEventListener("click",()=>chooseMarket(b.dataset.symbol));
 async function refresh(){if(busy)return;busy=true;try{const r=await fetch("/api/overview",{cache:"no-store"});if(!r.ok)throw Error();data=await r.json();render();$("refresh").textContent="Updated "+time(data.generated)}catch{$("refresh").textContent="Refresh failed · retained data";$("warning").textContent="Dashboard connection unavailable. Previously displayed data may be stale."}finally{busy=false}}
 refresh();setInterval(refresh,10000);

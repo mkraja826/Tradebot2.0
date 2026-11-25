@@ -1,0 +1,2 @@
+# Premium terminal phase 1
+Dashboard-only release: eight workspace routes, mobile bottom navigation with More, two-account overview, preserved 35 diagnostic panels and original selected market controls. Fix duplicate same-scope reference positioning/regime and management/memory variables. Aggregate closed Recover USD results before funding only when both markets have compatible verified summary fields; never label wallet balance equity. No live candlesticks yet: existing 5m close chart retained. No backend/trading changes, new providers or API calls beyond existing polling.
