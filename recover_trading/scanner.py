@@ -19,7 +19,7 @@ SCANNERS = {"BTCUSD": scan_btc, "XAUTUSD": scan_gold}
 
 
 def scan_market(store, client, symbol, *, clock=time.time,
-                gold_reference=collect_gold_reference, external_context=collect_context):
+                gold_reference=collect_gold_reference, external_context=collect_context, include_context=False):
     if symbol not in MARKETS:
         raise ValueError("Unknown market")
     as_of = int(clock())
@@ -96,17 +96,19 @@ def scan_market(store, client, symbol, *, clock=time.time,
     }
     report["feed_health"] = health
     report["candle_as_of"] = as_of
+    if include_context:
+        report["market_context"] = data["markets"][symbol]
     return report
 
 
 def scan_once(path, *, client=None, symbols=MARKETS, clock=time.time,
-              gold_reference=collect_gold_reference, external_context=collect_context):
+              gold_reference=collect_gold_reference, external_context=collect_context, include_context=False):
     store = MarketStore(path)
     client = public_client() if client is None else client
     reports = {}
     for symbol in symbols:
         try:
-            reports[symbol] = scan_market(store, client, symbol, clock=clock, gold_reference=gold_reference, external_context=external_context)
+            reports[symbol] = scan_market(store, client, symbol, clock=clock, gold_reference=gold_reference, external_context=external_context, include_context=include_context)
         except Exception as exc:
             reports[symbol] = {"symbol": symbol, "status": "scan_error", "reason": type(exc).__name__}
     return {"mode": "read_only", "markets": reports, "orders_submitted": 0, "ai_calls": 0}
