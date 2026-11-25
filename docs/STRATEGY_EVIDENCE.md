@@ -1,0 +1,2 @@
+# Strategy evidence
+Full registry including deferred IDs, actual closed episode co-occurrences and disjoint exact recent entry-rule sets, and prospective 15m/1h/4h mark returns after assumed 15bps cost. Select nonoverlapping windows per rule and horizon across all frames and sides before outcomes, including missed/pending windows and observation lag. No causal attribution, rankings, automatic weights, new AI calls or execution changes.
