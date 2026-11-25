@@ -22,11 +22,27 @@
  }
  const defs={ema9:[["ema9","EMA 9","#83a9ff"]],ema20:[["ema20","EMA 20","#e6b65c"]],ema50:[["ema50","EMA 50","#b79af6"]],ema200:[["ema200","EMA 200","#ef9e70"]],bb:[["bb_upper","BB upper","#779bc9"],["bb_mid","BB mid","#779bc9"],["bb_lower","BB lower","#779bc9"]],vwap:[["vwap","UTC VWAP","#39cdb7"]],sr:[["support","Prior low","#29c99a"],["resistance","Prior high","#f27783"]],rsi:[["rsi","RSI 14","#b79af6"]],macd:[["macd","MACD","#83a9ff"],["macd_signal","Signal","#e6b65c"],["macd_hist","Histogram","#29c99a"]],atr:[["atr","ATR 14","#e6b65c"]]};
  const lower=new Set(["rsi","macd","atr"]);
+ const studyNames={ema9:"EMA 9",ema20:"EMA 20",ema50:"EMA 50",ema200:"EMA 200",bb:"Bollinger Bands",vwap:"UTC VWAP",sr:"Prior support/resistance",rsi:"RSI 14",macd:"MACD 12/26/9",atr:"ATR 14"};
+ const presets={trend:["ema20","ema50","ema200"],momentum:["rsi","macd"],volatility:["bb","atr"]};
+ const colorClass={"#83a9ff":"study-blue","#e6b65c":"study-amber","#b79af6":"study-purple","#ef9e70":"study-orange","#779bc9":"study-steel","#39cdb7":"study-teal","#29c99a":"study-green","#f27783":"study-red"};
+ let studyLookup=new Map();
 
  function readout(t){
-   const row=rowsByTime.get(t)||packet?.candles?.at(-1),s=(packet?.studies||[]).find(x=>x.time===row?.time);
-   id("chartReadout").textContent=row?new Date(row.time*1000).toLocaleString()+" · O "+fmt(row.open)+" · H "+fmt(row.high)+" · L "+fmt(row.low)+" · C "+fmt(row.close)+" · V "+fmt(row.volume,0):"Open · High · Low · Close · Volume";
-   id("studyLegend").replaceChildren(...[...selected].flatMap(k=>defs[k]).map(([key,label])=>{const n=document.createElement("span");n.textContent=label+" "+fmt(s?.[key]);return n}));
+   const row=t===null||t===undefined?packet?.candles?.at(-1):rowsByTime.get(t),s=studyLookup.get(row?.time);
+   id("chartReadout").textContent=row?new Date(row.time*1000).toLocaleString()+" · O "+fmt(row.open)+" · H "+fmt(row.high)+" · L "+fmt(row.low)+" · C "+fmt(row.close)+" · V "+fmt(row.volume,0):t!=null?"No observed candle at crosshair":"Open · High · Low · Close · Volume";
+   const make=(tag,cls,label)=>{const n=document.createElement(tag);n.className=cls;if(label!=null)n.textContent=label;return n};
+   const groups=[...selected].map(k=>{
+     const group=make("div","study-value-group");
+     group.append(make("strong","study-value-title",studyNames[k]),make("small","study-value-location",lower.has(k)?"Pane":"Overlay"));
+     for(const [field,label,color] of defs[k]){
+       const n=make("span","study-value "+(colorClass[color]||""));
+       n.append(make("i","study-swatch"),make("span","study-value-label",label),make("b","study-value-number",fmt(s?.[field])));
+       group.append(n);
+     }
+     if(!defs[k].some(([field])=>Number.isFinite(s?.[field])))group.append(make("small","study-value-unavailable",row?"Insufficient contiguous history":"No observed candle"));
+     return group;
+   });
+   id("studyLegend").replaceChildren(...groups);
  }
  function scaleMode(){return scaleModes.get(symbol)||"full"}
  function visibleBars(){
@@ -135,7 +151,11 @@
        const index=lower.has(k)?pane++:0;
        for(const [field,label,color] of defs[k]){
          const options={color,priceLineVisible:false,lastValueVisible:false,title:label,...(index===0?{autoscaleInfoProvider:base=>scaleMode()==="focus"?null:base()}: {})};
-         const series=chart.addSeries(field==="macd_hist"?L.HistogramSeries:L.LineSeries,field==="macd_hist"?options:{...options,lineWidth:1},index);
+         if(field==="rsi")options.autoscaleInfoProvider=()=>({priceRange:{minValue:0,maxValue:100}});
+         const series=chart.addSeries(field==="macd_hist"?L.HistogramSeries:L.LineSeries,field==="macd_hist"?{...options,base:0}:{...options,lineWidth:2},index);
+         if(field==="rsi")for(const level of [30,70])series.createPriceLine({price:level,color:"#8493a5",lineWidth:1,lineStyle:L.LineStyle.Dashed,axisLabelVisible:true,title:"RSI "+level});
+         if(field==="macd_hist")series.createPriceLine({price:0,color:"#8493a5",lineWidth:1,lineStyle:L.LineStyle.Dotted,axisLabelVisible:false,title:"Zero"});
+         if(index>0)series.priceScale().applyOptions({scaleMargins:{top:.1,bottom:.1},autoScale:true});
          studySeries.push({field,series,upper:index===0});
        }
      }
@@ -143,14 +163,13 @@
      root.classList.add("study-count-"+(pane-1));
      id("studyPanels").textContent="";
    }
-   const lookup=new Map((packet.studies||[]).map(x=>[x.time,x]));
-   for(const {field,series} of studySeries)series.setData(withGaps(packet.candles,packet.step,r=>{const value=lookup.get(r.time)?.[field];return Number.isFinite(value)?{time:r.time,value}:{time:r.time}}));
+   for(const {field,series} of studySeries)series.setData(withGaps(packet.candles,packet.step,r=>{const value=studyLookup.get(r.time)?.[field];return Number.isFinite(value)?{time:r.time,value,...(field==="macd_hist"?{color:value>=0?"#29c99a":"#f27783"}:{})}:{time:r.time}}));
    readout(crossTime);
  }
  function renderPacket(next,reset){
    if(!ensure())return;
    const time=chart.timeScale(),range=time.getVisibleRange(),follow=reset||!displayed.length||time.scrollPosition()>=-2;
-   packet=next;displayed=next.candles;rowsByTime=new Map(displayed.map(r=>[r.time,r]));
+   packet=next;displayed=next.candles;rowsByTime=new Map(displayed.map(r=>[r.time,r]));studyLookup=new Map((next.studies||[]).map(r=>[r.time,r]));
    candles.setData(withGaps(displayed,next.step,r=>({time:r.time,open:r.open,high:r.high,low:r.low,close:r.close})));
    volume.setData(withGaps(displayed,next.step,r=>({time:r.time,value:r.volume,color:r.close>=r.open?"#29c99a66":"#f2778366"})));
    syncStudies(reset);
@@ -159,7 +178,7 @@
    overlayView();readout(null);scheduleScaleNote();
  }
  function clearSelection(){
-   generation++;busy=false;packet=null;displayed=[];rowsByTime.clear();crossTime=null;dispose();id("studyLegend").replaceChildren();id("studyPanels").replaceChildren();id("marketChartTitle").textContent=symbol+" · "+frame;id("marketChartLast").textContent="—";id("marketChartStatus").textContent="Loading chart…";id("chartOverlayNote").textContent="";readout(null);scaleNote();if(visible())load(true);
+   generation++;busy=false;packet=null;displayed=[];rowsByTime.clear();studyLookup.clear();crossTime=null;dispose();id("studyLegend").replaceChildren();id("studyPanels").replaceChildren();id("marketChartTitle").textContent=symbol+" · "+frame;id("marketChartLast").textContent="—";id("marketChartStatus").textContent="Loading chart…";id("chartOverlayNote").textContent="";readout(null);scaleNote();if(visible())load(true);
  }
  async function load(force=false){
    if(!visible()||(!force&&busy))return;
@@ -190,7 +209,10 @@
  id("scaleAuto").addEventListener("click",applyScale);
  scaleNote();
  id("chartLevels").addEventListener("click",()=>{levels=!levels;id("chartLevels").setAttribute("aria-pressed",String(levels));overlayView()});id("chartFills").addEventListener("click",()=>{showFills=!showFills;id("chartFills").setAttribute("aria-pressed",String(showFills));overlayView()});
- for(const b of document.querySelectorAll("[data-study]"))b.addEventListener("click",()=>{const k=b.dataset.study;if(selected.has(k))selected.delete(k);else selected.add(k);b.setAttribute("aria-pressed",String(selected.has(k)));id("indicatorCount").textContent=selected.size+" active";syncStudies()});
+ function updateStudyControls(){for(const b of document.querySelectorAll("[data-study]"))b.setAttribute("aria-pressed",String(selected.has(b.dataset.study)));id("indicatorCount").textContent=selected.size+" active";syncStudies();readout(crossTime)}
+ function selectPreset(keys){selected=new Set(keys);updateStudyControls()}
+ id("studyTrend").addEventListener("click",()=>selectPreset(presets.trend));id("studyMomentum").addEventListener("click",()=>selectPreset(presets.momentum));id("studyVolatility").addEventListener("click",()=>selectPreset(presets.volatility));id("studyClear").addEventListener("click",()=>selectPreset([]));
+ for(const b of document.querySelectorAll("[data-study]"))b.addEventListener("click",()=>{const k=b.dataset.study;if(selected.has(k))selected.delete(k);else selected.add(k);updateStudyControls()});
  function expand(on){id("marketTerminal").classList.toggle("expanded-chart",on);id("marketFullscreen").textContent=on?"Close expanded chart":"Expand chart";id("marketFullscreen").setAttribute("aria-pressed",String(on))}
  id("marketFullscreen").addEventListener("click",()=>expand(!id("marketTerminal").classList.contains("expanded-chart")));
  document.addEventListener("keydown",e=>{if(e.key==="Escape"&&id("marketTerminal").classList.contains("expanded-chart"))expand(false)});
