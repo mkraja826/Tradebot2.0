@@ -12,6 +12,7 @@ from .decision import DecisionJournal, Provider, configured_models
 from .engine import Journal
 from .execution import DemoExecutor, evaluate_and_execute
 from .scanner import scan_once
+from .lifecycle import Lifecycle
 from tradebot.market_data_v3 import MARKETS
 
 PREFIX = {"BTCUSD": "RECOVER_BTC", "XAUTUSD": "RECOVER_GOLD"}
@@ -38,18 +39,19 @@ class MarketService:
         self.scan, self.output = scan, output
         if broker is not None and (provider is None or not model):
             raise ValueError("Execution requires configured AI")
-        self.decisions = self.orders = self.executor = None
+        self.decisions = self.orders = self.executor = self.lifecycle = None
 
     def open(self):
         if self.broker is not None:
             self.decisions = DecisionJournal(self.directory / "decisions.sqlite")
             self.orders = Journal(self.directory / "orders.sqlite")
             self.executor = DemoExecutor(self.broker, self.orders)
+            self.lifecycle = Lifecycle(self.broker, self.orders)
 
     def close(self):
         if self.orders is not None:
             self.orders.close()
-        self.executor = self.orders = self.decisions = None
+        self.executor = self.orders = self.decisions = self.lifecycle = None
 
     def cycle(self):
         if self.broker is not None and self.executor is None:
@@ -60,6 +62,12 @@ class MarketService:
                 self.executor.reconcile()
             except Exception as exc:
                 reconciliation_error = type(exc).__name__
+        lifecycle = {}
+        if self.lifecycle is not None:
+            try:
+                lifecycle = self.lifecycle.refresh(self.symbol)
+            except Exception as exc:
+                lifecycle = {"errors": {"refresh": type(exc).__name__}}
         report = self.scan(self.directory / "market.sqlite", symbols=(self.symbol,),
                            include_context=self.executor is not None)["markets"][self.symbol]
         if report.get("status") == "scan_error":
@@ -82,7 +90,10 @@ class MarketService:
                  "signal_count": len(report.get("signals", [])),
                  "coverage": report.get("coverage", {}),
                  "error": summary.get("error", summary.get("reason")),
-                 "reconciliation_error": reconciliation_error}
+                 "reconciliation_error": reconciliation_error,
+                 "lifecycle": {"new_fills": lifecycle.get("new_fills"),
+                               "bracket_evidence": lifecycle.get("bracket_evidence"),
+                               "errors": lifecycle.get("errors", {})}}
         self.output(event)
         return event
 

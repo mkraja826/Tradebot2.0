@@ -85,3 +85,19 @@ class DeltaDemo:
                    "bracket_take_profit_price": str(intent.take_profit),
                    "bracket_stop_trigger_method": "mark_price"}
         return self._request("POST", "/v2/orders", payload=payload, auth=True)
+
+    def margined_positions(self, product_id):
+        return self._request("GET", "/v2/positions/margined",
+                             params={"product_ids": str(product_id)}, auth=True)
+
+    def active_orders_page(self, product_id, after=None):
+        params = {"product_ids": str(product_id), "page_size": 50}
+        if after:
+            params["after"] = after
+        return self._request("GET", "/v2/orders", params=params, auth=True, envelope=True)
+
+    def fills_page(self, product_id, after=None):
+        params = {"product_ids": str(product_id), "page_size": 50}
+        if after:
+            params["after"] = after
+        return self._request("GET", "/v2/fills", params=params, auth=True, envelope=True)
