@@ -169,8 +169,13 @@ function render(){
  $("learningNote").textContent=human(ol.status)+" · "+fmt(ol.lesson_count)+" recorded closed-trade lessons · observation only";
  table("learningRows",ol.lessons||[],[["Decision",r=>r.decision_id.slice(0,12)],["Outcome",r=>human(r.outcome)],["Net before funding",r=>fmt(r.net_before_funding)],["Entry deviation bps",r=>fmt(r.entry_evidence?.entry_deviation_bps)],["Observed exit gap bps",r=>fmt(r.exit_evidence?.observed_favorable_gap_bps)]]);
  table("learningFollowups",ol.followups||[],[["Decision",r=>r.decision_id.slice(0,12)],["Horizon min",r=>fmt(r.horizon_s/60)],["Timing",r=>human(r.timing)],["Status",r=>human(r.status)],["Directional return bps",r=>fmt(r.evidence?.gross_directional_price_return_bps)]]);
+ const lm=m.learning_memory||{};
+ $("memoryNote").textContent=human(lm.status)+" · "+fmt(lm.verified_observations?.length)+" observations · "+fmt(lm.process_observations?.length)+" process categories · "+fmt(lm.statistically_supported_lessons?.length)+" validated trading lessons";
+ table("memoryFacts",lm.verified_observations||[],[["Observation",r=>human(r.kind)],["Count",r=>fmt(r.count??1)],["Net before funding",r=>fmt(r.net_before_funding)],["Evidence",r=>human(r.evidence_grade)]]);
+ table("memoryIssues",lm.process_observations||[],[["Process finding",r=>human(r.kind)],["Count",r=>fmt(r.count)],["Evidence",r=>human(r.evidence_grade)],["Scope",r=>r.scope]]);
+ table("memoryHypotheses",lm.hypotheses||[],[["Horizon min",r=>fmt(r.horizon_s/60)],["Prospective samples",r=>fmt(r.prospective_nonoverlap_samples)],["Mean gross bps",r=>fmt(r.mean_gross_directional_bps)],["Status",r=>human(r.evidence_grade)]]);
  const dq=m.decision_quality||{};
- $("qualityNote").textContent="Closed Recover episodes: "+fmt(dq.closed_recover_episodes)+" · Filled decision samples: "+fmt(dq.filled_decision_samples)+" · Complete attributed excursions: "+fmt(dq.complete_attributed_excursion_samples)+" · "+human(dq.closed_outcome_evidence);
+ $("decisionQualityNote").textContent="Closed Recover episodes: "+fmt(dq.closed_recover_episodes)+" · Filled decision samples: "+fmt(dq.filled_decision_samples)+" · Complete attributed excursions: "+fmt(dq.complete_attributed_excursion_samples)+" · "+human(dq.closed_outcome_evidence);
  table("qualityRows",dq.findings||[],[["Finding",r=>human(r.finding)],["Count",r=>fmt(r.count)],["Evidence",r=>r.evidence],["Scope",r=>r.scope]]);
  const sa=m.submission_audit||{};
  $("submissionNote").textContent="Status: "+human(sa.status)+" · Misaligned brackets: "+fmt(sa.misaligned_brackets)+" · Unknown alignment: "+fmt(sa.unknown_tick_alignment);
