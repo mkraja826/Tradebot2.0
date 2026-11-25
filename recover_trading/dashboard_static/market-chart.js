@@ -8,6 +8,8 @@
  const fmt=(n,d=2)=>Number.isFinite(n)?n.toLocaleString(undefined,{minimumFractionDigits:d,maximumFractionDigits:d}):"—";
  function visible(){return !root.closest("[data-workspace]").hidden}
  const lineStyle={entry:["ENTRY","#83a9ff"],mark:["MARK","#c4ccd5"],stop:["SL","#f27783"],target:["TP","#29c99a"],break_even:["BE est.","#e6b65c"]};
+ const fillNames={entry:"Entry",exit:"Exit",reversal:"Reversal",reduction:"Reduction",increase:"Increase",fill:"Fill"};
+ let fillFilter="all",selectedFillId=null,selectedFillLine=null,fillListKey="";
  function overlay(){return overlays.get(symbol)||{}}
  function isFresh(o){const age=Date.now()/1000-o.observed;return Number.isFinite(o.observed)&&age>=-5&&age<=180}
  function dock(){
@@ -88,7 +90,7 @@
    }
    scaleNote();
  }
- function dispose(){if(scaleNoteFrame)cancelAnimationFrame(scaleNoteFrame);scaleNoteFrame=0;quoteLine=null;if(chart)chart.remove();chart=null;candles=null;volume=null;markers=null;priceLines=[];studySeries=[];studyKey="";root.replaceChildren();}
+ function dispose(){selectedFillLine=null;fillListKey="";if(scaleNoteFrame)cancelAnimationFrame(scaleNoteFrame);scaleNoteFrame=0;quoteLine=null;if(chart)chart.remove();chart=null;candles=null;volume=null;markers=null;priceLines=[];studySeries=[];studyKey="";root.replaceChildren();}
  function ensure(){
    if(chart)return true;
    if(!L?.createChart||!L.CandlestickSeries){id("marketChartStatus").textContent="Chart library unavailable · deployment asset missing";return false}
@@ -131,15 +133,55 @@
    }catch(e){if(g===quoteGeneration){quoteFailed=true;quoteView()}}
    finally{if(g===quoteGeneration)quoteBusy=false}
  }
+ function knownFills(){
+   return (overlay().fills||[]).filter(f=>typeof f.id==="string"&&Number.isFinite(f.time)&&Number.isFinite(f.price)&&f.price>0&&["buy","sell"].includes(f.side));
+ }
+ function candleTime(f){return packet?Math.floor(f.time/packet.step)*packet.step:null}
+ function matchingFills(){return knownFills().filter(f=>fillFilter==="all"||f.kind===fillFilter||(fillFilter==="adjustment"&&["increase","reduction"].includes(f.kind)))}
+ function fillTimeLabel(f){return new Date(f.time*1000).toLocaleString()}
+ function renderFillSelection(){
+   if(selectedFillLine&&candles)candles.removePriceLine(selectedFillLine);
+   selectedFillLine=null;
+   const f=knownFills().find(x=>x.id===selectedFillId);
+   id("clearFillSelection").disabled=!selectedFillId;
+   id("chartFillDetail").textContent=f?fillNames[f.kind]+" · "+f.side.toUpperCase()+" · "+f.size+" contracts · actual fill "+fmt(f.price)+" USD · "+fillTimeLabel(f)+(rowsByTime.has(candleTime(f))?" · candle located in archive":" · no completed candle in loaded window"):"Select a recorded fill to locate its candle and actual execution price.";
+   if(f&&candles&&rowsByTime.has(candleTime(f)))selectedFillLine=candles.createPriceLine({price:f.price,color:"#e6b65c",lineWidth:2,lineStyle:L.LineStyle.Dotted,axisLabelVisible:true,title:"SELECTED FILL"});
+ }
+ function jumpToFill(f){
+   selectedFillId=f.id;fillListKey="";renderFillSelection();
+   if(chart&&rowsByTime.has(candleTime(f))){
+     const t=candleTime(f),index=withGaps(displayed,packet.step,r=>r).findIndex(r=>r.time===t);
+     if(index>=0){chart.timeScale().setVisibleLogicalRange({from:Math.max(0,index-25),to:index+25});readout(t)}
+   }
+   overlayView();
+ }
+ function fillListView(){
+   const all=knownFills(),fills=matchingFills(),loaded=fills.filter(f=>rowsByTime.has(candleTime(f)));
+   id("chartFillCount").textContent=loaded.length+" / "+all.length+" fills";
+   const key=JSON.stringify([symbol,frame,fillFilter,selectedFillId,fills.map(f=>[f.id,f.time,f.price,f.size,f.kind,f.side,rowsByTime.has(candleTime(f))])]);
+   if(key!==fillListKey){
+     fillListKey=key;const wrap=id("chartFillList");wrap.replaceChildren();
+     if(!fills.length){const p=document.createElement("p");p.className="empty";p.textContent="No recorded fills for this filter.";wrap.append(p)}
+     for(const f of fills.slice().sort((a,b)=>b.time-a.time).slice(0,100)){
+       const b=document.createElement("button");b.className="chart-fill-row";b.type="button";b.setAttribute("aria-pressed",String(f.id===selectedFillId));
+       const make=(tag,cls,label)=>{const n=document.createElement(tag);n.className=cls;n.textContent=label;return n};
+       b.append(make("strong","fill-kind "+(f.side==="buy"?"gain":"loss"),(fillNames[f.kind]||"Fill")+" · "+f.side.toUpperCase()),make("strong","fill-price",fmt(f.price)),make("small","fill-stamp",fillTimeLabel(f)),make("small","fill-size",f.size+" contracts"),make("small","fill-coverage",rowsByTime.has(candleTime(f))?"Locate candle":"Outside loaded completed candles"));
+       b.addEventListener("click",()=>jumpToFill(f));wrap.append(b);
+     }
+   }
+   renderFillSelection();
+ }
  function overlayView(){
-   dock();quoteView();if(!chart||!packet)return;
+   dock();quoteView();fillListView();if(!chart||!packet)return;
    for(const line of priceLines)candles.removePriceLine(line);priceLines=[];
    const o=overlay(),fresh=isFresh(o),live=levels&&fresh&&o.status==="position_observed";
    const atLatest=chart.timeScale().scrollPosition()>=-2;
-   if(live&&atLatest)for(const l of o.lines||[]){if(!lineStyle[l.kind]||!Number.isFinite(l.price)||l.price<=0)continue;const [title,color]=lineStyle[l.kind];priceLines.push(candles.createPriceLine({price:l.price,color,lineWidth:1,lineStyle:L.LineStyle.Dashed,axisLabelVisible:true,title}));}
-   const times=new Set(packet.candles.map(r=>r.time)),fills=showFills?(o.fills||[]).filter(f=>Number.isFinite(f.time)&&Number.isFinite(f.price)&&times.has(Math.floor(f.time/packet.step)*packet.step)):[];
-   markers.setMarkers(fills.map(f=>({time:Math.floor(f.time/packet.step)*packet.step,position:f.side==="buy"?"belowBar":"aboveBar",color:f.side==="buy"?colors.up:colors.down,shape:f.side==="buy"?"arrowUp":"arrowDown",text:(f.kind==="entry"?"E":f.kind==="exit"?"X":"Fill")+" "+fmt(f.price)})).sort((a,b)=>a.time-b.time));
-   id("chartOverlayNote").textContent=fills.length+" recorded fills in loaded archive · "+(live&&atLatest?"Current snapshot price lines, not historical levels":!atLatest?"Current levels hidden while panning":!fresh?"Position snapshot unavailable or stale":"No active levels")+". Marker anchors show candle location; text records actual fill price.";
+   if(live&&atLatest)for(const l of o.lines||[]){if(!lineStyle[l.kind]||!Number.isFinite(l.price)||l.price<=0)continue;const [title,color]=lineStyle[l.kind];priceLines.push(candles.createPriceLine({price:l.price,color,lineWidth:l.kind==="entry"?2:1,lineStyle:l.kind==="entry"?L.LineStyle.Solid:l.kind==="mark"?L.LineStyle.Dotted:L.LineStyle.Dashed,axisLabelVisible:true,title}));}
+   const fills=showFills?matchingFills().filter(f=>rowsByTime.has(candleTime(f))):[];
+   // Compact markers identify observed action; exact price is shown in the selected-fill line and list.
+   markers.setMarkers(fills.map(f=>({id:f.id,time:candleTime(f),position:f.side==="buy"?"belowBar":"aboveBar",color:f.id===selectedFillId?"#e6b65c":f.kind==="exit"?"#b79af6":f.kind==="reversal"?"#e6b65c":f.side==="buy"?colors.up:colors.down,shape:f.kind==="exit"?"circle":f.kind==="reversal"?"square":f.side==="buy"?"arrowUp":"arrowDown",text:({entry:"E",exit:"X",reversal:"R",increase:"+",reduction:"−"})[f.kind]||"F"})).sort((a,b)=>a.time-b.time));
+   id("chartOverlayNote").textContent=fills.length+" displayed fills in loaded archive · "+(live&&atLatest?"Current snapshot price lines, not historical levels":!atLatest?"Current levels hidden while panning":!fresh?"Position snapshot unavailable or stale":!levels?"Position levels hidden":"No active levels")+". E entry · X exit · R reversal · + increase · − reduction · F fill. Marker anchors identify the candle; select a fill for its actual price.";
+
  }
  function syncStudies(rebuild=false){
    if(!chart||!packet)return;
@@ -178,7 +220,7 @@
    overlayView();readout(null);scheduleScaleNote();
  }
  function clearSelection(){
-   generation++;busy=false;packet=null;displayed=[];rowsByTime.clear();studyLookup.clear();crossTime=null;dispose();id("studyLegend").replaceChildren();id("studyPanels").replaceChildren();id("marketChartTitle").textContent=symbol+" · "+frame;id("marketChartLast").textContent="—";id("marketChartStatus").textContent="Loading chart…";id("chartOverlayNote").textContent="";readout(null);scaleNote();if(visible())load(true);
+   generation++;busy=false;packet=null;displayed=[];rowsByTime.clear();studyLookup.clear();crossTime=null;dispose();id("studyLegend").replaceChildren();id("studyPanels").replaceChildren();id("marketChartTitle").textContent=symbol+" · "+frame;id("marketChartLast").textContent="—";id("marketChartStatus").textContent="Loading chart…";id("chartOverlayNote").textContent="";readout(null);scaleNote();fillListView();if(visible())load(true);
  }
  async function load(force=false){
    if(!visible()||(!force&&busy))return;
@@ -200,9 +242,11 @@
  function zoom(factor){if(chart){const scale=chart.timeScale(),r=scale.getVisibleLogicalRange();if(r){const center=(r.from+r.to)/2,half=Math.max(5,Math.min(180,(r.to-r.from)*factor/2));scale.setVisibleLogicalRange({from:center-half,to:center+half})}}}
  function latest(){if(chart){chart.timeScale().scrollToRealTime();overlayView()}load()}
  document.addEventListener("recover:overview",e=>{overlays=new Map(e.detail.map(o=>[o.symbol,o]));if(visible())overlayView()});
- document.addEventListener("recover:market",e=>{if(symbol!==e.detail){symbol=e.detail;quoteGeneration++;quoteBusy=false;quote=null;quoteFailed=false;clearSelection();quoteView();loadQuote();dock()}});
+ document.addEventListener("recover:market",e=>{if(symbol!==e.detail){selectedFillId=null;symbol=e.detail;quoteGeneration++;quoteBusy=false;quote=null;quoteFailed=false;clearSelection();quoteView();loadQuote();dock()}});
  for(const b of document.querySelectorAll("[data-frame]"))b.addEventListener("click",()=>{if(frame===b.dataset.frame)return;frame=b.dataset.frame;for(const a of document.querySelectorAll("[data-frame]"))a.setAttribute("aria-pressed",String(a===b));clearSelection()});
  id("chartZoomIn").addEventListener("click",()=>zoom(.8));id("chartZoomOut").addEventListener("click",()=>zoom(1.25));id("chartLeft").addEventListener("click",()=>pan(-15));id("chartRight").addEventListener("click",()=>pan(15));id("chartReset").addEventListener("click",latest);
+ id("chartFillFilter").addEventListener("change",e=>{fillFilter=e.target.value;selectedFillId=null;fillListKey="";overlayView()});
+ id("clearFillSelection").addEventListener("click",()=>{selectedFillId=null;fillListKey="";overlayView()});
  id("scaleFull").addEventListener("click",()=>{scaleModes.set(symbol,"full");applyScale()});
  id("scaleFocus").addEventListener("click",()=>{scaleModes.set(symbol,"focus");applyScale()});
  id("scaleLog").addEventListener("click",()=>{logarithmic=!logarithmic;applyScale()});
