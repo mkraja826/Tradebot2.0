@@ -211,8 +211,8 @@ def main():
     parser.add_argument("--once", action="store_true")
     parser.add_argument("--execute-demo", action="store_true", help="Enable billable AI and demo orders")
     parser.add_argument("--manage-demo",action="store_true",help="Enable recurring AI management and demo position mutations")
-    args = parser.parse_args()
     parser.add_argument("--learning-journal", help="Opt-in read-only prior outcome evidence for AI context")
+    args = parser.parse_args()
     if args.manage_demo and not args.execute_demo:parser.error("--manage-demo requires --execute-demo")
     if not math.isfinite(args.interval) or args.interval <= 0:
         parser.error("Interval must be finite and positive")
