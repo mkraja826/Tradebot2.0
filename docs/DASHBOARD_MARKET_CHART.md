@@ -1,0 +1,2 @@
+# Live workstation phase 1
+Read-only local chart endpoint with fixed market/frame allowlist, bounded 350 completed OHLCV rows, validation and gap counts. Native SVG chart, eight frames, volume, EMA20 optional, zoom/pan/crosshair keyboard controls, expanded mode. Existing 35 panels retained, previous close chart in details. Native implementation avoids external CDN dependencies and keeps CSP unchanged; not TradingView library and no tick-level streaming. Feed freshness and archive gaps explicitly disclosed. No worker restart or trading changes.

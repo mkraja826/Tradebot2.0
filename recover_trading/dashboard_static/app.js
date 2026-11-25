@@ -87,7 +87,7 @@ $("morePages").addEventListener("click",()=>{const open=$("workspaceNav").classL
 document.addEventListener("keydown",e=>{if(e.key==="Escape"&&$("workspaceNav").classList.contains("expanded")){$("workspaceNav").classList.remove("expanded");$("morePages").setAttribute("aria-expanded","false");$("morePages").focus()}});
 window.addEventListener("hashchange",()=>{if(location.hash!=="#workspace")navigate(location.hash.slice(1),true)});
 navigate(location.hash.slice(1));
-function chooseMarket(symbol){if(!["BTCUSD","XAUTUSD"].includes(symbol))return;chosen=symbol;for(const x of document.querySelectorAll("[data-symbol]"))x.setAttribute("aria-pressed",String(x.dataset.symbol===symbol));render()}
+function chooseMarket(symbol){if(!["BTCUSD","XAUTUSD"].includes(symbol))return;chosen=symbol;for(const x of document.querySelectorAll("[data-symbol]"))x.setAttribute("aria-pressed",String(x.dataset.symbol===symbol));render();document.dispatchEvent(new CustomEvent("recover:market",{detail:symbol}))}
 function ageLabel(h){const age=Date.now()/1000-Number(h?.timestamp);return finite(h?.timestamp)&&age>=-5&&age<=180&&h.status!=="cycle_error"?"Recent heartbeat":finite(h?.timestamp)?"Check worker":"Unverified"}
 function overviewView(){
  const ms=data.markets||[], stats=ms.map(m=>m.performance?.recover_attributed||{}), currency=ms.length===2&&ms.every(m=>m.performance?.currency==="USD")?"USD":null;

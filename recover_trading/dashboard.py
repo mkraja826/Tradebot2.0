@@ -1,12 +1,13 @@
 """Local, read-only dashboard for Recover Trading journals."""
 import argparse
 import json
+import math
 import sqlite3
 import time
 from contextlib import closing
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, parse_qs
 
 from .performance import read_performance
 from .strategy_evidence import report as strategy_evidence_report
@@ -174,6 +175,29 @@ def report(root, symbol):
                             "wallets":isinstance(latest,dict) and "wallets" in latest},
             "win_rate":None,"realized_trade_pnl":None}
 
+CHART_FRAMES={"1m":60,"3m":180,"5m":300,"15m":900,"30m":1800,"1h":3600,"4h":14400,"1d":86400}
+def chart_data(root,symbol,frame,now):
+    if symbol not in MARKETS or frame not in CHART_FRAMES:
+        raise ValueError("Unknown chart selection")
+    step=CHART_FRAMES[frame]
+    rows=query(Path(root)/symbol/"market.sqlite",
+        "SELECT stamp,payload FROM samples WHERE symbol=? AND series=? AND stamp<=? ORDER BY stamp DESC LIMIT 350",
+        (symbol,"candle:"+frame,now-step))
+    candles=[];invalid=0
+    for row in reversed(rows or []):
+        t=row["stamp"];p=decode(row["payload"])
+        if not isinstance(p,dict) or type(t) is not int or t%step or p.get("time")!=t:
+            invalid+=1;continue
+        o,h,l,c,v=(p.get(k) for k in ("open","high","low","close","volume"))
+        if not all(type(x) in (int,float) and math.isfinite(x) for x in (o,h,l,c,v)) or not 0<l<=min(o,c)<=max(o,c)<=h or v<0:
+            invalid+=1;continue
+        candles.append({"time":t,"open":o,"high":h,"low":l,"close":c,"volume":v})
+    gaps=sum(b["time"]-a["time"]!=step for a,b in zip(candles,candles[1:]))
+    return {"symbol":symbol,"frame":frame,"step":step,"source":"demo_archived_completed_candles","generated":now,
+        "status":"unavailable" if rows is None else "observed" if candles else "empty",
+        "candles":candles,"invalid_rows":invalid,"gap_count":gaps,
+        "last_close_age_s":now-candles[-1]["time"]-step if candles else None}
+
 def handler(root):
     class Handler(BaseHTTPRequestHandler):
         def send(self, status, content, mime):
@@ -193,10 +217,19 @@ def handler(root):
             path = urlsplit(self.path).path
             assets = {"/":("index.html","text/html; charset=utf-8"),
                       "/app.js":("app.js","text/javascript; charset=utf-8"),
+                      "/market-chart.js":("market-chart.js","text/javascript; charset=utf-8"),
                       "/style.css":("style.css","text/css; charset=utf-8")}
             if path in assets:
                 name,mime = assets[path]
                 return self.send(200,(STATIC/name).read_bytes(),mime)
+            if path == "/api/chart":
+                try:
+                    q=parse_qs(urlsplit(self.path).query,strict_parsing=True,max_num_fields=2)
+                    if set(q)!={"symbol","frame"} or any(len(v)!=1 for v in q.values()):raise ValueError("Invalid query")
+                    data=chart_data(root,q["symbol"][0],q["frame"][0],int(time.time()))
+                except ValueError:
+                    return self.send(400,b"Invalid chart selection","text/plain")
+                return self.send(200,json.dumps(data,allow_nan=False).encode(),"application/json")
             if path == "/api/overview":
                 data={"generated":int(time.time()),"markets":[report(root,s) for s in MARKETS]}
                 return self.send(200,json.dumps(data,allow_nan=False).encode(),"application/json")
