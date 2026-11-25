@@ -18,6 +18,8 @@ from .opportunity import opportunity
 from .planner_shadow import packet,load_reference,ShadowJournal
 from .lifecycle import Lifecycle
 from .bracket_repair import BracketRepair
+from .management_shadow import ManagementShadow
+from .execution import product_for
 from .market_quality import diagnostics
 from tradebot.market_data_v3 import MARKETS
 
@@ -45,7 +47,7 @@ class MarketService:
         self.scan, self.output = scan, output
         if broker is not None and (provider is None or not model):
             raise ValueError("Execution requires configured AI")
-        self.decisions = self.orders = self.executor = self.lifecycle = self.repair = None
+        self.decisions = self.orders = self.executor = self.lifecycle = self.repair = self.management = None
 
     def open(self):
         self.research = SignalResearch(self.directory / "signal_research.sqlite")
@@ -56,6 +58,7 @@ class MarketService:
             self.executor = DemoExecutor(self.broker, self.orders)
             self.lifecycle = Lifecycle(self.broker, self.orders)
             self.repair = BracketRepair(self.broker,self.orders)
+            self.management = ManagementShadow(self.orders.db)
 
     def close(self):
         if self.orders is not None:
@@ -115,6 +118,10 @@ class MarketService:
                 planner=self.planner.record(packet(report,direction,reference))
             except Exception as exc:
                 planner={"status":"shadow_error","error":type(exc).__name__,"execution_effect":"none"}
+        management=None
+        if self.management is not None and report.get("status")!="scan_error":
+            try:management=self.management.capture(report,lifecycle,self.model,lambda s:product_for(self.broker,s))
+            except Exception as exc:management={"status":"capture_error","error":type(exc).__name__,"execution_effect":"none"}
         execution_started=time.monotonic()
         if report.get("status") == "scan_error":
             result = {"status": "scan_error", "reason": report.get("reason")}
@@ -142,6 +149,7 @@ class MarketService:
                  "cycle_timing_ms":{"lifecycle":lifecycle_ms,"scan":scan_ms,"decision_execution":round((time.monotonic()-execution_started)*1000),"total":round((time.monotonic()-started)*1000)},
                  "planner_shadow": planner,
                  "bracket_repair": repair,
+                 "management_shadow": management,
                  "error": summary.get("error", summary.get("reason")),
                  "reconciliation_error": reconciliation_error,
                  "lifecycle": {"new_fills": lifecycle.get("new_fills"),

@@ -145,11 +145,18 @@ class Provider:
         self.diagnostics = {}
 
     def propose(self, model, context):
+        return self._propose(model,compact_context(context),SYSTEM)
+
+    def propose_management(self,model,context):
+        from .management_shadow import SYSTEM as MANAGEMENT_SYSTEM
+        return self._propose(model,context,MANAGEMENT_SYSTEM)
+
+    def _propose(self,model,context,system):
         self.diagnostics = {}
         if not self.key or not model:
             raise ValueError("AI runtime configuration missing")
-        body={"model":model,"messages":[{"role":"system","content":SYSTEM},
-             {"role":"user","content":encode(compact_context(context))}],"max_completion_tokens":8192}
+        body={"model":model,"messages":[{"role":"system","content":system},
+             {"role":"user","content":encode(context)}],"max_completion_tokens":8192}
         req=Request(PROVIDER, data=encode(body).encode(), method="POST",
                     headers={"Authorization":"Bearer "+self.key,"Content-Type":"application/json"})
         started = time.monotonic()
