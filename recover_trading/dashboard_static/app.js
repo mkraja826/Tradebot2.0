@@ -305,6 +305,56 @@ function labView(){
 for(const k of ["labSearch","labFamily","labState"])$(k).addEventListener(k==="labSearch"?"input":"change",labView);
 $("labReset").addEventListener("click",()=>{$("labSearch").value="";$("labFamily").value="all";$("labState").value="all";labView()});
 
+
+let inspectorMarket=null,inspectorChoice="";
+const episodeKey=e=>JSON.stringify([e.opened,e.closed,e.decision_id??null,e.direction]);
+function boundaryFill(fills,when,side,currency,closing){
+ const matches=(fills||[]).filter(f=>f&&f.created_at===when);
+ if(matches.length!==1)return null;
+ const f=matches[0],after=f.new_position?.size;
+ if(f.side!==side||f.settling_asset_symbol!==currency||!finite(f.price)||Number(f.price)<=0||!finite(after))return null;
+ if(closing?Number(after)!==0:(side==="buy"?Number(after)<=0:Number(after)>=0))return null;
+ return f;
+}
+function inspectorView(m){
+ const p=m.performance||{},currency=p.currency||"",rows=(p.recent_episodes||[]).slice().reverse(),select=$("inspectorEpisode"),content=$("inspectorContent");
+ if(inspectorMarket!==m.symbol){inspectorMarket=m.symbol;inspectorChoice=""}
+ const keys=rows.map(episodeKey);
+ if(!keys.includes(inspectorChoice))inspectorChoice=keys[0]||"";
+ if(JSON.stringify(Array.from(select.options).map(o=>o.value))!==JSON.stringify(keys.length?keys:[""])){
+  select.replaceChildren();
+  if(!rows.length){const o=el("option","No reconciled positions");o.value="";select.append(o)}
+  for(const e of rows){const o=el("option",fmt(e.closed)+" · "+human(e.direction)+" · "+money(e.net_before_funding,currency));o.value=episodeKey(e);select.append(o)}
+ }
+ select.disabled=!rows.length;select.value=inspectorChoice;
+ const e=rows.find(x=>episodeKey(x)===inspectorChoice);
+ if(!e){$("inspectorStatus").textContent="No reconciled closed position available · "+human(p.status);content.replaceChildren();return}
+ const d=e.decision_id?(m.decisions||[]).find(x=>x.id===e.decision_id):null;
+ const reviews=e.decision_id?(m.decision_review?.recent||[]).filter(x=>x.id===e.decision_id):[];
+ const r=reviews.length===1?reviews[0]:null,plan=d?.result||{};
+ const openingSide=e.direction==="LONG"?"buy":e.direction==="SHORT"?"sell":null;
+ const open=openingSide?boundaryFill(m.fills,e.opened,openingSide,currency,false):null;
+ const close=openingSide?boundaryFill(m.fills,e.closed,openingSide==="buy"?"sell":"buy",currency,true):null;
+ $("inspectorStatus").textContent=m.symbol+" · "+human(e.attribution)+" · "+fmt(e.fills)+" reconciled fills";
+ const cards=el("div",undefined,"inspector-cards");
+ for(const [label,value,cls] of [["Net before funding",money(e.net_before_funding,currency),finite(e.net_before_funding)?Number(e.net_before_funding)>0?"gain":Number(e.net_before_funding)<0?"loss":"neutral":"neutral"],["Gross P&L",money(e.gross_pnl,currency),"neutral"],["Commissions",money(e.fees,currency),"neutral"]]){
+  const n=el("div",undefined,"metric");n.append(el("small",label),el("strong",value,cls));cards.append(n);
+ }
+ const layout=el("div",undefined,"inspector-grid");
+ function fields(title,pairs){
+  const panel=el("div",undefined,"inspector-block"),dl=el("dl",undefined,"inspector-fields");panel.append(el("h3",title));
+  for(const [label,value] of pairs){dl.append(el("dt",label),el("dd",value))}panel.append(dl);layout.append(panel);
+ }
+ fields("Position lifecycle",[["Direction",human(e.direction)],["Opened",fmt(e.opened)],["Closed",fmt(e.closed)],["First observed entry fill",fmt(open?.price)],["Final observed exit fill",fmt(close?.price)],["Entry order average (review)",fmt(r?.average_fill_price)],["Reported funding (unverified)",money(e.reported_funding,currency)]]);
+ fields("Recorded AI plan",[["Decision ID",fmt(e.decision_id)],["Model",fmt(d?.model??r?.model)],["Action",human(plan.action??r?.action)],["Reference entry",fmt(plan.entry_reference)],["Planned stop",fmt(plan.stop_loss)],["Planned target",fmt(plan.take_profit)],["Planned reward/risk",fmt(r?.planned_reward_risk)],["Entry deviation (bps)",fmt(r?.entry_deviation_bps)]]);
+ const reasoning=el("div",undefined,"inspector-block");reasoning.append(el("h3","Recorded explanation"),el("p",d?.result?.reason??r?.reason??"No linked explanation in the available decision archive."),el("h3","Associated strategy triggers"));
+ const rules=el("div",undefined,"inspector-rules");
+ for(const id of e.active_rules||[])rules.append(el("span",id));
+ if(!rules.childElementCount)rules.append(el("p","No attributed rules available.","empty"));reasoning.append(rules);
+ content.replaceChildren(cards,layout,reasoning,el("p","First and final fill prices are shown only when a unique matching boundary record is available in the recent fill window; they are not weighted episode prices. Planned levels are not verified exit triggers.","empty"));
+}
+$("inspectorEpisode").addEventListener("change",()=>{inspectorChoice=$("inspectorEpisode").value;const m=data?.markets.find(x=>x.symbol===chosen);if(m)inspectorView(m)});
+
 function historyView(m){
  const query=$("historyQuery").value.trim().toLowerCase(),side=$("historySide").value;
  const orderFields=r=>[r.client_id,r.status,r.exchange?.status,r.intent?.side,r.intent?.size,r.exchange?.filled_size,r.exchange?.order?.average_fill_price,r.intent?.stop_loss,r.intent?.take_profit];
@@ -472,7 +522,7 @@ function render(){
  const hs=m.historical_submission_evidence||{};
  $("historicalSubmissionNote").textContent=human(hs.status)+" · "+fmt(hs.unknown_count)+" unresolved · "+fmt(hs.snapshot_window_count)+" archived snapshots examined";
  table("historicalSubmissionRows",hs.rows||[],[["Client ID",r=>r.client_id.slice(0,12)],["Evidence",r=>human(r.classification)],["Original HTTP",r=>fmt(r.original_http_status)],["Not-found observation times",r=>fmt(r.distinct_not_found_observation_times)],["Latest lookup",r=>human(r.last_lookup_code)]]);
- historyView(m);
+ historyView(m);inspectorView(m);
 }
 $("scopeRecover").addEventListener("click",()=>{scope="recover";render()});
 $("scopeAccount").addEventListener("click",()=>{scope="account";render()});

@@ -6,7 +6,7 @@ class WorkspaceTests(unittest.TestCase):
         ids=re.findall(r'\bid="([^"]+)"',html)
         self.assertEqual(len(ids),len(set(ids)))
         self.assertTrue(set(re.findall(r'\$\("([^"]+)"\)',js))<=set(ids))
-        self.assertEqual(len(re.findall(r'<section class="panel\b',html)),43)
+        self.assertEqual(len(re.findall(r'<section class="panel\b',html)),44)
     def test_routes_and_market_controls(self):
         html=(STATIC/"index.html").read_text()
         self.assertEqual(set(re.findall(r'data-page="([^"]+)"',html)),set(re.findall(r'data-workspace="([^"]+)"',html)))
@@ -23,3 +23,14 @@ class WorkspaceTests(unittest.TestCase):
         self.assertIn('addEventListener("change",refreshHistoryView)',js)
         self.assertIn('No orders match these filters',js)
         self.assertIn('No fills match these filters',js)
+
+    def test_trade_inspector_is_read_only_and_market_scoped(self):
+        html=(STATIC/"index.html").read_text();js=(STATIC/"app.js").read_text()
+        history=html.split('data-workspace="history"',1)[1].split('data-workspace="intelligence"',1)[0]
+        for identifier in ("inspectorEpisode","inspectorStatus","inspectorContent"):
+            self.assertIn(f'id="{identifier}"',history)
+        self.assertIn("historyView(m);inspectorView(m);",js)
+        self.assertIn("inspectorMarket!==m.symbol",js)
+        self.assertIn("x.id===e.decision_id",js)
+        self.assertIn("matches.length!==1",js)
+        self.assertIn("Final observed exit fill",js)
