@@ -1,0 +1,11 @@
+[Unit]
+Description=Recover Trading matched reference strategy comparison
+[Service]
+Type=oneshot
+User=recovertrading
+WorkingDirectory=/opt/recover-trading/current
+ExecStart=/usr/bin/python3 -m recover_trading.reference_strategy --data-dir /var/lib/recover-trading/demo
+Environment=PYTHONDONTWRITEBYTECODE=1
+NoNewPrivileges=true
+PrivateTmp=true
+TimeoutStartSec=300

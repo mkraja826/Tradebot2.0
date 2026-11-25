@@ -1,0 +1,8 @@
+[Unit]
+Description=Compare reference strategy registry every 15 minutes
+[Timer]
+OnActiveSec=15min
+OnUnitActiveSec=15min
+Unit=recover-reference-strategy.service
+[Install]
+WantedBy=timers.target
