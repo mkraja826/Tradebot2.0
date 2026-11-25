@@ -1,0 +1,10 @@
+[Unit]
+Description=Collect prospective Recover Trading research outcomes
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=5min
+Unit=recover-forward.service
+
+[Install]
+WantedBy=timers.target
