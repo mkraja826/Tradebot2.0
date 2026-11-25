@@ -33,3 +33,10 @@ class ManagementShadowTests(unittest.TestCase):
     def test_stale_snapshot_not_captured(self):
         r,s,p=fixture()
         self.assertIsNone(context_for(r,s,p,1200))
+
+    def test_rounded_scan_cutoff(self):
+        r,s,p=fixture()
+        r["as_of"]=1001
+        self.assertIsNotNone(context_for(r,s,p,1000))
+        r["as_of"]=1002
+        self.assertIsNone(context_for(r,s,p,1000))

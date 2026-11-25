@@ -20,8 +20,9 @@ not a mandate to close or reverse. All output is advisory and cannot execute."""
 def context_for(report,snapshot,product,now):
     symbol=report["symbol"];at=report["as_of"]
     view=observe(snapshot,symbol,now)
-    if view["position_state"] not in ("long","short") or type(at) is not int or not 0<=now-at<=180:
+    if view["position_state"] not in ("long","short") or type(at) is not int or not -1<=now-at<=180:
         return None
+    # Scanner rounds its subsecond cutoff upward; tolerate only that one-second offset.
     pos=snapshot["positions"][0]
     tick=dec(product.get("tick_size"));mark=dec(view.get("mark_price"));entry=dec(view.get("entry_price"));qty=dec(view.get("size"))
     if product.get("symbol")!=symbol or str(product.get("id"))!=str(pos.get("product_id")) or any(v is None or v<=0 for v in (tick,mark,entry)) or qty is None or qty!=qty.to_integral_value():
