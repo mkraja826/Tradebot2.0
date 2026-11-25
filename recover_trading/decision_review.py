@@ -5,12 +5,14 @@ from contextlib import closing
 from pathlib import Path
 from statistics import median
 from .performance import dec,stamp
+from .entry_quotes import attribution
 
 def positive(x):
     n=dec(x)
     return n if n is not None and n>0 else None
 
-def review(decisions,orders,fills,episodes,symbol):
+def review(decisions,orders,fills,episodes,symbol,entry_quotes=None):
+    entry_quotes=entry_quotes or {}
     by_order=defaultdict(list)
     for f in fills:
         by_order[str(f.get("order_id"))].append(f)
@@ -52,6 +54,7 @@ def review(decisions,orders,fills,episodes,symbol):
             row["outcome"]="no_order_recorded"
             if order:
                 row["order_status"]=order["status"];row["outcome"]="submission_"+order["status"]
+                if client in entry_quotes:row["entry_quote_evidence"]=entry_quotes[client]
                 receipt=order.get("detail") or {};spec=(context.get("demo_account") or {}).get("product") or {}
                 oid=receipt.get("id")
                 if (order["status"]=="acknowledged" and oid is not None and receipt.get("client_order_id")==client
@@ -68,6 +71,7 @@ def review(decisions,orders,fills,episodes,symbol):
                             row.update(entry_deviation_bps=float(sign*(avg/en-1)*10000),
                                        fill_stop_bps=float(sign*(avg-sl)/avg*10000),
                                        fill_target_bps=float(sign*(tp-avg)/avg*10000))
+                        row["entry_attribution"]=attribution(entry_quotes.get(client),avg)
                         if len(closed[ident])==1:
                             row.update(outcome="closed_reconciled",net_before_funding=closed[ident][0]["net_before_funding"])
                     elif candidates:row["outcome"]="fill_identity_unverified"
@@ -101,6 +105,9 @@ def read_review(root,symbol,performance):
             db.execute("BEGIN")
             orders={i:{"status":s,"detail":json.loads(r or "{}")} for i,s,r in db.execute("SELECT client_id,status,detail FROM orders WHERE symbol=?",(symbol,))}
             fills=[json.loads(r) for r, in db.execute("SELECT detail FROM observed_fills WHERE symbol=?",(symbol,))]
-        return review(decisions,orders,fills,performance.get("recent_episodes",[]),symbol)
+            evidence={}
+            if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='entry_quotes'").fetchone():
+                evidence={i:json.loads(r) for i,r in db.execute("SELECT client_id,detail FROM entry_quotes WHERE symbol=?",(symbol,))}
+        return review(decisions,orders,fills,performance.get("recent_episodes",[]),symbol,evidence)
     except (sqlite3.Error,ValueError,KeyError,TypeError,AttributeError,ArithmeticError):
         return {"status":"unavailable_or_invalid_journal","symbol":symbol}

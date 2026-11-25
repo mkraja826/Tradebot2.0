@@ -109,3 +109,32 @@ class ExecutionTests(unittest.TestCase):
         self.assertEqual(mark_evidence(t,"BTCUSD",i,2000000)["status"],"bracket_crossed_mark")
         t["product_id"]=181689
         self.assertEqual(mark_evidence(t,"BTCUSD",i,2000000)["status"],"ticker_identity_unverified")
+
+import json
+from recover_trading.entry_quotes import quote_evidence,attribution
+class EntryQuoteTests(unittest.TestCase):
+    def test_quote_and_attribution(self):
+        t={"symbol":"BTCUSD","product_id":84,"timestamp":100,"mark_price":"100","quotes":{"best_bid":"99","best_ask":"101","ask_size":"10"}}
+        q=quote_evidence(t,"BTCUSD",84,101)
+        self.assertEqual(q["status"],"fresh_book")
+        self.assertEqual(q["spread_bps"],200)
+        self.assertEqual(quote_evidence(t,"XAUTUSD",84,101)["status"],"unavailable")
+        self.assertEqual(quote_evidence(t,"BTCUSD",84,31000101)["status"],"stale_or_invalid")
+        e={"reference":"100","side":"buy","decision_quote":q,"pre_submit_quote":{**q,"best_ask":"102"}}
+        a=attribution(e,103)
+        self.assertEqual(a["total_reference_deviation_bps"],300)
+        self.assertEqual(a["reference_to_decision_book_bps"],100)
+        self.assertEqual(a["decision_to_submission_book_bps"],100)
+        self.assertEqual(a["submission_book_to_fill_bps"],100)
+        e["side"]="sell";e["pre_submit_quote"]={**q,"best_bid":"98"}
+        self.assertEqual(attribution(e,97)["total_reference_deviation_bps"],300)
+        self.assertEqual(attribution(None,103),{})
+    def test_quote_survives_timeout_and_reconciliation(self):
+        b=Fake();b.timeout=True;j=Journal(":memory:");self.addCleanup(j.close)
+        e=DemoExecutor(b,j);a=account_context(b,"BTCUSD")
+        r=e.execute(proposal(),account=a)
+        self.assertEqual(r["status"],"unknown")
+        row=j.db.execute("SELECT detail FROM entry_quotes WHERE client_id=?",(r["client_id"],)).fetchone()
+        self.assertEqual(json.loads(row[0])["mark_check"]["status"],"compatible")
+        e.reconcile()
+        self.assertEqual(j.db.execute("SELECT detail FROM entry_quotes").fetchone(),row)

@@ -1,5 +1,6 @@
 """Explicit, journaled execution of capital-aware AI proposals on Delta India demo."""
 import hashlib
+import json
 import sqlite3
 import time
 from dataclasses import dataclass
@@ -7,6 +8,7 @@ from decimal import Decimal, InvalidOperation
 from .broker import DeltaDemo, BrokerError, error_detail
 from .decision import validate, evaluate_report, MODEL_VARS
 from .engine import Journal, Engine
+from .entry_quotes import quote_evidence
 
 LEVERAGE = 20
 
@@ -43,7 +45,11 @@ def account_context(broker, symbol):
     position_fields = ("product_id", "size", "entry_price", "margin", "liquidation_price")
     if isinstance(positions, dict):
         positions = [positions]
-    return {"leverage": LEVERAGE, "wallets": rows, "product": spec,
+    try:
+        quote=quote_evidence(broker.ticker(symbol),symbol,product["id"],time.time_ns()//1000)
+    except Exception as exc:
+        quote={"status":"unavailable",**error_detail(exc)}
+    return {"leverage": LEVERAGE, "wallets": rows, "product": spec, "decision_quote":quote,
             "positions": [{k: p[k] for k in position_fields if k in p} for p in positions],
             "exchange_wallet_meta": {k:v for k,v in wallet.get("meta",{}).items()
                                      if k in ("net_equity","robo_trading_equity")}}
@@ -79,6 +85,7 @@ def mark_evidence(ticker, symbol, intent, now_us):
 class DemoExecutor:
     def __init__(self, broker: DeltaDemo, journal: Journal):
         self.broker, self.journal = broker, journal
+        with journal.db:journal.db.execute("CREATE TABLE IF NOT EXISTS entry_quotes (client_id TEXT PRIMARY KEY,symbol TEXT NOT NULL,detail TEXT NOT NULL)")
 
     def execute(self, result, *, account):
         if result.get("status") != "proposed":
@@ -114,7 +121,10 @@ class DemoExecutor:
         # Bracket triggers are mark-price based. Validate a fresh demo mark
         # immediately before sending, without silently repricing AI choices.
         try:
-            check=mark_evidence(self.broker.ticker(symbol),symbol,intent,time.time_ns()//1000)
+            ticker=self.broker.ticker(symbol);now=time.time_ns()//1000
+            check=mark_evidence(ticker,symbol,intent,now)
+            evidence={"decision_quote":account.get("decision_quote"),"pre_submit_quote":quote_evidence(ticker,symbol,intent.product_id,now),"reference":str(entry),"side":intent.side,"mark_check":check}
+            with self.journal.db:self.journal.db.execute("INSERT INTO entry_quotes VALUES (?,?,?)",(client_id,symbol,json.dumps(evidence)))
         except Exception as exc:
             self.journal.finish(client_id,"preparation_failed",{"phase":"mark_quote",**error_detail(exc)})
             return {"status":"preparation_failed","client_id":client_id,"reason":"mark_quote_failed"}
