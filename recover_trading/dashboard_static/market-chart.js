@@ -3,6 +3,7 @@
  const id=x=>document.getElementById(x),root=id("marketChart"),L=window.LightweightCharts;
  let symbol=document.querySelector("[data-symbol][aria-pressed=true]")?.dataset.symbol||"BTCUSD",frame="5m",packet=null,selected=new Set(),generation=0,busy=false,levels=true,showFills=true,overlays=new Map(),dockKey="",chart=null,candles=null,volume=null,markers=null,priceLines=[],studySeries=[],studyKey="",crossTime=null,displayed=[],rowsByTime=new Map();
  const scaleModes=new Map([["BTCUSD","full"],["XAUTUSD","focus"]]);let logarithmic=false,scaleNoteFrame=0;
+ let modalInert=[],modalReturnFocus=null;
  let quote=null,quoteLine=null,quoteBusy=false,quoteGeneration=0,quoteReceived=0,quoteFailed=false;
  const colors={up:"#29c99a",down:"#f27783",grid:"#303943",muted:"#a1aebb"};
  const fmt=(n,d=2)=>Number.isFinite(n)?n.toLocaleString(undefined,{minimumFractionDigits:d,maximumFractionDigits:d}):"—";
@@ -242,7 +243,7 @@
  function zoom(factor){if(chart){const scale=chart.timeScale(),r=scale.getVisibleLogicalRange();if(r){const center=(r.from+r.to)/2,half=Math.max(5,Math.min(180,(r.to-r.from)*factor/2));scale.setVisibleLogicalRange({from:center-half,to:center+half})}}}
  function latest(){if(chart){chart.timeScale().scrollToRealTime();overlayView()}load()}
  document.addEventListener("recover:overview",e=>{overlays=new Map(e.detail.map(o=>[o.symbol,o]));if(visible())overlayView()});
- document.addEventListener("recover:market",e=>{if(symbol!==e.detail){selectedFillId=null;symbol=e.detail;quoteGeneration++;quoteBusy=false;quote=null;quoteFailed=false;clearSelection();quoteView();loadQuote();dock()}});
+ document.addEventListener("recover:market",e=>{for(const b of document.querySelectorAll("[data-chart-symbol]"))b.setAttribute("aria-pressed",String(b.dataset.chartSymbol===e.detail));if(symbol!==e.detail){selectedFillId=null;symbol=e.detail;quoteGeneration++;quoteBusy=false;quote=null;quoteFailed=false;clearSelection();quoteView();loadQuote();dock()}});
  for(const b of document.querySelectorAll("[data-frame]"))b.addEventListener("click",()=>{if(frame===b.dataset.frame)return;frame=b.dataset.frame;for(const a of document.querySelectorAll("[data-frame]"))a.setAttribute("aria-pressed",String(a===b));clearSelection()});
  id("chartZoomIn").addEventListener("click",()=>zoom(.8));id("chartZoomOut").addEventListener("click",()=>zoom(1.25));id("chartLeft").addEventListener("click",()=>pan(-15));id("chartRight").addEventListener("click",()=>pan(15));id("chartReset").addEventListener("click",latest);
  id("chartFillFilter").addEventListener("change",e=>{fillFilter=e.target.value;selectedFillId=null;fillListKey="";overlayView()});
@@ -257,9 +258,52 @@
  function selectPreset(keys){selected=new Set(keys);updateStudyControls()}
  id("studyTrend").addEventListener("click",()=>selectPreset(presets.trend));id("studyMomentum").addEventListener("click",()=>selectPreset(presets.momentum));id("studyVolatility").addEventListener("click",()=>selectPreset(presets.volatility));id("studyClear").addEventListener("click",()=>selectPreset([]));
  for(const b of document.querySelectorAll("[data-study]"))b.addEventListener("click",()=>{const k=b.dataset.study;if(selected.has(k))selected.delete(k);else selected.add(k);updateStudyControls()});
- function expand(on){id("marketTerminal").classList.toggle("expanded-chart",on);id("marketFullscreen").textContent=on?"Close expanded chart":"Expand chart";id("marketFullscreen").setAttribute("aria-pressed",String(on))}
+ function fullscreenTools(on){
+   id("marketTerminal").classList.toggle("expanded-price-tools",on);
+   id("fullscreenTools").setAttribute("aria-expanded",String(on));
+ }
+ function expand(on){
+   const terminal=id("marketTerminal"),toggle=id("marketFullscreen");
+   if(terminal.classList.contains("expanded-chart")===on)return;
+   if(on){
+     modalReturnFocus=document.activeElement;
+     terminal.classList.add("expanded-chart");document.body.classList.add("chart-modal-open");
+     terminal.setAttribute("role","dialog");terminal.setAttribute("aria-modal","true");
+     id("fullscreenToolbar").hidden=false;
+     fullscreenTools(false);
+     for(const d of terminal.querySelectorAll("details"))d.open=false;
+     // Inert siblings along the ancestor chain, never the actual chart or its ancestors.
+     modalInert=[];
+     for(let n=terminal;n&&n!==document.body;n=n.parentElement){
+       for(const other of n.parentElement.children){
+         if(other===n||other.inert||["SCRIPT","STYLE","LINK"].includes(other.tagName))continue;
+         other.inert=true;modalInert.push(other);
+       }
+     }
+     terminal.scrollTop=0;toggle.textContent="Close chart";toggle.setAttribute("aria-pressed","true");
+     toggle.focus({preventScroll:true});
+   }else{
+     terminal.classList.remove("expanded-chart","expanded-price-tools");document.body.classList.remove("chart-modal-open");
+     terminal.removeAttribute("role");terminal.removeAttribute("aria-modal");id("fullscreenToolbar").hidden=true;
+     for(const other of modalInert)other.inert=false;
+     modalInert=[];toggle.textContent="Expand chart";toggle.setAttribute("aria-pressed","false");fullscreenTools(false);
+     if(visible()&&modalReturnFocus?.isConnected)modalReturnFocus.focus({preventScroll:true});
+     modalReturnFocus=null;
+   }
+ }
  id("marketFullscreen").addEventListener("click",()=>expand(!id("marketTerminal").classList.contains("expanded-chart")));
- document.addEventListener("keydown",e=>{if(e.key==="Escape"&&id("marketTerminal").classList.contains("expanded-chart"))expand(false)});
+ id("fullscreenTools").addEventListener("click",()=>fullscreenTools(id("fullscreenTools").getAttribute("aria-expanded")!=="true"));
+ for(const b of document.querySelectorAll("[data-chart-symbol]"))b.addEventListener("click",()=>document.dispatchEvent(new CustomEvent("recover:select-market",{detail:b.dataset.chartSymbol})));
+ document.addEventListener("keydown",e=>{
+   const terminal=id("marketTerminal");if(!terminal.classList.contains("expanded-chart"))return;
+   if(e.key==="Escape"){e.preventDefault();expand(false);return}
+   if(e.key!=="Tab")return;
+   const focusable=[...terminal.querySelectorAll("button:not([disabled]),select:not([disabled]),summary,a[href],[tabindex='0']")].filter(n=>n.getClientRects().length>0);
+   if(!focusable.length)return;
+   const first=focusable[0],last=focusable.at(-1);
+   if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus()}
+   else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus()}
+ });
  root.addEventListener("keydown",e=>{if(e.key==="ArrowLeft")pan(-5);else if(e.key==="ArrowRight")pan(5);else if(e.key==="+"||e.key==="=")zoom(.8);else if(e.key==="-")zoom(1.25);else return;e.preventDefault()});
  window.addEventListener("hashchange",()=>{if(visible()){load(true);loadQuote();dock()}else{generation++;busy=false;quoteGeneration++;quoteBusy=false;expand(false)}});
  load();loadQuote();setInterval(load,10000);setInterval(loadQuote,3000);
