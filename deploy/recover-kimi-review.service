@@ -1,0 +1,18 @@
+[Unit]
+Description=Recover Kimi historical learning reviewer
+After=network-online.target
+[Service]
+Type=oneshot
+User=recovertrading
+Group=recovertrading
+WorkingDirectory=/opt/recover-dashboard/current
+EnvironmentFile=/etc/recover-trading/demo.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/usr/bin/python3 -m recover_trading.kimi_review --journal /var/lib/recover-trading/outcome-learning --directory /var/lib/recover-trading/kimi-review
+TimeoutStartSec=220
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/recover-trading/kimi-review
+UMask=0077

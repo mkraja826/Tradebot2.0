@@ -136,6 +136,8 @@ def run(page,url,mobile=False):
     route("strategies")
     route("performance")
     route("learning")
+    expect(page.locator("#kimiStatus")).to_have_text("Not reviewed")
+    expect(page.locator("#kimiSummary")).to_contain_text("No verified Kimi report")
     page.locator("#learnOutcomeFilter").select_option("loss")
     route("health")
     expect(page.locator("#healthMarkets .health-market")).to_have_count(2)

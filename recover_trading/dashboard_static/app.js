@@ -393,7 +393,13 @@ function learnLessonView(m){
  table("learningRows",rows,[["Decision",r=>fmt(r.decision_id).slice(0,12)],["Outcome",r=>human(r.outcome)],["Net before funding",r=>fmt(r.net_before_funding)],["Entry deviation bps",r=>fmt(r.entry_evidence?.entry_deviation_bps)],["Observed exit gap bps",r=>fmt(r.exit_evidence?.observed_favorable_gap_bps)]]);
  if(all.length&&!rows.length)empty("learningRows","No lessons match this outcome");
 }
+function kimiView(m){
+ const k=m.kimi_review||{},r=k.review||{};$("kimiStatus").textContent=human(k.status||"not_reviewed");$("kimiMeta").textContent="Kimi K3 · TopBilling · "+fmt(k.evidence_count??0)+" recorded lessons"+(k.reviewed_at?" · "+time(k.reviewed_at):"");$("kimiSummary").textContent=k.status==="reviewed"?r.summary:"No verified Kimi report available yet.";
+ $("kimiLessons").replaceChildren(...(k.status==="reviewed"?(r.lessons||[]):[]).map(x=>{const n=el("article",undefined,"kimi-lesson");n.append(el("strong",human(x.kind)),el("p",x.text),el("small","Evidence: "+(x.evidence_ids||[]).join(", ")));return n}));
+ $("kimiLimits").replaceChildren(...(k.status==="reviewed"?(r.limitations||[]):[]).map(x=>el("p",x)));
+}
 function learnIntelligence(m){
+ kimiView(m);
  const ol=m.outcome_learning||{},lm=m.learning_memory||{},mc=m.memory_comparison||{},lessons=ol.lessons||[];
  const counts=["win","loss","breakeven"].map(k=>({status:k,count:lessons.filter(r=>r.outcome===k).length}));
  const unknown=lessons.length-counts.reduce((sum,x)=>sum+x.count,0);
