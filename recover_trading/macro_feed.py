@@ -17,8 +17,8 @@ ALFRED_SOURCE = "alfred_same_day_vintage_as_observed"
 
 
 def fetch(url):
-    with urlopen(Request(url, headers={"User-Agent": "RecoverTrading research/1.0",
-                                       "Accept-Encoding": "identity"}), timeout=5) as r:
+    request = url if url.startswith(ALFRED) else Request(url, headers={"User-Agent": "RecoverTrading research/1.0", "Accept-Encoding": "identity"})
+    with urlopen(request, timeout=8 if url.startswith(ALFRED) else 5) as r:
         raw = r.read(1_000_001)
     if len(raw)>1_000_000:
         raise ValueError("oversize")
