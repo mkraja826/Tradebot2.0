@@ -19,7 +19,7 @@ class ManagementLifecycleTests(unittest.TestCase):
         self.assertEqual(current_match(p,snap(-20),1001),"position_changed")
         self.assertEqual(reconcile(p,snap(),1001)["status"],"no_mutation_requested")
     def test_bracket_repair_and_amendment(self):
-        for action,orders in (("repair_bracket",[]),("update_bracket",legs(-25,106,94))):
+        for action,orders in (("repair_bracket",[]),("update_bracket",legs(-25,106,95))):
             p=self.p(action,orders,stop_loss=105,take_profit=95)
             self.assertEqual(reconcile(p,snap(orders=orders),1001,ack={"success":True})["status"],"legs_unverified" if not orders else "triggers_mismatch")
             self.assertEqual(reconcile(p,snap(orders=legs(-25)),1001,ack={"success":True})["status"],"matching_triggers_observed")
