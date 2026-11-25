@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
+from contextlib import ExitStack
 from recover_trading import service
 
 class DepartmentServiceTests(unittest.TestCase):
@@ -20,3 +21,47 @@ class DepartmentServiceTests(unittest.TestCase):
                         self.assertFalse(kw["manage_demo"])
                         self.assertIsNone(kw["broker"])
                         fake.run.assert_called_once()
+
+    def test_entry_management_handoff(self):
+        for symbol in ("BTCUSD","XAUTUSD"):
+            for state in ("flat","open","unknown"):
+                with self.subTest(symbol=symbol,state=state), tempfile.TemporaryDirectory() as tmp, ExitStack() as stack:
+                    report={"symbol":symbol,"as_of":300,"status":"ok","signals":[]}
+                    scan=Mock(return_value={"markets":{symbol:report}})
+                    svc=service.MarketService(symbol,tmp,model="fake",provider=Mock(),broker=Mock(),
+                        scan=scan,output=Mock(),manage_demo=True,
+                        learning_journal=Path(tmp)/"missing.sqlite")
+                    svc.executor=Mock()
+                    svc.decisions=Mock()
+                    svc.lifecycle=Mock()
+                    svc.lifecycle.refresh.return_value=({"positions":[]}
+                        if state=="flat" else {"positions":[{"size":1}]} if state=="open" else {})
+                    svc.management=Mock()
+                    svc.management.capture.return_value=({"status":"prepared","id":"test","context_bytes":10}
+                        if state=="open" else {"status":"no_fresh_position"})
+                    svc.management.evaluate.return_value={"status":"proposed"}
+                    svc.management_executor=Mock()
+                    svc.management_executor.execute.return_value={"status":"verified","attempted":True}
+                    svc.research=Mock()
+                    svc.research.record.return_value={}
+                    svc.planner=Mock()
+                    svc.planner.record.return_value={}
+                    for name in ("diagnostics","direction_for","opportunity","load_reference","packet","open_excursion_report"):
+                        stack.enter_context(patch.object(service,name,return_value={}))
+                    entry=stack.enter_context(patch.object(service,"evaluate_and_execute",return_value={"status":"test_entry"}))
+                    result=svc.cycle()
+                    packet=svc.management.capture.call_args.args[0]["department_learning"]
+                    self.assertEqual(packet["symbol"],symbol)
+                    self.assertEqual(packet["status"],"unavailable")
+                    if state=="flat":
+                        entry.assert_called_once()
+                        self.assertEqual(entry.call_args.args[0]["department_learning"],packet)
+                        svc.management_executor.execute.assert_not_called()
+                    elif state=="open":
+                        entry.assert_not_called()
+                        svc.management_executor.execute.assert_called_once_with(symbol,"test",enabled=True)
+                        self.assertEqual(result["status"],"position_management_cycle")
+                    else:
+                        entry.assert_not_called()
+                        svc.management_executor.execute.assert_not_called()
+                        self.assertEqual(result["status"],"position_management_cycle")
