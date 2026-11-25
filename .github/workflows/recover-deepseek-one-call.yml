@@ -1,0 +1,29 @@
+name: Recover DeepSeek one-call compatibility
+on:
+  pull_request:
+    types: [synchronize]
+    branches: [recover-trading-foundation]
+permissions:
+  contents: read
+concurrency:
+  group: recover-deepseek-one-call-95
+  cancel-in-progress: false
+jobs:
+  smoke:
+    if: ${{ github.repository == 'mkraja826/Tradebot2.0' && github.event.pull_request.number == 95 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'recover/three-department-integration' && github.event.before == '84009286055c54cdc5ad16667ff0858deb1929b7' && github.run_attempt == 1 }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: One synthetic completion, no exchange calls
+        env:
+          TB_API_KEY: ${{ secrets.TB_API_KEY }}
+        run: |
+          if [ -z "$TB_API_KEY" ]; then
+            echo "SKIPPED: repository TopBilling secret not available"
+            exit 1
+          fi
+          python -m recover_trading.management_probe --model tb-deepseek-v4-pro --symbol BTCUSD --scenario profit_retention --direction SHORT --call-provider
