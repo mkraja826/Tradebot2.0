@@ -1,0 +1,2 @@
+# Decision quality evidence
+Read-only report combines attributed closed outcome accounting, latest 100 decision records, historical submission position context and verified management attempts. Distinguish process failures, adverse reference deviation and incompatible original bracket geometry from losses. No causal inference from sparse outcomes, no provider calls, no retraining or execution changes. Existing realized outcomes exclude funding. Counts have explicit source scope.
