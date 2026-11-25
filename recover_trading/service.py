@@ -19,6 +19,7 @@ from .planner_shadow import packet,load_reference,ShadowJournal
 from .lifecycle import Lifecycle
 from .bracket_repair import BracketRepair
 from .management_shadow import ManagementShadow
+from .open_excursion import report as open_excursion_report
 from .management_executor import ManagementExecutor
 from .execution import product_for
 from .market_quality import diagnostics
@@ -126,9 +127,10 @@ class MarketService:
                 planner=self.planner.record(packet(report,direction,reference))
             except Exception as exc:
                 planner={"status":"shadow_error","error":type(exc).__name__,"execution_effect":"none"}
+        excursion=open_excursion_report(self.directory,self.symbol,lifecycle,int(time.time())) if self.lifecycle is not None else None
         management=None
         if self.management is not None and report.get("status")!="scan_error":
-            try:management=self.management.capture(report,lifecycle,self.model,lambda s:product_for(self.broker,s))
+            try:management=self.management.capture(report,lifecycle,self.model,lambda s:product_for(self.broker,s),excursion=excursion)
             except Exception as exc:management={"status":"capture_error","error":type(exc).__name__,"execution_effect":"none"}
         managed={"status":"execution_disabled" if not self.manage_demo else "awaiting_next_sample","enabled":self.manage_demo,"attempted":False}
         if self.manage_demo and management:
@@ -175,6 +177,7 @@ class MarketService:
                  "planner_shadow": planner,
                  "bracket_repair": repair,
                  "management_shadow": management,
+                 "open_excursion":excursion,
                  "management_execution": managed,
                  "management_reconciliation": management_reconciliation,
                  "error": summary.get("error", summary.get("reason")),

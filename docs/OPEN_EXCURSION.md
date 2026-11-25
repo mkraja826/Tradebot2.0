@@ -1,0 +1,2 @@
+# Open excursion evidence
+Read-only single-entry and partial-reduction lineage anchored by a preceding flat fill, matching position size, entry and creation timestamp. Completed interior trade-price candles and actual fills establish observed lower bounds; mark return separately reported. Incomplete and unsupported contexts are explicit. Worker refreshes each cycle and includes matching evidence in new management packets. No extra AI requests or execution rules. Multi-entry and exact mark-price path remain unsupported.

@@ -16,8 +16,8 @@ observed mark price. Repair is only for a position with no active orders; update
 for matching existing legs. For reduce include positive integer contracts strictly
 less than current absolute size. Close means the entire current position. Do not
 increase exposure, reverse, cancel orders, or claim execution. Consensus is evidence,
-not a mandate to close or reverse. All output is advisory and cannot execute."""
-def context_for(report,snapshot,product,now):
+not a mandate to close or reverse. Open excursion evidence is a trade-price lower bound with coverage, not a complete mark-price history. Current mark return is separate. Use as context only; missing coverage is not zero movement. All output is advisory and cannot execute."""
+def context_for(report,snapshot,product,now,excursion=None):
     symbol=report["symbol"];at=report["as_of"]
     view=observe(snapshot,symbol,now)
     if view["position_state"] not in ("long","short") or type(at) is not int or not -1<=now-at<=180:
@@ -36,6 +36,8 @@ def context_for(report,snapshot,product,now):
       "market":report.get("market_context",{}),"coverage":report.get("coverage",{})}
     from .management_executor import identity
     context["execution_identity"]=identity(snapshot)
+    if isinstance(excursion,dict) and excursion.get("observed")==view["observed"] and excursion.get("position_created_at")==pos.get("created_at") and dec(excursion.get("size"))==qty:
+        context["open_excursion"]=excursion
     return compact_context(context)
 
 def validate(raw,context):
@@ -68,7 +70,7 @@ class ManagementShadow:
           id TEXT PRIMARY KEY,symbol TEXT NOT NULL,bucket INTEGER NOT NULL,
           created INTEGER NOT NULL,model TEXT NOT NULL,status TEXT NOT NULL,
           context TEXT NOT NULL,result TEXT,UNIQUE(symbol,bucket))""")
-    def capture(self,report,snapshot,model,product_reader,now=None):
+    def capture(self,report,snapshot,model,product_reader,now=None,*,excursion=None):
         now=int(time.time()) if now is None else now
         symbol=report["symbol"]
         view=observe(snapshot,symbol,now)
@@ -76,7 +78,7 @@ class ManagementShadow:
         bucket=now//300
         previous=self.db.execute("SELECT id,status FROM management_shadow WHERE symbol=? AND bucket=?",(symbol,bucket)).fetchone()
         if previous:return {"version":VERSION,"status":previous[1],"id":previous[0],"execution_effect":"none"}
-        context=context_for(report,snapshot,product_reader(symbol),now)
+        context=context_for(report,snapshot,product_reader(symbol),now,excursion)
         if context is None:return {"version":VERSION,"status":"context_unavailable","execution_effect":"none"}
         raw=encode(context);ident=hashlib.sha256(encode([VERSION,symbol,bucket,raw]).encode()).hexdigest()
         with self.db:self.db.execute("INSERT OR IGNORE INTO management_shadow VALUES(?,?,?,?,?,'prepared',?,NULL)",(ident,symbol,bucket,now,model,raw))
