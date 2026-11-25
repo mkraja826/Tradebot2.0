@@ -40,6 +40,10 @@ def run(page,url,mobile=False):
         button.click()
         expect(page.locator('[data-workspace="'+name+'"]')).to_be_visible()
         expect(button).to_have_attribute("aria-current","page")
+        if mobile:
+            # Check hit testing, not only visibility; a covered navigation button is a real failure.
+            assert page.evaluate("""() => {const b=document.querySelector('#workspaceNav [data-page="performance"]');const r=b.getBoundingClientRect();return b.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))}"""),"Performance navigation covered on "+name
+            assert page.evaluate("document.documentElement.scrollWidth <= innerWidth + 1"),"Horizontal document overflow on "+name
     route("live")
     expect(page.locator("#marketChart svg")).to_be_visible(timeout=20000)
     page.locator('[data-frame="15m"]').click()

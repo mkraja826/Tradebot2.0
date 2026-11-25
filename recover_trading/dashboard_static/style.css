@@ -58,3 +58,18 @@ html{scroll-padding-top:calc(var(--header) + 12px)}.workspace-link,.quiet-button
 @media(max-width:760px){.topbar{padding-left:max(13px,env(safe-area-inset-left));padding-right:max(13px,env(safe-area-inset-right))}.sidebar{overflow:visible;padding-left:max(5px,env(safe-area-inset-left));padding-right:max(5px,env(safe-area-inset-right))}main{padding-bottom:calc(95px + env(safe-area-inset-bottom));padding-left:max(13px,env(safe-area-inset-left));padding-right:max(13px,env(safe-area-inset-right))}#workspaceNav>[data-page="overview"]{grid-column:1}#workspaceNav>[data-page="live"]{grid-column:2}#workspaceNav>[data-page="intelligence"]{grid-column:3}#workspaceNav>[data-page="performance"]{grid-column:4}#workspaceNav>#morePages{grid-column:5}#workspaceNav>.workspace-link:not(.secondary-link){grid-row:2}#workspaceNav.expanded{row-gap:6px}#workspaceNav.expanded .secondary-link{grid-row:1;min-height:56px}#workspaceNav.expanded>[data-page="history"]{grid-column:1}#workspaceNav.expanded>[data-page="strategies"]{grid-column:2}#workspaceNav.expanded>[data-page="learning"]{grid-column:3}#workspaceNav.expanded>[data-page="health"]{grid-column:4}#workspaceNav.expanded .secondary-link span{font-size:10px}#workspaceNav .workspace-link{min-height:52px}.chart-tools button,.scope button,.quiet-button,.lab-cell{min-height:44px}.history-controls input,.history-controls select,.trade-inspector select,.learn-filter select,.lab-controls input,.lab-controls select{font-size:16px;min-height:44px}.chart-tools .timeframes{flex-wrap:nowrap;max-width:100%;overflow-x:auto;scrollbar-width:thin}.timeframes button{flex:0 0 auto}.skeleton-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.skeleton-card:last-child{display:none}#refresh{max-width:160px;text-align:right}.market-switch button{min-height:48px}.section-head{gap:8px}}
 @media(max-width:360px){main{padding-left:10px;padding-right:10px}.hero-stats{gap:5px}.hero-stats strong{font-size:16px}.hero-stats small{font-size:9px}.overview-hero{padding:14px}.metric strong{font-size:16px}.workspace-link span{font-size:8px}.brand small{display:none}.learn-signed{grid-template-columns:58px minmax(20px,1fr) 70px}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+
+/* Keep fixed mobile navigation above all scrolling workspace content. */
+@media(max-width:760px){
+ html,body{max-width:100%;overflow-x:clip}
+ main{position:relative;z-index:0;max-width:100%;width:100%}
+ main:has(.expanded-chart){z-index:30}
+ .sidebar{position:fixed;inset:auto 0 0;width:auto;z-index:25;isolation:isolate}
+ #workspaceNav{width:100%;min-width:0;grid-template-columns:repeat(5,minmax(0,1fr));grid-auto-rows:auto}
+ #workspaceNav>.workspace-link{min-width:0;max-width:100%;overflow-wrap:anywhere}
+ #workspaceNav:not(.expanded)>.workspace-link:not(.secondary-link){grid-row:1}
+ .lab-controls,.lab-controls>label,.lab-market,.lab-matrix,.lab-matrix>button,.lab-horizons>div,.lab-detail-head>div{min-width:0}
+ .lab-controls{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .lab-controls input,.lab-controls select{width:100%;max-width:100%}
+ .scroll{max-width:100%}
+}
