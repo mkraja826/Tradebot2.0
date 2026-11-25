@@ -1,0 +1,24 @@
+[Unit]
+Description=Recover Trading read-only market preview (%i)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=recovertrading
+Group=recovertrading
+WorkingDirectory=/opt/recover-trading/current
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/usr/bin/python3 -m recover_trading.service --symbol %i --data-dir /var/lib/recover-trading/preview --interval 60
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=180
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/recover-trading/preview
+
+[Install]
+WantedBy=multi-user.target
