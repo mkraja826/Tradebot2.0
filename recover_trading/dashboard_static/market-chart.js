@@ -52,7 +52,7 @@
    }catch(e){if(g===generation){id("marketChartStatus").textContent="Chart connection unavailable · retained data may be stale";id("marketChartStatus").className="caution"}}
    finally{if(g===generation)busy=false}
  }
- function resetSelection(){packet=null;offset=0;hover=null;root.replaceChildren();id("marketChartTitle").textContent=symbol+" · "+frame;id("marketChartLast").textContent="—";id("marketChartStatus").textContent="Loading chart…";load(true)}
+ function resetSelection(){generation++;busy=false;packet=null;offset=0;hover=null;root.replaceChildren();id("marketChartTitle").textContent=symbol+" · "+frame;id("marketChartLast").textContent="—";id("marketChartStatus").textContent="Loading chart…";load(true)}
  document.addEventListener("recover:market",e=>{if(symbol!==e.detail){symbol=e.detail;resetSelection()}});
  for(const b of document.querySelectorAll("[data-frame]"))b.addEventListener("click",()=>{frame=b.dataset.frame;for(const a of document.querySelectorAll("[data-frame]"))a.setAttribute("aria-pressed",String(a===b));resetSelection()});
  id("chartZoomIn").addEventListener("click",()=>zoom(.8));id("chartZoomOut").addEventListener("click",()=>zoom(1.25));
@@ -66,7 +66,7 @@
  root.addEventListener("pointermove",e=>{if(!packet?.candles.length)return;const rect=root.getBoundingClientRect();if(drag){offset=Math.max(0,Math.min(limit(),drag.offset+Math.round((e.clientX-drag.x)*windowSize/Math.max(1,rect.width-89))));hover=null}else{const last=packet.candles.at(-1).time-offset*packet.step;hover=last-(windowSize-1)*packet.step+Math.round((e.clientX-rect.left-10)*windowSize/Math.max(1,rect.width-89))*packet.step}view()});
  for(const event of ["pointerup","pointercancel","lostpointercapture"])root.addEventListener(event,()=>{drag=null});
  root.addEventListener("pointerleave",()=>{if(!drag){hover=null;view()}});
- window.addEventListener("hashchange",()=>{if(visible()){view();load(true)}});
+ window.addEventListener("hashchange",()=>{if(visible()){view();load(true)}else{generation++;busy=false;id("marketTerminal").classList.remove("expanded-chart");id("marketFullscreen").textContent="Expand chart"}});
  new ResizeObserver(()=>{if(visible())view()}).observe(root);
  load();setInterval(load,10000);
 })();
