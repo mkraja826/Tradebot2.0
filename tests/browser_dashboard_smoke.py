@@ -23,6 +23,9 @@ def seed(root):
                     t=end-(99-i)*step
                     o=1000*(index+1)+i
                     p={"time":t,"open":o,"high":o+3,"low":o-2,"close":o+1,"volume":i+1}
+                    if symbol=="XAUTUSD" and frame=="15m" and i==95:
+                        p["high"]=o*2
+                        p["low"]=o/2
                     db.execute("INSERT INTO samples VALUES(?,?,?,?)",(symbol,"candle:"+frame,t,json.dumps(p)))
 
 def run(page,url,mobile=False):
@@ -62,6 +65,16 @@ def run(page,url,mobile=False):
     page.locator('[data-symbol="XAUTUSD"]').click()
     expect(page.locator("#marketChartTitle")).to_have_text("XAUTUSD · 15m")
     expect(page.locator("#marketChart canvas").first).to_be_visible()
+    expect(page.locator("#scaleFocus")).to_have_attribute("aria-pressed","true")
+    expect(page.locator("#chartScaleNote")).to_contain_text("raw OHLC unchanged")
+    page.locator("#scaleFull").click()
+    expect(page.locator("#chartScaleNote")).to_contain_text("Full range")
+    page.locator("#scaleLog").click()
+    expect(page.locator("#chartScaleNote")).to_contain_text("Logarithmic axis")
+    page.locator("#scaleLog").click()
+    page.locator("#scaleFocus").click()
+    page.locator("#scaleAuto").click()
+    expect(page.locator("#chartScaleNote")).to_contain_text("Body focus")
     page.screenshot(path="browser-artifacts/"+("mobile" if mobile else "desktop")+"-chart.png",full_page=True)
     route("history")
     page.locator("#historyQuery").fill("fixture")
