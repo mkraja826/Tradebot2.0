@@ -263,5 +263,5 @@ function render(){
 $("scopeRecover").addEventListener("click",()=>{scope="recover";render()});
 $("scopeAccount").addEventListener("click",()=>{scope="account";render()});
 for(const b of document.querySelectorAll("[data-symbol]"))b.addEventListener("click",()=>chooseMarket(b.dataset.symbol));
-async function refresh(){if(busy)return;busy=true;try{const r=await fetch("/api/overview",{cache:"no-store"});if(!r.ok)throw Error();data=await r.json();render();$("refresh").textContent="Updated "+time(data.generated)}catch{$("refresh").textContent="Refresh failed · retained data";$("warning").textContent="Dashboard connection unavailable. Previously displayed data may be stale."}finally{busy=false}}
+async function refresh(){if(busy)return;busy=true;try{const r=await fetch("/api/overview",{cache:"no-store"});if(!r.ok)throw Error();data=await r.json();document.dispatchEvent(new CustomEvent("recover:overview",{detail:data.markets.map(m=>m.chart_overlay).filter(Boolean)}));render();$("refresh").textContent="Updated "+time(data.generated)}catch{$("refresh").textContent="Refresh failed · retained data";$("warning").textContent="Dashboard connection unavailable. Previously displayed data may be stale."}finally{busy=false}}
 refresh();setInterval(refresh,10000);
