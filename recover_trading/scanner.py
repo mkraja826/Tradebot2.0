@@ -99,7 +99,7 @@ def scan_market(store, client, symbol, *, clock=time.time,
 
 
 def scan_once(path, *, client=None, symbols=MARKETS, clock=time.time,
-              gold_reference=collect_gold_reference):
+              gold_reference=collect_gold_reference, external_context=collect_context):
     store = MarketStore(path)
     client = public_client() if client is None else client
     reports = {}
