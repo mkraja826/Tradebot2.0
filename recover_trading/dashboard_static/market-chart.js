@@ -1,7 +1,7 @@
 "use strict";
 (()=>{
  const id=x=>document.getElementById(x),root=id("marketChart"),ns="http://www.w3.org/2000/svg";
- let symbol=document.querySelector("[data-symbol][aria-pressed=true]")?.dataset.symbol||"BTCUSD",frame="5m",packet=null,windowSize=80,offset=0,ema=false,generation=0,busy=false,drag=null,hover=null,levels=true,showFills=true,overlays=new Map();
+ let symbol=document.querySelector("[data-symbol][aria-pressed=true]")?.dataset.symbol||"BTCUSD",frame="5m",packet=null,windowSize=80,offset=0,ema=false,generation=0,busy=false,drag=null,hover=null,levels=true,showFills=true,overlays=new Map(),dockKey="";
  const colors={up:"#29c99a",down:"#f27783",grid:"#303943",muted:"#a1aebb",ema:"#e6b65c"};
  const fmt=(n,d=2)=>Number.isFinite(n)?n.toLocaleString(undefined,{minimumFractionDigits:d,maximumFractionDigits:d}):"—";
  const node=(tag,attrs={},text)=>{const el=document.createElementNS(ns,tag);for(const [k,v] of Object.entries(attrs))el.setAttribute(k,String(v));if(text!==undefined)el.textContent=text;return el};
@@ -10,7 +10,7 @@
  function overlay(){return overlays.get(symbol)||{}}
  function isFresh(o){const age=Date.now()/1000-o.observed;return Number.isFinite(o.observed)&&age>=-5&&age<=180}
  function dock(){
-   const o=overlay(),fresh=isFresh(o),wrap=id("positionDock");wrap.replaceChildren();
+   const o=overlay(),fresh=isFresh(o),wrap=id("positionDock"),key=JSON.stringify([symbol,fresh,o.observed,o.status,o.direction,o.contracts,o.unrealized_pnl,o.lines,o.bracket_state,o.management]);if(key===dockKey)return;dockKey=key;wrap.replaceChildren();
    const text=(tag,value,cls)=>{const n=document.createElement(tag);n.textContent=value;if(cls)n.className=cls;return n};
    if(!fresh||o.status!=="position_observed"){wrap.append(text("p",fresh&&o.status==="flat"?"No open position":"Position observation unavailable or stale","caution"));return}
    wrap.append(text("strong",o.direction+" · "+o.contracts+" contracts","dock-side "+(o.direction==="LONG"?"gain":"loss")),text("small","Exchange unrealized P&L","dock-label"),text("strong",o.unrealized_pnl==null?"—":fmt(Number(o.unrealized_pnl))+" USD","dock-pnl "+(Number(o.unrealized_pnl)>=0?"gain":"loss")));
@@ -25,7 +25,7 @@
    const all=packet.candles,step=packet.step,last=all.at(-1).time,finish=last-offset*step,start=finish-(windowSize-1)*step;
    const rows=all.filter(r=>r.time>=start&&r.time<=finish);
    if(!rows.length){root.replaceChildren();return}
-   const W=Math.max(300,root.clientWidth||600),H=Math.max(270,root.clientHeight||400),left=10,right=W-88,top=12,bottom=H-77,volTop=H-59,volBottom=H-28;
+   const W=Math.max(300,root.clientWidth||600),H=Math.max(270,root.clientHeight||400),left=10,right=W-108,top=12,bottom=H-77,volTop=H-59,volBottom=H-28;
    const o=overlay(),liveLines=levels&&offset===0&&isFresh(o)&&o.status==="position_observed"?(o.lines||[]).filter(l=>lineStyle[l.kind]&&Number.isFinite(l.price)&&l.price>0):[];
    const times=new Set(rows.map(r=>r.time)),fills=showFills?(o.fills||[]).filter(f=>Number.isFinite(f.price)&&f.price>0&&times.has(Math.floor(f.time/step)*step)):[];
    const prices=[...liveLines.map(l=>l.price),...fills.map(f=>f.price)];
@@ -49,7 +49,7 @@
    const positioned=liveLines.map(l=>({...l,y:Y(l.price)})).sort((a,b)=>a.y-b.y);let prev=top-15;
    for(const l of positioned){l.labelY=Math.max(l.y,prev+15);prev=l.labelY}
    if(positioned.length&&prev>bottom){const delta=prev-bottom;for(const l of positioned)l.labelY-=delta}
-   for(const l of positioned){const [label,c]=lineStyle[l.kind];add("line",{x1:left,x2:right,y1:l.y,y2:l.y,stroke:c,"stroke-dasharray":l.kind==="mark"?"2 3":"6 4","stroke-width":1});add("line",{x1:right,x2:right+5,y1:l.y,y2:l.labelY,stroke:c});add("rect",{x:right+5,y:l.labelY-7,width:81,height:14,rx:2,fill:"#202833",stroke:c,"stroke-width":.5});add("text",{x:right+9,y:l.labelY+3,fill:c,"font-size":9},label+" "+fmt(l.price,1))}
+   for(const l of positioned){const [label,c]=lineStyle[l.kind];add("line",{x1:left,x2:right,y1:l.y,y2:l.y,stroke:c,"stroke-dasharray":l.kind==="mark"?"2 3":"6 4","stroke-width":1});add("line",{x1:right,x2:right+5,y1:l.y,y2:l.labelY,stroke:c});add("rect",{x:right+5,y:l.labelY-7,width:101,height:14,rx:2,fill:"#202833",stroke:c,"stroke-width":.5});add("text",{x:right+9,y:l.labelY+3,fill:c,"font-size":9},label+" "+fmt(l.price,2))}
    for(const f of fills){const x=X(Math.floor(f.time/step)*step),y=Y(f.price),c=f.side==="buy"?colors.up:colors.down;
      const dot=add("circle",{cx:x,cy:y,r:4.2,fill:c,stroke:"#141a22","stroke-width":1.3});dot.append(node("title",{},f.kind+" · "+f.side+" "+f.size+" @ "+fmt(f.price)+" · "+new Date(f.time*1000).toLocaleString()));
      if(f.kind==="entry"||f.kind==="exit")add("text",{x:x+6,y:y-6,fill:c,"font-size":10,"font-weight":700},f.kind==="entry"?"E":"X");
@@ -93,7 +93,7 @@
  root.addEventListener("keydown",e=>{if(e.key==="ArrowLeft"){pan(5)}else if(e.key==="ArrowRight"){pan(-5)}else if(e.key==="+"||e.key==="="){zoom(.8)}else if(e.key==="-"){zoom(1.25)}else return;e.preventDefault()});
  root.addEventListener("wheel",e=>{if(!e.ctrlKey&&!e.metaKey)return;e.preventDefault();zoom(e.deltaY>0?1.15:.87)},{passive:false});
  root.addEventListener("pointerdown",e=>{if(!packet?.candles.length)return;drag={x:e.clientX,offset};root.setPointerCapture(e.pointerId)});
- root.addEventListener("pointermove",e=>{if(!packet?.candles.length)return;const rect=root.getBoundingClientRect();if(drag){offset=Math.max(0,Math.min(limit(),drag.offset+Math.round((e.clientX-drag.x)*windowSize/Math.max(1,rect.width-89))));hover=null}else{const last=packet.candles.at(-1).time-offset*packet.step;hover=last-(windowSize-1)*packet.step+Math.round((e.clientX-rect.left-10)*windowSize/Math.max(1,rect.width-89))*packet.step}view()});
+ root.addEventListener("pointermove",e=>{if(!packet?.candles.length)return;const rect=root.getBoundingClientRect();if(drag){offset=Math.max(0,Math.min(limit(),drag.offset+Math.round((e.clientX-drag.x)*windowSize/Math.max(1,rect.width-118))));hover=null}else{const last=packet.candles.at(-1).time-offset*packet.step;hover=last-(windowSize-1)*packet.step+Math.round((e.clientX-rect.left-10)*windowSize/Math.max(1,rect.width-118))*packet.step}view()});
  for(const event of ["pointerup","pointercancel","lostpointercapture"])root.addEventListener(event,()=>{drag=null});
  root.addEventListener("pointerleave",()=>{if(!drag){hover=null;view()}});
  window.addEventListener("hashchange",()=>{if(visible()){view();load(true)}else{generation++;busy=false;id("marketTerminal").classList.remove("expanded-chart");id("marketFullscreen").textContent="Expand chart"}});
