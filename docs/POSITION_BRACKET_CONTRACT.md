@@ -1,0 +1,2 @@
+# Position bracket creation compatibility
+Delta India documentation https://docs.delta.exchange/ section Place Bracket order: POST /v2/orders/bracket targets the whole position without size; stop and target objects can be market orders. Success-only response is an acknowledgment, not proof of active orders. Endpoint-specific response parsing and fixture-only payload/verification tests. No callable repair command, execution integration, automatic repricing, or exchange mutation. Actual demo behavior and authorization of replacement trigger levels remain pending.

@@ -12,6 +12,7 @@ from .performance import read_performance
 from .decision_review import read_review
 from .submission_audit import read_audit
 from .position_preview import observe
+from .bracket_contract import repair_status
 from .postfill_bracket import audit as postfill_audit
 from .management_compat import audit as management_audit
 
@@ -130,7 +131,7 @@ def report(root, symbol):
     position_preview=observe(latest,symbol,int(time.time()),unresolved)
     receipts=query(orders,"SELECT detail FROM orders WHERE symbol=? AND status='acknowledged'",(symbol,))
     postfill=postfill_audit(latest,symbol,int(time.time()),[decode(r["detail"]) for r in receipts or []],[decode(r["detail"]) for r in fills or [] if isinstance(decode(r["detail"]),dict)])
-    return {"symbol":symbol,"performance":performance,"position_preview":position_preview,"postfill_bracket":postfill,"management_compat":management_audit(root,symbol,int(time.time())),"submission_audit":read_audit(root,symbol),"decision_review":read_review(root,symbol,performance),"forward_validation":forward_report(root,symbol),"dual_market":dual_report(root,symbol),"reference_strategy":reference_strategy_report(root,symbol),"paired_forward":paired_forward_report(root,symbol),"planner_comparison":planner_comparison_report(root,symbol),"signal_research":research,"heartbeat":heartbeat,"snapshot":latest,"wallet_history":history,
+    return {"symbol":symbol,"performance":performance,"position_preview":position_preview,"postfill_bracket":postfill,"bracket_contract":repair_status(latest,symbol,int(time.time())),"management_compat":management_audit(root,symbol,int(time.time())),"submission_audit":read_audit(root,symbol),"decision_review":read_review(root,symbol,performance),"forward_validation":forward_report(root,symbol),"dual_market":dual_report(root,symbol),"reference_strategy":reference_strategy_report(root,symbol),"paired_forward":paired_forward_report(root,symbol),"planner_comparison":planner_comparison_report(root,symbol),"signal_research":research,"heartbeat":heartbeat,"snapshot":latest,"wallet_history":history,
             "decisions":decision_rows,"orders":entries,"fills":[decode(f["detail"]) for f in fills] if fills is not None else None,
             "prices":points,"order_counts":counts,"decision_counts":dc,
             "availability":{"decisions":proposals is not None,"orders":entries is not None,

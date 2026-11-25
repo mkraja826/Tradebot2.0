@@ -100,6 +100,10 @@ class DeltaDemo:
         try:data=json.loads(raw)
         except (ValueError,TypeError):
             raise BrokerError("Demo invalid JSON",category="invalid_response") from None
+        # Position-bracket creation/amendment returns an acknowledgment
+        # without a result. Scope the exception to these documented routes.
+        if path=="/v2/orders/bracket" and method in ("POST","PUT") and isinstance(data,dict) and data.get("success") is True:
+            return {"success":True}
         if not isinstance(data, dict) or data.get("success") is not True or "result" not in data:
             raise BrokerError("Demo exchange rejected request or returned invalid response",
                 category="exchange_rejection" if isinstance(data,dict) and data.get("success") is False else "invalid_response",
