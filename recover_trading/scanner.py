@@ -75,7 +75,7 @@ def scan_market(store, client, symbol, *, clock=time.time,
     if symbol == "XAUTUSD":
         try:
             refs = external_context()
-            health.update({"external:" + k: {"status": v["status"], **({"reason": v["reason"]} if "reason" in v else {})} for k, v in refs.items()})
+            health.update({"external:" + k: {"status": v["status"], **({k:v[k] for k in ("reason","source","vintage_date") if k in v})} for k, v in refs.items()})
         except Exception as exc:
             health["external"] = {"status": "unavailable", "reason": type(exc).__name__}
     # Round the snapshot cutoff up so subsecond observations just recorded are included.

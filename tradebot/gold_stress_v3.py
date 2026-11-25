@@ -24,7 +24,7 @@ def parse(raw,key,now):
 
 def validate(data,key,today):
     field,n,maxage,span=FIELDS[key]
-    if data["source"]!="fred_as_observed" or data["series"]!=field: raise ValueError("wrong_series")
+    if data["source"] not in ("fred_as_observed","alfred_same_day_vintage_as_observed") or data["series"]!=field: raise ValueError("wrong_series")
     rows=data["observations"]
     if len(rows)!=n: raise ValueError("missing_history")
     ds=[date.fromisoformat(r["date"]) for r in rows]; vs=[r["value"] for r in rows]

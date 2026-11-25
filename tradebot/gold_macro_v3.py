@@ -28,7 +28,7 @@ def features(refs,*,observed_at):
             item=refs[key]; stamp=item["observed_at"]
             if item["status"]!="ready" or type(stamp) not in (int,float) or not 0<=observed_at-stamp<=22200: continue
             hist=item["macro_history"]
-            if hist["source"]!="fred_daily_as_observed": continue
+            if hist["source"] not in ("fred_daily_as_observed","alfred_same_day_vintage_as_observed"): continue
             changes={}; dates={}
             for k in keys:
                 rows=hist["series"][k]
