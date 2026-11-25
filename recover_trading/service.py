@@ -17,6 +17,7 @@ from .research import SignalResearch
 from .opportunity import opportunity
 from .planner_shadow import packet,load_reference,ShadowJournal
 from .lifecycle import Lifecycle
+from .bracket_repair import BracketRepair
 from .market_quality import diagnostics
 from tradebot.market_data_v3 import MARKETS
 
@@ -44,7 +45,7 @@ class MarketService:
         self.scan, self.output = scan, output
         if broker is not None and (provider is None or not model):
             raise ValueError("Execution requires configured AI")
-        self.decisions = self.orders = self.executor = self.lifecycle = None
+        self.decisions = self.orders = self.executor = self.lifecycle = self.repair = None
 
     def open(self):
         self.research = SignalResearch(self.directory / "signal_research.sqlite")
@@ -54,11 +55,12 @@ class MarketService:
             self.orders = Journal(self.directory / "orders.sqlite")
             self.executor = DemoExecutor(self.broker, self.orders)
             self.lifecycle = Lifecycle(self.broker, self.orders)
+            self.repair = BracketRepair(self.broker,self.orders)
 
     def close(self):
         if self.orders is not None:
             self.orders.close()
-        self.executor = self.orders = self.decisions = self.lifecycle = None
+        self.executor = self.orders = self.decisions = self.lifecycle = self.repair = None
 
     def publish(self, event):
         # Atomic replacement keeps dashboard reads independent of worker writes.
@@ -83,6 +85,7 @@ class MarketService:
                 lifecycle = self.lifecycle.refresh(self.symbol)
             except Exception as exc:
                 lifecycle = {"errors": {"refresh": type(exc).__name__}}
+        repair = self.repair.cycle(self.symbol,lifecycle) if self.repair is not None else None
         lifecycle_ms=round((time.monotonic()-started)*1000)
         scan_started=time.monotonic()
         report = self.scan(self.directory / "market.sqlite", symbols=(self.symbol,),
@@ -138,6 +141,7 @@ class MarketService:
                  "market_quality": quality,
                  "cycle_timing_ms":{"lifecycle":lifecycle_ms,"scan":scan_ms,"decision_execution":round((time.monotonic()-execution_started)*1000),"total":round((time.monotonic()-started)*1000)},
                  "planner_shadow": planner,
+                 "bracket_repair": repair,
                  "error": summary.get("error", summary.get("reason")),
                  "reconciliation_error": reconciliation_error,
                  "lifecycle": {"new_fills": lifecycle.get("new_fills"),
