@@ -52,6 +52,10 @@ function render(){
  const rows=research.filter(x=>x.observed>0).slice(0,20);
  if(rows.length){const list=el("ul");for(const x of rows)list.append(el("li",x.rule_id+" · "+human(x.regime)+" · "+x.horizon_s/60+"m · "+x.observed+" observations · "+fmt(x.avg_mark_return_bps)+" bps average"));$("strategies").append(list)}
  $("strategies").append(el("p","Research uses forward mark-price returns, not executed trade P&L. Full per-rule aggregates are in the dashboard API.","empty"));
+ const opp=h.opportunity||{},atr=opp.atr_by_frame?.["15m"];
+ $("strategies").append(el("p","Opportunity evidence: "+human(opp.status)+" · Mark: "+fmt(opp.reference_price)+" · Spread (bps): "+fmt(opp.observed_spread_bps)),
+ el("p","15m ATR (bps): "+fmt(atr?.atr_bps)+" · Nearest below: "+fmt(opp.nearest_below?.price)+" · Above: "+fmt(opp.nearest_above?.price)),
+ el("p","Illustrative round-trip cost: "+fmt(opp.assumed_round_trip_cost_bps)+" bps. Research evidence only; not a trade instruction.","empty"));
  bars("counts",m.order_counts);
  table("decisions",m.availability.decisions?m.decisions:null,[["Time",r=>time(r.created)],["Model",r=>r.model],["Decision",r=>human(r.result?.action||r.status)],["Side",r=>r.result?.side],["Capital budget",r=>r.result?.capital_allocation],["Size",r=>r.result?.size],["SL",r=>r.result?.stop_loss],["TP",r=>r.result?.take_profit],["Signals",r=>r.signals.map(s=>s.id+" "+s.frame).join(", ")],["Reason",r=>r.result?.reason||r.result?.error]]);
  table("orders",m.orders,[["Client ID",r=>r.client_id.slice(0,12)],["Submission",r=>human(r.status)],["Exchange state",r=>human(r.exchange?.status)],["Side",r=>r.intent?.side],["Size",r=>r.intent?.size],["Filled",r=>r.exchange?.filled_size],["Fill price",r=>r.exchange?.order?.average_fill_price],["SL",r=>r.intent?.stop_loss],["TP",r=>r.intent?.take_profit]]);

@@ -14,6 +14,7 @@ from .execution import DemoExecutor, evaluate_and_execute
 from .scanner import scan_once
 from .direction import direction_for
 from .research import SignalResearch
+from .opportunity import opportunity
 from .lifecycle import Lifecycle
 from tradebot.market_data_v3 import MARKETS
 
@@ -82,8 +83,13 @@ class MarketService:
                            include_context=True)["markets"][self.symbol]
         direction = None
         research = None
+        evidence = None
         if report.get("status") != "scan_error":
             direction = direction_for(report)
+            try:
+                evidence = opportunity(report,direction)
+            except Exception as exc:
+                evidence = {"status":"evidence_error","error":type(exc).__name__}
             try:
                 research = self.research.record(report,direction)
             except Exception as exc:
@@ -109,6 +115,7 @@ class MarketService:
                  "coverage": report.get("coverage", {}),
                  "direction_engine": direction,
                  "research": research,
+                 "opportunity": evidence,
                  "error": summary.get("error", summary.get("reason")),
                  "reconciliation_error": reconciliation_error,
                  "lifecycle": {"new_fills": lifecycle.get("new_fills"),
