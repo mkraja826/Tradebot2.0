@@ -8,6 +8,7 @@ import time
 from contextlib import closing
 from pathlib import Path
 from urllib.request import Request, build_opener
+from urllib.error import HTTPError
 from .broker import NoRedirect
 from tradebot.strategy_registry_v3 import valid_signal_rule
 
@@ -132,6 +133,11 @@ class Provider:
         try:
             with self.opener.open(req, timeout=90) as response:
                 raw=response.read(1_000_001)
+        except HTTPError as exc:
+            # Numeric status only: never log headers, response bodies or credentials.
+            self.diagnostics["http_status"] = exc.code
+            exc.close()
+            raise ProviderResponseError("http_" + str(exc.code)) from None
         finally:
             self.diagnostics["elapsed_ms"] = round((time.monotonic()-started)*1000)
         if len(raw)>1_000_000:

@@ -1,5 +1,6 @@
 import json
 import unittest
+from urllib.error import HTTPError
 from recover_trading.decision import parse_completion, Provider, ProviderResponseError
 
 def envelope(content, finish="stop"):
@@ -34,3 +35,14 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual(opener.body["max_completion_tokens"],8192)
         self.assertEqual(p.diagnostics["finish_reason"],"stop")
         self.assertNotIn("fake",str(p.diagnostics))
+
+    def test_http_error_status_is_recorded_without_sensitive_body(self):
+        class Opener:
+            def open(self,req,timeout):
+                raise HTTPError("https://example.invalid",429,"private error text",{},None)
+        p=Provider(api_key="fake",opener=Opener())
+        with self.assertRaises(ProviderResponseError) as cm:
+            p.propose("fake",{})
+        self.assertEqual(cm.exception.code,"http_429")
+        self.assertEqual(p.diagnostics["http_status"],429)
+        self.assertNotIn("private error text",str(p.diagnostics))
