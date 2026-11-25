@@ -31,6 +31,14 @@ def seed(root):
 def run(page,url,mobile=False):
     errors=[]
     page.on("pageerror",lambda err:errors.append(str(err)))
+    def overview_fixture(route):
+        response=route.fetch()
+        data=response.json()
+        for m in data["markets"]:
+            if m["symbol"]=="XAUTUSD":
+                m["kimi_review"]={"status":"reviewed","model":"tb-kimi-k3","evidence_count":1,"evidence":{"records":[{"id":"R1","outcome":"win","net_before_funding":2.12,"fees":0.1}]},"review":{"summary":"Incorrect AI count must not be shown.","method":"I checked the completed trade.","lessons":[{"kind":"observation","title":"One recorded win","text":"The trade made money before funding.","how":"I checked the recorded result.","why":"One trade is not a pattern.","next":"Check more completed trades.","evidence_ids":["R1"]}],"limitations":["Only one trade."]}}
+        route.fulfill(response=response,json=data)
+    page.route("**/api/overview",overview_fixture)
     page.goto(url,wait_until="domcontentloaded")
     expect(page.locator("#initialLoad")).to_be_hidden(timeout=20000)
     expect(page.locator("#refresh")).to_contain_text("Updated")
@@ -136,9 +144,16 @@ def run(page,url,mobile=False):
     route("strategies")
     route("performance")
     route("learning")
+    expect(page.locator("#kimiStatus")).to_have_text("Review ready")
+    expect(page.locator("#kimiSummary")).to_contain_text("1 win, 0 losses, 0 broke even")
+    expect(page.locator("#kimiMethod")).to_have_text("I checked the completed trade.")
+    expect(page.locator("#kimiLessons")).to_contain_text("How I learned it")
+    expect(page.locator("#kimiLessons")).to_contain_text("Check more completed trades.")
+    page.locator('[data-symbol="BTCUSD"]').click()
     expect(page.locator("#kimiStatus")).to_have_text("Not reviewed")
     expect(page.locator("#kimiSummary")).to_contain_text("No verified Kimi report")
-    expect(page.locator("#kimiMethod")).to_contain_text("Kimi compares completed trade records")
+    page.locator('[data-symbol="XAUTUSD"]').click()
+    expect(page.locator("#kimiStatus")).to_have_text("Review ready")
     page.locator("#learnOutcomeFilter").select_option("loss")
     route("health")
     expect(page.locator("#healthMarkets .health-market")).to_have_count(2)
