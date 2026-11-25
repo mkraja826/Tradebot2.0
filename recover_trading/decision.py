@@ -8,7 +8,8 @@ import time
 from contextlib import closing
 from pathlib import Path
 from urllib.request import Request, build_opener
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
+from http.client import IncompleteRead
 from .broker import NoRedirect
 from .direction import direction_for, compact_context
 from tradebot.strategy_registry_v3 import valid_signal_rule
@@ -95,6 +96,21 @@ class ProviderResponseError(ValueError):
         self.code = code
 
 
+def strict_object(pairs):
+    result={}
+    for key,value in pairs:
+        if key in result:
+            raise ValueError("duplicate JSON key")
+        result[key]=value
+    return result
+
+def reject_constant(value):
+    raise ValueError("nonfinite JSON constant")
+
+def strict_json(raw):
+    return json.loads(raw,object_pairs_hook=strict_object,parse_constant=reject_constant)
+
+
 def parse_completion(envelope):
     """Accept one complete JSON object, optionally in a single Markdown fence."""
     try:
@@ -113,7 +129,7 @@ def parse_completion(envelope):
         if sep and first.strip().lower() in ("```json", "```"):
             content = rest[:-3].strip()
     try:
-        result = json.loads(content)
+        result = strict_json(content)
     except ValueError:
         raise ProviderResponseError("invalid_json") from None
     if not isinstance(result, dict):
@@ -137,20 +153,38 @@ class Provider:
                     headers={"Authorization":"Bearer "+self.key,"Content-Type":"application/json"})
         started = time.monotonic()
         self.diagnostics["request_bytes"] = len(req.data)
+        self.diagnostics["telemetry_version"] = "provider-v2"
+        self.diagnostics["phase"] = "connect_or_headers"
         try:
             with self.opener.open(req, timeout=90) as response:
+                self.diagnostics["headers_ms"] = round((time.monotonic()-started)*1000)
+                self.diagnostics["phase"] = "response_body"
                 raw=response.read(1_000_001)
+                self.diagnostics["response_bytes"] = len(raw)
         except HTTPError as exc:
             # Numeric status only: never log headers, response bodies or credentials.
             self.diagnostics["http_status"] = exc.code
             exc.close()
             raise ProviderResponseError("http_" + str(exc.code)) from None
+        except TimeoutError:
+            self.diagnostics["transport_failure"]="timeout"
+            raise
+        except URLError as exc:
+            self.diagnostics["transport_failure"]="timeout" if isinstance(exc.reason,TimeoutError) else "url_error"
+            # Retain the existing bounded timeout recovery for wrapped timeouts.
+            if isinstance(exc.reason,TimeoutError):
+                raise TimeoutError() from None
+            raise ProviderResponseError("transport_error") from None
+        except (IncompleteRead, OSError):
+            self.diagnostics["transport_failure"]="incomplete_or_io"
+            raise ProviderResponseError("transport_error") from None
         finally:
             self.diagnostics["elapsed_ms"] = round((time.monotonic()-started)*1000)
+        self.diagnostics["phase"]="envelope_decode"
         if len(raw)>1_000_000:
             raise ProviderResponseError("response_too_large")
         try:
-            envelope=json.loads(raw)
+            envelope=strict_json(raw)
         except ValueError:
             raise ProviderResponseError("invalid_provider_json") from None
         if isinstance(envelope, dict):
@@ -165,7 +199,10 @@ class Provider:
             usage=envelope.get("usage")
             if isinstance(usage,dict):
                 self.diagnostics["usage"]={k:usage[k] for k in ("prompt_tokens","completion_tokens","total_tokens") if type(usage.get(k)) is int}
-        return parse_completion(envelope)
+        self.diagnostics["phase"]="completion_decode"
+        result=parse_completion(envelope)
+        self.diagnostics["phase"]="completion_parsed"
+        return result
 
 
 RETRY_DELAY_SECONDS = 180
@@ -270,7 +307,10 @@ def evaluate_report(report, journal, provider, models, *, account=None):
             outcome["diagnostics"]=provider.diagnostics
         journal.finish(ident,"failed",outcome)
         return {"symbol":symbol,"status":"failed","decision_id":ident,"ai_calls":1,**outcome}
-    journal.finish(ident,"proposed",result)
+    persisted=dict(result)
+    if isinstance(provider,Provider):
+        persisted["diagnostics"]={**provider.diagnostics,"phase":"proposal_validated"}
+    journal.finish(ident,"proposed",persisted)
     return {"symbol":symbol,"status":"proposed","decision_id":ident,"ai_calls":1,"proposal":result}
 
 

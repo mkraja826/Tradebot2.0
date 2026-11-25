@@ -3,6 +3,7 @@ import hashlib,json,sqlite3
 from collections import Counter,defaultdict
 from contextlib import closing
 from pathlib import Path
+from statistics import median
 from .performance import dec,stamp
 
 def positive(x):
@@ -16,7 +17,7 @@ def review(decisions,orders,fills,episodes,symbol):
     closed=defaultdict(list)
     for e in episodes:
         if e.get("decision_id"):closed[e["decision_id"]].append(e)
-    rows=[]; failures=Counter();states=Counter()
+    rows=[]; failures=Counter();states=Counter(); telemetry=defaultdict(list)
     for d in decisions:
         result=d.get("result") or {};context=d.get("context") or {}
         action=result.get("action");ident=d["id"]
@@ -27,6 +28,12 @@ def review(decisions,orders,fills,episodes,symbol):
              "planned_stop_bps":None,"planned_target_bps":None,"planned_reward_risk":None,
              "fill_stop_bps":None,"fill_target_bps":None,"filled_contracts":None,
              "net_before_funding":None,"outcome":"not_evaluated","order_status":None}
+        diag=result.get("diagnostics")
+        if isinstance(diag,dict):
+            sample={k:diag[k] for k in ("elapsed_ms","headers_ms","request_bytes","response_bytes") if type(diag.get(k)) is int and diag[k]>=0}
+            if sample:
+                telemetry[d["status"]].append(sample)
+                row["provider_metrics"]=sample
         if d["status"]=="failed":
             code=result.get("response_error") or result.get("error") or "unknown"
             failures[code]+=1;row["failure"]=code;row["outcome"]="decision_failed"
@@ -66,7 +73,14 @@ def review(decisions,orders,fills,episodes,symbol):
                     elif candidates:row["outcome"]="fill_identity_unverified"
                     else:row["outcome"]="acknowledged_no_fill_evidence"
         states[row["outcome"]]+=1;rows.append(row)
-    return {"version":"decision-review-v1","symbol":symbol,"status":"observed",
+    metrics={}
+    for status, samples in telemetry.items():
+        metrics[status]={}
+        for field in ("elapsed_ms","headers_ms","request_bytes","response_bytes"):
+            values=[x[field] for x in samples if field in x]
+            if values:
+                metrics[status][field]={"samples":len(values),"median":median(values),"maximum":max(values)}
+    return {"provider_telemetry":metrics,"version":"decision-review-v1","symbol":symbol,"status":"observed",
             "decision_count":len(rows),"outcome_counts":dict(states),"failure_counts":dict(failures),
             "entry_deviation_samples":sum(r["entry_deviation_bps"] is not None for r in rows),
             "recent":rows[-100:],"limitations":["Positive signed entry deviation means worse fill than AI reference, not measured market slippage.",
