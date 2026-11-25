@@ -1,0 +1,2 @@
+# Unified deferred research overview
+Read-only dashboard uses sibling research journals of configured demo data directory. Shows current independent positioning, liquidation heartbeat/batches, prototype freshness, economic probe availability and G25 evidence state. No journal writes, order requests, external fetches or AI requests from the dashboard. Research cannot enter the live direction engine. Missing or stale evidence is explicit.

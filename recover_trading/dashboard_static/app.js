@@ -85,6 +85,11 @@ function render(){
  const sum=rows=>rows?.reduce((s,r)=>s+r.count,0)??null;
  metrics([["Market price",fmt(m.prices.at(-1)?.close),"Last recorded 5m close"],["Open positions",positions?.length??"—","Exchange observation"],["AI decisions",fmt(sum(m.decision_counts)),"Journal count"],["Order submissions",fmt(sum(m.order_counts)),"Not completed trades"],["Recover win rate",percent(m.performance?.recover_attributed?.win_rate_before_funding),"Reconciled, before funding"],["Recover net P&L",money(m.performance?.recover_attributed?.net_before_funding,m.performance?.currency||"USD"),"Closed episodes, before funding"]]);
  performanceView(m);forwardView(m);
+ const dr=m.deferred_research||{};
+ $("deferredNote").textContent="Independent data and experimental frameworks · "+fmt(dr.rules?.length)+" deferred candidates";
+ table("deferredRows",dr.rules||[],[["Rule",r=>r.id],["Stage",r=>human(r.stage)],["Evidence",r=>human(r.status)],["Source",r=>human(r.source_status)],["Consensus",r=>human(r.consensus_status)],["Execution",r=>r.execution_enabled?"Enabled":"Not enabled"]]);
+ const rp=dr.positioning||{}, liq=rp.liquidations||{}, q=rp.latest||{};
+ $("deferredFeed").textContent=m.symbol==="BTCUSD"?"Reference positioning: "+human(rp.status)+" · OI BTC "+fmt(q.open_interest_btc_both_sides)+" · indicative funding % "+fmt(q.indicative_funding_percent)+" · liquidation connection "+human(liq.status)+" · recorded batches "+fmt(liq.batches)+" · completeness unverified":"Official release probe: "+fmt(dr.economic?.last_probe_epoch?time(dr.economic.last_probe_epoch):null)+" · G25 calendar "+human(dr.reopening?.calendar_connection)+" · trade feed "+human(dr.reopening?.licensed_trade_feed);
  const se=m.strategy_evidence||{};
  $("strategyEvidenceNote").textContent=human(se.status)+" · "+fmt(se.implemented)+" implemented · "+fmt(se.deferred)+" deferred · assumed research cost "+fmt(se.assumed_cost_bps)+" bps. Associations are not causal. Research is not executed P&L.";
  table("strategySets",se.exact_entry_rule_sets||[],[["Entry rules",r=>r.rules.join(", ")],["Closed",r=>fmt(r.closed_episodes)],["Net before funding",r=>money(r.net_before_funding,m.performance?.currency||"USD")]]);
