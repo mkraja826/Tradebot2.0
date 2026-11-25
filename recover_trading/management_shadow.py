@@ -3,7 +3,7 @@ import hashlib,json,sqlite3,time
 from .performance import dec
 from .position_preview import observe
 from .direction import compact_context,direction_for
-from .decision import encode
+from .decision import encode,Provider,ProviderResponseError
 from .bracket_contract import repair_status
 
 VERSION="management-shadow-v1"
@@ -82,7 +82,7 @@ class ManagementShadow:
         with self.db:self.db.execute("INSERT OR IGNORE INTO management_shadow VALUES(?,?,?,?,?,'prepared',?,NULL)",(ident,symbol,bucket,now,model,raw))
         return {"version":VERSION,"status":"prepared","id":ident,"context_bytes":len(raw.encode()),"execution_effect":"none"}
     def evaluate(self,ident,provider):
-        """Explicit separate proposal evaluation; not called by the service."""
+        """Reserve and evaluate one management proposal; execution is separate."""
         with self.db:
             self.db.execute("BEGIN IMMEDIATE")
             row=self.db.execute("SELECT model,context,status FROM management_shadow WHERE id=?",(ident,)).fetchone()
@@ -94,5 +94,8 @@ class ManagementShadow:
             status="proposed";result={"proposal":proposal}
         except Exception as exc:
             status="failed";result={"error":type(exc).__name__}
+            if isinstance(exc,ProviderResponseError):result["response_error"]=exc.code
+            elif type(exc) is ValueError and str(exc).startswith("management_") and len(str(exc))<=80:result["response_error"]=str(exc)
+        if isinstance(provider,Provider):result["diagnostics"]=dict(provider.diagnostics)
         with self.db:self.db.execute("UPDATE management_shadow SET status=?,result=? WHERE id=?",(status,encode(result),ident))
         return {"status":status,**result,"execution_effect":"none"}

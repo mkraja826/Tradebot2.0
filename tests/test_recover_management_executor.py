@@ -69,3 +69,20 @@ class ManagementExecutorTests(unittest.TestCase):
         self.b.sl="106"
         self.assertEqual(self.e.execute("BTCUSD",i,enabled=True)["status"],"position_or_order_identity_changed")
         self.assertEqual(self.b.calls,0)
+
+    def test_reconcile_unknown_without_resubmission(self):
+        self.b.unknown=True;i=self.proposal("reduce",contracts=1)
+        self.assertEqual(self.e.execute("BTCUSD",i,enabled=True)["status"],"outcome_unverified")
+        row=self.j.db.execute("SELECT detail FROM management_attempts WHERE proposal_id=?",(i,)).fetchone()
+        d=json.loads(row[0])
+        self.b.q=-23
+        self.b.order_row={"id":42,"client_order_id":d["client_id"],"product_id":84,"side":"buy","size":1,"unfilled_size":0,"state":"closed","reduce_only":True}
+        out=self.e.reconcile_pending("BTCUSD")
+        self.assertEqual(out["resolved"],1)
+        self.assertEqual(self.b.calls,1)
+        self.assertEqual(self.j.db.execute("SELECT status FROM management_attempts WHERE proposal_id=?",(i,)).fetchone()[0],"verified")
+    def test_pending_unknown_remains_unverified(self):
+        self.b.unknown=True;i=self.proposal("reduce",contracts=1)
+        self.e.execute("BTCUSD",i,enabled=True)
+        self.assertEqual(self.e.reconcile_pending("BTCUSD")["unresolved"],1)
+        self.assertEqual(self.b.calls,1)

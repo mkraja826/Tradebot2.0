@@ -89,10 +89,22 @@ class ManagementExecutor:
         # Persist the response before verification. A crash leaves a durable ambiguous attempt.
         if isinstance(receipt,dict):detail["receipt"]={k:receipt[k] for k in ("id","client_order_id","product_id","state","size","unfilled_size","reduce_only","stop_price","success") if k in receipt}
         with self.db:self.db.execute("UPDATE management_attempts SET detail=? WHERE proposal_id=?",(json.dumps(detail),ident))
+        status,detail=self._verify(symbol,detail)
+        with self.db:self.db.execute("UPDATE management_attempts SET status=?,detail=? WHERE proposal_id=?",(status,json.dumps(detail),ident))
+        return {"version":VERSION,"status":status,"action":action,"attempted":True}
+
+    def _verify(self,symbol,detail):
+        """Read-only re-observation; never resubmit or amend an order."""
+        p=detail["plan"];action=p["action"];pid=p["product_id"];q=p["before_size"]
+        ident_before=detail["identity"];cid=detail["client_id"]
+        detail={**detail,"last_reconciled":int(time.time())}
+        detail.pop("verification_error",None)
         status="outcome_unverified"
         try:
             after=self.reader.observe(symbol,pid)
             view=observe(after,symbol,int(time.time()))
+            if view["position_state"] in ("long","short") and (after["positions"][0].get("created_at")!=ident_before["created_at"] or dec(view.get("entry_price"))!=dec(p["entry_price"])):
+                return "outcome_unverified",{**detail,"evidence":"position_lineage_changed","last_reconciled":int(time.time())}
             if action in ("repair_bracket","update_bracket"):
                 d=p["desired_triggers"]
                 evidence=verify_fixture(after,symbol,int(time.time()),q,d["stop_loss"],d["take_profit"])
@@ -106,9 +118,24 @@ class ManagementExecutor:
                 evidence=reconcile(p,after,int(time.time()),order=order,fills=[normalize_fill(f)[1] for f in raw],complete_fills=complete)
                 detail["evidence"]=evidence
                 if evidence["status"] in ("full_close_observed","partial_close_observed") and evidence["target_size_observed"]:status="verified"
-                elif evidence["status"]=="no_fill_observed":status="terminal_no_fill"
+                elif evidence["status"]=="no_fill_observed" and identity(after)==ident_before:status="terminal_no_fill"
                 elif evidence["status"] in ("full_close_observed","partial_close_observed","flat_residual_orders_unverified","reduction_bracket_unverified"):status="partial_result_unverified"
             detail["observed_size"]=view.get("size");detail["bracket_state"]=view.get("bracket_state")
         except Exception as e:detail["verification_error"]=error_detail(e)
-        with self.db:self.db.execute("UPDATE management_attempts SET status=?,detail=? WHERE proposal_id=?",(status,json.dumps(detail),ident))
-        return {"version":VERSION,"status":status,"action":action,"attempted":True}
+        return status,detail
+
+    def reconcile_pending(self,symbol):
+        """Revisit ambiguous attempts using only exchange reads and journal updates."""
+        counts={"checked":0,"resolved":0,"unresolved":0,"errors":0}
+        rows=self.db.execute("SELECT proposal_id,status,detail FROM management_attempts WHERE symbol=? AND status IN ('attempting','outcome_unverified','partial_result_unverified') ORDER BY created LIMIT 3",(symbol,)).fetchall()
+        for ident,old,raw in rows:
+            counts["checked"]+=1
+            try:
+                detail=json.loads(raw)
+                if detail["plan"]["symbol"]!=symbol:raise ValueError("journal_symbol")
+                status,detail=self._verify(symbol,detail)
+                with self.db:self.db.execute("UPDATE management_attempts SET status=?,detail=? WHERE proposal_id=? AND status=?",(status,json.dumps(detail),ident,old))
+                if status in ("verified","terminal_no_fill"):counts["resolved"]+=1
+                else:counts["unresolved"]+=1
+            except Exception:counts["errors"]+=1
+        return {"version":VERSION,**counts,"execution_effect":"none"}

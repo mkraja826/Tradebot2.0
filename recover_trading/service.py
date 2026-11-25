@@ -92,6 +92,10 @@ class MarketService:
                 lifecycle = self.lifecycle.refresh(self.symbol)
             except Exception as exc:
                 lifecycle = {"errors": {"refresh": type(exc).__name__}}
+        management_reconciliation=None
+        if self.manage_demo and self.management_executor is not None:
+            try:management_reconciliation=self.management_executor.reconcile_pending(self.symbol)
+            except Exception as exc:management_reconciliation={"status":"reconciliation_error","error":type(exc).__name__,"execution_effect":"none"}
         repair = self.repair.cycle(self.symbol,lifecycle) if self.repair is not None else None
         lifecycle_ms=round((time.monotonic()-started)*1000)
         scan_started=time.monotonic()
@@ -126,14 +130,20 @@ class MarketService:
         if self.management is not None and report.get("status")!="scan_error":
             try:management=self.management.capture(report,lifecycle,self.model,lambda s:product_for(self.broker,s))
             except Exception as exc:management={"status":"capture_error","error":type(exc).__name__,"execution_effect":"none"}
-        managed={"status":"execution_disabled","attempted":False}
+        managed={"status":"execution_disabled" if not self.manage_demo else "awaiting_next_sample","enabled":self.manage_demo,"attempted":False}
+        if self.manage_demo and management:
+            captured=management.get("status")
+            if captured=="failed":managed["status"]="evaluation_failed"
+            elif captured=="proposed":managed["status"]="proposal_already_evaluated"
+            elif captured in ("context_unavailable","capture_error","no_fresh_position","requested"):managed["status"]=captured
         # Explicit opt-in. Only newly captured, current proposals can execute.
         if self.manage_demo and management and management.get("status")=="prepared" and management.get("context_bytes"):
             try:
                 ident=management["id"]
                 outcome=self.management.evaluate(ident,self.provider)
-                managed=self.management_executor.execute(self.symbol,ident,enabled=True) if outcome["status"]=="proposed" else {"status":outcome["status"],"attempted":False}
+                managed=self.management_executor.execute(self.symbol,ident,enabled=True) if outcome["status"]=="proposed" else {"status":outcome["status"],"attempted":False,"error":outcome.get("error"),"response_error":outcome.get("response_error")}
                 managed["management_ai_calls"]=1
+                managed["enabled"]=True
             except Exception as exc:managed={"status":"management_error","error":type(exc).__name__,"attempted":False}
         execution_started=time.monotonic()
         if report.get("status") == "scan_error":
@@ -166,6 +176,7 @@ class MarketService:
                  "bracket_repair": repair,
                  "management_shadow": management,
                  "management_execution": managed,
+                 "management_reconciliation": management_reconciliation,
                  "error": summary.get("error", summary.get("reason")),
                  "reconciliation_error": reconciliation_error,
                  "lifecycle": {"new_fills": lifecycle.get("new_fills"),

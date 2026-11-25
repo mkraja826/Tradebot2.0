@@ -40,3 +40,11 @@ class ManagementShadowTests(unittest.TestCase):
         self.assertIsNotNone(context_for(r,s,p,1000))
         r["as_of"]=1002
         self.assertIsNone(context_for(r,s,p,1000))
+
+    def test_provider_failure_code_recorded(self):
+        from recover_trading.decision import ProviderResponseError
+        class Failing:
+            def propose_management(self,model,context):raise ProviderResponseError("http_520")
+        j=Journal(":memory:");self.addCleanup(j.close);m=ManagementShadow(j.db)
+        r,s,p=fixture();a=m.capture(r,s,"mock",lambda _:p,1001)
+        self.assertEqual(m.evaluate(a["id"],Failing())["response_error"],"http_520")
