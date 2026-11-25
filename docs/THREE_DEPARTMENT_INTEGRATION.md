@@ -24,3 +24,6 @@ First paid smoke request (run 45720807662): provider returned a parsed completio
 
 ## Second paid compatibility result
 GitHub run 45721423980 passed. DeepSeek V4 Pro returned a valid `reduce` proposal for the synthetic profitable BTC short (10 to 5 contracts), with no unexpected fields. Latency 6855 ms; 1308 prompt tokens, 242 completion tokens, 1550 total. Offline run 45721424032 passed. This is a single synthetic proposal, not observed fills or demonstrated profitability. For market coverage, the next pinned one-call workflow tests a synthetic losing Gold long. Exactly one additional completion is permitted on the first attempt for the specific preceding commit; no automatic retries or exchange calls. No deployment or activation.
+
+## Gold paid compatibility result
+GitHub run 45721808724 passed. Synthetic losing Gold long: DeepSeek proposed reducing 10 to 7 contracts, validated with no extra fields; 4517 ms elapsed, 1311 prompt and 56 completion tokens, total 1367. Both markets have now passed one paid schema smoke check. Neither establishes realized performance or broker compatibility. Further paid checks are not scheduled.
