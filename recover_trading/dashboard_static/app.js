@@ -113,6 +113,86 @@ function overviewView(){
  if(cards.length)$("overviewAccounts").append(el("p","* Exchange-reported unrealized P&L; not realized return. Heartbeat status does not guarantee execution readiness.","empty overview-footnote"));
 }
 
+
+let aiFilter="all",aiLastKey="",aiExpanded=new Set();
+const aiNumber=x=>finite(x)?Number(x).toLocaleString(undefined,{maximumFractionDigits:2}):"—";
+const aiLabel=x=>x==null?"Unavailable":human(x);
+const aiText=x=>typeof x==="string"?x.slice(0,1500):null;
+function aiEvents(m){
+ const review=new Map((m.decision_review?.recent||[]).map(r=>[r.id,r]));
+ const attempts=new Map((m.management_attempts||[]).map(r=>[r.proposal_id,r]));
+ const entry=(m.decisions||[]).map(d=>{
+  const r=d.result||{},v=review.get(d.id)||{};
+  return {key:"entry:"+d.id,type:"entry",created:d.created,status:d.status,action:r.action,side:r.side,reason:aiText(r.reason),error:aiText(r.response_error||r.error),outcome:v.outcome,execution:v.order_status,net:v.net_before_funding,model:d.model,rules:d.signals||[],size:r.size,sl:r.stop_loss,tp:r.take_profit};
+ });
+ const management=(m.management_shadow?.recent||[]).map(d=>{
+  const r=d.result||{},p=r.proposal||{},a=attempts.get(d.id);
+  return {key:"management:"+d.id,type:"management",created:d.created,status:d.status,action:p.action,reason:aiText(p.reason),error:aiText(r.response_error||r.error),execution:a?.status,executionAction:a?.action,executionTime:a?.created};
+ });
+ return [...entry,...management].filter(e=>Number.isInteger(e.created)).sort((a,b)=>b.created-a.created||a.key.localeCompare(b.key));
+}
+function aiEvidence(m){
+ const h=m.heartbeat||{},d=h.direction_engine||{},reg=d.regime||{},age=Date.now()/1000-Number(h.timestamp);
+ const fresh=finite(h.timestamp)&&age>=-5&&age<=180&&h.status!=="cycle_error";
+ const valid=["LONG","SHORT","NEUTRAL"].includes(d.direction);
+ $("aiDirection").textContent=valid?d.direction==="LONG"?"Bullish consensus":d.direction==="SHORT"?"Bearish consensus":"Neutral consensus":"Consensus unavailable";
+ $("aiDirection").className=valid?(d.direction==="LONG"?"gain":d.direction==="SHORT"?"loss":""):"";
+ $("aiFreshness").textContent=(fresh?"Recent worker observation":"Stale or unverified worker observation")+" · "+time(h.timestamp);
+ $("aiFreshness").className=fresh?"empty":"empty caution";
+ const a=finite(d.long_score)&&Number(d.long_score)>=0?Number(d.long_score):null,b=finite(d.short_score)&&Number(d.short_score)>=0?Number(d.short_score):null;
+ const track=$("aiScoreTrack");track.replaceChildren();
+ if(a!==null&&b!==null&&a+b>0){
+  const progress=el("progress",undefined,"ai-score-progress");progress.max=a+b;progress.value=a;progress.setAttribute("aria-label","Long share of directional scores");track.append(progress);
+ }else track.append(el("span","No directional score balance available","empty"));
+ $("aiLongScore").textContent="LONG "+aiNumber(a)+(a!==null&&b!==null&&a+b>0?" · "+(100*a/(a+b)).toFixed(1)+"%":"");
+ $("aiShortScore").textContent="SHORT "+aiNumber(b)+(a!==null&&b!==null&&a+b>0?" · "+(100*b/(a+b)).toFixed(1)+"%":"");
+ const cards=[["Market regime",aiLabel(reg.regime)],["Volatility",aiLabel(reg.volatility)],["Trend bias",aiLabel(reg.trend_bias)],["Long / short rules",fmt(d.long_votes)+" / "+fmt(d.short_votes)],["Conflicts",fmt(d.conflicting_rules)],["Evaluable rules",fmt(h.coverage?.evaluable_rules)+" / 50"]];
+ $("aiRegimeCards").replaceChildren(...cards.map(([k,v])=>{const n=el("div",undefined,"ai-regime-card");n.append(el("small",k),el("strong",v));return n}));
+ const groups=["LONG","SHORT","CONFLICT"],rules=$("aiActiveRules");rules.replaceChildren();
+ for(const k of groups){
+  const list=Array.isArray(d.votes?.[k])?d.votes[k]:null,box=el("div",undefined,"ai-rule-group");
+  box.append(el("h3",k+" · "+fmt(list?.length),k==="LONG"?"gain":k==="SHORT"?"loss":"caution"));
+  if(!list?.length)box.append(el("p",list?"No active rules":"Unavailable","empty"));
+  else for(const r of list){const line=el("div",undefined,"ai-rule-row");line.append(el("strong",r.id+" · "+human(r.name)),el("small",(r.frames||[]).join(" / ")));box.append(line)}
+  rules.append(box);
+ }
+ const families=Object.entries(d.family_scores||{}).map(([family,v])=>({family,long:v.LONG?.score,short:v.SHORT?.score}));
+ table("aiFamilyScores",families,[["Family",r=>human(r.family)],["Long",r=>aiNumber(r.long)],["Short",r=>aiNumber(r.short)]]);
+}
+function aiEventContent(e,compact=false){
+ const n=el("div",undefined,"ai-event-content");
+ const fields=el("dl",undefined,"ai-event-fields");
+ const facts=[["Journal state",aiLabel(e.status)],["Requested action",aiLabel(e.action)],["Exchange evidence",e.execution?human(e.execution):"Not linked / unavailable"]];
+ if(e.type==="entry")facts.push(["Side",aiLabel(e.side)],["Model",fmt(e.model)],["Outcome",aiLabel(e.outcome)],["Net before funding",money(e.net,"USD")],["Planned size",fmt(e.size)],["Planned SL",fmt(e.sl)],["Planned TP",fmt(e.tp)]);
+ else if(e.execution)facts.push(["Mutation action",aiLabel(e.executionAction)],["Attempt recorded",time(e.executionTime)]);
+ for(const [k,v] of facts){fields.append(el("dt",k),el("dd",v))}
+ n.append(fields);
+ if(e.reason){n.append(el("h3","Recorded AI explanation"),el("p",e.reason,"ai-reason"))}
+ else n.append(el("p","No recorded explanation available.","empty"));
+ if(e.error)n.append(el("p","Recorded error: "+e.error,"caution"));
+ if(e.rules?.length)n.append(el("p","New signals: "+e.rules.map(r=>r.id+" "+r.frame).join(", "),"empty"));
+ return n;
+}
+function aiTimelineView(m){
+ const events=aiEvents(m),latest=events[0],content=$("aiLatestContent");
+ $("aiLatestTitle").textContent=latest?(latest.type==="entry"?"Entry evaluation":"Position management")+" · "+aiLabel(latest.action||latest.status):"No recorded AI activity";
+ content.replaceChildren();
+ if(latest)content.append(el("p",time(latest.created),"empty"),aiEventContent(latest,true));else content.append(el("p","Awaiting a journal observation.","empty"));
+ const filtered=events.filter(e=>aiFilter==="all"||e.type===aiFilter);
+ const key=JSON.stringify([m.symbol,aiFilter,filtered]);if(key===aiLastKey)return;aiLastKey=key;
+ const list=$("aiTimeline");list.replaceChildren();
+ if(!filtered.length){list.append(el("p","No recorded events in this filter.","empty"));return}
+ for(const e of filtered){
+  const detail=el("details",undefined,"ai-event");detail.open=aiExpanded.has(e.key);
+  detail.addEventListener("toggle",()=>{if(detail.open)aiExpanded.add(e.key);else aiExpanded.delete(e.key)});
+  const summary=el("summary"),meta=el("div",undefined,"ai-event-meta");
+  meta.append(el("strong",(e.type==="entry"?"Entry":"Management")+" · "+aiLabel(e.action||e.status)),el("small",time(e.created)));
+  const state=el("span",e.execution?"Exchange: "+human(e.execution):"Journal: "+aiLabel(e.status),"ai-event-state "+(e.execution==="verified"?"gain":e.status==="failed"?"caution":""));
+  summary.append(meta,state);detail.append(summary,aiEventContent(e));list.append(detail);
+ }
+}
+for(const b of document.querySelectorAll("[data-ai-filter]"))b.addEventListener("click",()=>{aiFilter=b.dataset.aiFilter;for(const x of document.querySelectorAll("[data-ai-filter]"))x.setAttribute("aria-pressed",String(x===b));const m=data?.markets?.find(x=>x.symbol===chosen);if(m)aiTimelineView(m)});
+
 function render(){
  if(!data)return;
  overviewView();
@@ -128,7 +208,7 @@ function render(){
  $("warning").textContent=alerts.join(" • ");
  const sum=rows=>rows?.reduce((s,r)=>s+r.count,0)??null;
  metrics([["Market price",fmt(m.prices.at(-1)?.close),"Last recorded 5m close"],["Open positions",positions?.length??"—","Exchange observation"],["AI decisions",fmt(sum(m.decision_counts)),"Journal count"],["Order submissions",fmt(sum(m.order_counts)),"Not completed trades"],["Recover win rate",percent(m.performance?.recover_attributed?.win_rate_before_funding),"Reconciled, before funding"],["Recover net P&L",money(m.performance?.recover_attributed?.net_before_funding,m.performance?.currency||"USD"),"Closed episodes, before funding"]]);
- performanceView(m);forwardView(m);
+ performanceView(m);forwardView(m);aiEvidence(m);aiTimelineView(m);
  const dr=m.deferred_research||{};
  $("deferredNote").textContent="Independent data and experimental frameworks · "+fmt(dr.rules?.length)+" deferred candidates";
  table("deferredRows",dr.rules||[],[["Rule",r=>r.id],["Stage",r=>human(r.stage)],["Evidence",r=>human(r.status)],["Source",r=>human(r.source_status)],["Consensus",r=>human(r.consensus_status)],["Execution",r=>r.execution_enabled?"Enabled":"Not enabled"]]);

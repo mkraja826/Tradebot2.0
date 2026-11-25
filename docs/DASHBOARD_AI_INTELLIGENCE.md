@@ -1,0 +1,2 @@
+# AI intelligence workspace
+Read-only latest weighted directional consensus (long/short scores and share, not probability), regime and volatility, active distinct rules and family contributions. Recent entry and position-management journal events, exact identifier joins to existing decision review or management attempts only, distinct journal/attempt states, recorded explanations without rewriting or additional calls. Filters and expandable timeline; 40 entry and 20 management records, existing diagnostic panels preserved. No trading or provider changes.
