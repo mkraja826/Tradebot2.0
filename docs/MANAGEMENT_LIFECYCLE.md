@@ -1,0 +1,2 @@
+# Management lifecycle adapter v1
+Simulation-only translation of shadow proposals. Reconcile requested quantities, terminal reduce-only orders, unique fills and residual brackets. No provider or exchange mutations. Actual amendment target and reduce-only exchange behavior remain unverified. Matching quantity/entry is not proof of position lineage. Dashboard exposes historical validated plans and current observation checks.
