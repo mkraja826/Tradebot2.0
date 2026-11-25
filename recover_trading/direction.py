@@ -53,4 +53,15 @@ def compact_context(context):
     # Only scalar quote metadata, not depth arrays or trade samples.
     out_quotes={k:({a:b for a,b in v.items() if type(b) in (str,int,float,bool) or b is None}
                    if isinstance(v,dict) else None) for k,v in quotes.items()}
-    return {**context,"market":{"frames":frames,"context":market.get("context",{}),"quotes":out_quotes}}
+    compact={**context,"market":{"frames":frames,"context":market.get("context",{}),"quotes":out_quotes}}
+    # Asset network, withdrawal and deposit metadata is irrelevant to the
+    # proposal; keep settlement/quote identity and precision, not the rest.
+    account=context.get("demo_account")
+    if isinstance(account,dict) and isinstance(account.get("product"),dict):
+        product=dict(account["product"])
+        for key in ("settling_asset","quoting_asset"):
+            asset=product.get(key)
+            if isinstance(asset,dict):
+                product[key]={k:asset[k] for k in ("symbol","id","name","precision","minimum_precision") if k in asset}
+        compact["demo_account"]={**account,"product":product}
+    return compact

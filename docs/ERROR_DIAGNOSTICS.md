@@ -1,0 +1,2 @@
+# Error diagnostics
+Old generic errors cannot reveal the original exchange response. Future HTTP errors retain numeric status and allowlisted exchange code only; transport, invalid JSON and explicit rejection are distinguishable. Lifecycle read-only lookup diagnostics remain separate from original order status. AI validation errors receive field-specific safe codes; redundant asset metadata is removed from request context without altering archived evidence. No order retry or admission policy change.\n

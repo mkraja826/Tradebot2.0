@@ -3,7 +3,7 @@ import hashlib
 import sqlite3
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
-from .broker import DeltaDemo, BrokerError
+from .broker import DeltaDemo, BrokerError, error_detail
 from .decision import validate, evaluate_report, MODEL_VARS
 from .engine import Journal, Engine
 
@@ -91,14 +91,14 @@ class DemoExecutor:
             if number(leverage["leverage"]) != LEVERAGE:
                 raise BrokerError("Exchange did not confirm 20x")
         except Exception as exc:
-            self.journal.finish(client_id, "preparation_failed", {"error": type(exc).__name__})
+            self.journal.finish(client_id, "preparation_failed", error_detail(exc))
             return {"status": "preparation_failed", "client_id": client_id}
         try:
             receipt = self.broker.submit_bracket(intent, client_id)
             if not isinstance(receipt, dict) or receipt.get("id") is None:
                 raise BrokerError("Order receipt missing id")
         except Exception as exc:
-            self.journal.finish(client_id, "unknown", {"error": type(exc).__name__})
+            self.journal.finish(client_id, "unknown", error_detail(exc))
             return {"status": "unknown", "client_id": client_id}
         self.journal.finish(client_id, "acknowledged", receipt)
         return {"status": "acknowledged", "client_id": client_id, "receipt": receipt}

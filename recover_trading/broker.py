@@ -4,13 +4,39 @@ import hmac
 import json
 import time
 from urllib.parse import quote, urlencode
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, build_opener, HTTPRedirectHandler
 
 DEMO_API = "https://cdn-ind.testnet.deltaex.org"
 
 
+# Only explicitly recognized exchange codes are retained. Never persist
+# response bodies, arbitrary error messages, URLs, headers or credentials.
+KNOWN_CODES=frozenset(("order_not_found","invalid_order","invalid_order_id",
+    "insufficient_margin","insufficient_balance","invalid_stop_price",
+    "invalid_price","invalid_size","invalid_api_key","invalid_signature",
+    "signature_expired","rate_limit_exceeded","invalid_product",
+    "invalid_bracket_order","invalid_order_type","invalid_request",
+    "unauthorized","forbidden","not_found","internal_server_error",
+    "invalid_stop_loss_price","invalid_take_profit_price"))
+def safe_exchange_code(data):
+    error=data.get("error") if isinstance(data,dict) else None
+    code=error.get("code") if isinstance(error,dict) else None
+    return code if isinstance(code,str) and code in KNOWN_CODES else (
+        "unrecognized_exchange_code" if code is not None else None)
+
 class BrokerError(RuntimeError):
-    pass
+    def __init__(self,message="Demo broker error",*,category="local_or_unclassified",http_status=None,exchange_code=None):
+        super().__init__(message)
+        self.category=category
+        self.http_status=http_status
+        self.exchange_code=exchange_code if exchange_code in KNOWN_CODES or exchange_code=="unrecognized_exchange_code" else None
+
+def error_detail(exc):
+    out={"error":type(exc).__name__}
+    if isinstance(exc,BrokerError):
+        out.update(category=exc.category,http_status=exc.http_status,exchange_code=exc.exchange_code)
+    return out
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -44,11 +70,30 @@ class DeltaDemo:
                           data=body.encode() if payload is not None else None, method=method)
         try:
             with self._opener.open(request, timeout=10) as response:
-                data = json.load(response)
-        except (OSError, ValueError) as exc:
-            raise BrokerError(f"Demo request failed: {type(exc).__name__}") from None
+                raw=response.read(8_000_001)
+        except HTTPError as exc:
+            status=exc.code
+            code=None
+            try:
+                raw=exc.read(16385)
+                if len(raw)<=16384:code=safe_exchange_code(json.loads(raw))
+            except (OSError,ValueError,TypeError,AttributeError):
+                pass
+            finally:exc.close()
+            raise BrokerError("Demo HTTP error",category="http_error",http_status=status,exchange_code=code) from None
+        except (TimeoutError, URLError, OSError) as exc:
+            reason=exc.reason if isinstance(exc,URLError) else exc
+            category="timeout" if isinstance(reason,TimeoutError) else "transport_error"
+            raise BrokerError("Demo transport error",category=category) from None
+        if len(raw)>8_000_000:
+            raise BrokerError("Demo response too large",category="invalid_response")
+        try:data=json.loads(raw)
+        except (ValueError,TypeError):
+            raise BrokerError("Demo invalid JSON",category="invalid_response") from None
         if not isinstance(data, dict) or data.get("success") is not True or "result" not in data:
-            raise BrokerError("Demo exchange rejected request or returned invalid response")
+            raise BrokerError("Demo exchange rejected request or returned invalid response",
+                category="exchange_rejection" if isinstance(data,dict) and data.get("success") is False else "invalid_response",
+                exchange_code=safe_exchange_code(data))
         return data if envelope else data["result"]
 
     def ticker(self, symbol):

@@ -3,6 +3,7 @@ import json
 import time
 from decimal import Decimal, InvalidOperation
 from .execution import product_for
+from .broker import error_detail
 
 POSITION_FIELDS = ("product_id", "product_symbol", "size", "entry_price", "margin",
                    "liquidation_price", "mark_price", "margin_mode", "unrealized_pnl",
@@ -162,6 +163,7 @@ class Lifecycle:
              WHERE o.symbol=? AND o.status IN ('submitting','unknown','acknowledged')
              ORDER BY o.rowid DESC""", (symbol,)).fetchall()
         checked = 0
+        lookup_diagnostics = {}
         for (client_id,) in pending:
             old = self.db.execute("SELECT detail FROM observed_orders WHERE client_id=?",
                                   (client_id,)).fetchone()
@@ -181,8 +183,10 @@ class Lifecycle:
                                     (client_id, symbol, now, json.dumps(detail, allow_nan=False)))
             except Exception as exc:
                 errors["order_poll"] = type(exc).__name__
+                lookup_diagnostics[client_id] = error_detail(exc)
         result.update({"symbol": symbol, "observed": now, "errors": errors,
-                       "new_fills": new_fills, "orders_checked": checked})
+                       "new_fills": new_fills, "orders_checked": checked,
+                       "order_lookup_diagnostics": lookup_diagnostics})
         with self.db:
             self.db.execute("INSERT INTO lifecycle_snapshots(symbol,observed,detail) VALUES (?,?,?)",
                             (symbol, now, json.dumps(result, allow_nan=False)))

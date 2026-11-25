@@ -50,35 +50,41 @@ def signal_keys(report):
     return result
 
 
+class ProposalValidationError(ValueError):
+    def __init__(self,code):
+        super().__init__(code)
+        self.code=code
+
+
 def validate(raw, symbol, *, require_capital=False):
     if not isinstance(raw, dict) or raw.get("symbol") != symbol:
-        raise ValueError("Invalid proposal symbol")
+        raise ProposalValidationError("proposal_symbol")
     if raw.get("action") not in ("trade", "no_trade"):
-        raise ValueError("Unknown proposal action")
+        raise ProposalValidationError("proposal_action")
     reason = raw.get("reason")
     if not isinstance(reason, str) or not reason.strip() or len(reason)>4000:
-        raise ValueError("Invalid rationale")
+        raise ProposalValidationError("proposal_reason")
     out = {"symbol":symbol,"action":raw["action"],"reason":reason}
     if raw["action"]=="no_trade":
         return out
     if raw.get("side") not in ("buy","sell"):
-        raise ValueError("Invalid order side")
+        raise ProposalValidationError("proposal_side")
     out["side"]=raw["side"]
     for k in ("size","leverage"):
         if type(raw.get(k)) is not int or raw[k]<=0:
-            raise ValueError("Invalid contract size or leverage")
+            raise ProposalValidationError("proposal_size_or_leverage")
         out[k]=raw[k]
     if out["leverage"] != 20:
-        raise ValueError("Demo leverage must be 20")
+        raise ProposalValidationError("proposal_leverage")
     if require_capital or "capital_allocation" in raw:
         v = raw.get("capital_allocation")
         if type(v) not in (int, float) or not math.isfinite(v) or v <= 0:
-            raise ValueError("Invalid capital allocation")
+            raise ProposalValidationError("proposal_capital")
         out["capital_allocation"] = v
     for k in ("entry_reference","stop_loss","take_profit"):
         v=raw.get(k)
         if type(v) not in (int,float) or not math.isfinite(v) or v<=0:
-            raise ValueError("Invalid price")
+            raise ProposalValidationError("proposal_price")
         out[k]=v
     return out
 
@@ -258,7 +264,7 @@ def evaluate_report(report, journal, provider, models, *, account=None):
     except Exception as exc:
         # Persist failure; only the journal may reserve one later recovery.
         outcome={"error":type(exc).__name__}
-        if isinstance(exc,ProviderResponseError):
+        if isinstance(exc,(ProviderResponseError,ProposalValidationError)):
             outcome["response_error"]=exc.code
         if isinstance(provider,Provider):
             outcome["diagnostics"]=provider.diagnostics
