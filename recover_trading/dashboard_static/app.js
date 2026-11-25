@@ -8,9 +8,10 @@ function el(tag,text,cls){const n=document.createElement(tag);if(text!==undefine
 function empty(id,message="No records available"){ $(id).replaceChildren(el("p",message,"empty")); }
 function table(id,rows,cols){
  if(!rows?.length){empty(id,rows===null?"Data unavailable":"No records observed");return}
- const wrap=el("div",undefined,"scroll"),t=el("table"),head=el("thead"),hr=el("tr");
+ const previous=$(id).querySelector(".scroll"),left=previous?.scrollLeft||0,top=previous?.scrollTop||0,focused=previous===document.activeElement;
+ const wrap=el("div",undefined,"scroll"),t=el("table"),head=el("thead"),hr=el("tr");wrap.tabIndex=0;wrap.setAttribute("role","region");wrap.setAttribute("aria-label","Scrollable data table");
  for(const [label] of cols)hr.append(el("th",label));head.append(hr);t.append(head);
- const body=el("tbody");for(const row of rows){const tr=el("tr");for(const [,get] of cols)tr.append(el("td",get(row)));body.append(tr)}t.append(body);wrap.append(t);$(id).replaceChildren(wrap);
+ const body=el("tbody");for(const row of rows){const tr=el("tr");for(const [,get] of cols)tr.append(el("td",get(row)));body.append(tr)}t.append(body);wrap.append(t);$(id).replaceChildren(wrap);wrap.scrollLeft=left;wrap.scrollTop=top;if(focused)wrap.focus({preventScroll:true});
 }
 function metrics(values,id="metrics"){$(id).replaceChildren(...values.map(([label,value,detail])=>{const box=el("div",undefined,"metric");box.append(el("small",label),el("strong",value),el("small",detail));return box}))}
 function chart(id,points){
@@ -122,18 +123,22 @@ function forwardView(m){
 
 // Application navigation and two-account overview. No trading mutations.
 const workspacePages=Array.from(document.querySelectorAll("[data-workspace]"));
+function closeMore(restore=false){$("workspaceNav").classList.remove("expanded");$("morePages").setAttribute("aria-expanded","false");if(restore)$("morePages").focus({preventScroll:true})}
+function moreActive(target){const hiddenRoute=Array.from(document.querySelectorAll(".secondary-link")).some(b=>b.dataset.page===target);$("morePages").classList.toggle("active-secondary",hiddenRoute);$("morePages").setAttribute("aria-label",hiddenRoute?"More workspaces · "+$("pageTitle").textContent+" selected":"More workspaces");$("moreLabel").textContent=hiddenRoute?"More •":"More"}
 function navigate(page,focus=false){
  const target=workspacePages.find(n=>n.dataset.workspace===page)||workspacePages[0];
  for(const n of workspacePages)n.hidden=n!==target;
  for(const b of document.querySelectorAll("[data-page]")){if(b.dataset.page===target.dataset.workspace)b.setAttribute("aria-current","page");else b.removeAttribute("aria-current")}
  $("pageTitle").textContent=target.dataset.title;$("pageSubtitle").textContent=target.dataset.description;
- $("workspaceNav").classList.remove("expanded");$("morePages").setAttribute("aria-expanded","false");
+ closeMore();moreActive(target.dataset.workspace);
  if(focus){$("workspace").focus({preventScroll:true});window.scrollTo({top:0,behavior:"instant"})}
 }
 function route(page){if(location.hash==="#"+page)navigate(page,true);else location.hash=page}
 for(const b of document.querySelectorAll("[data-page],[data-route]"))b.addEventListener("click",()=>route(b.dataset.page||b.dataset.route));
 $("morePages").addEventListener("click",()=>{const open=$("workspaceNav").classList.toggle("expanded");$("morePages").setAttribute("aria-expanded",String(open))});
-document.addEventListener("keydown",e=>{if(e.key==="Escape"&&$("workspaceNav").classList.contains("expanded")){$("workspaceNav").classList.remove("expanded");$("morePages").setAttribute("aria-expanded","false");$("morePages").focus()}});
+document.addEventListener("keydown",e=>{if(e.key==="Escape"&&$("workspaceNav").classList.contains("expanded"))closeMore(true)});
+document.addEventListener("pointerdown",e=>{if($("workspaceNav").classList.contains("expanded")&&!$("workspaceNav").contains(e.target))closeMore($("workspaceNav").contains(document.activeElement))});
+const mobileNav=window.matchMedia("(max-width: 760px)");mobileNav.addEventListener("change",()=>{if(!mobileNav.matches)closeMore()});
 window.addEventListener("hashchange",()=>{if(location.hash!=="#workspace")navigate(location.hash.slice(1),true)});
 navigate(location.hash.slice(1));
 function chooseMarket(symbol){if(!["BTCUSD","XAUTUSD"].includes(symbol))return;chosen=symbol;for(const x of document.querySelectorAll("[data-symbol]"))x.setAttribute("aria-pressed",String(x.dataset.symbol===symbol));render();document.dispatchEvent(new CustomEvent("recover:market",{detail:symbol}))}
@@ -635,5 +640,14 @@ function render(){
 $("scopeRecover").addEventListener("click",()=>{scope="recover";render()});
 $("scopeAccount").addEventListener("click",()=>{scope="account";render()});
 for(const b of document.querySelectorAll("[data-symbol]"))b.addEventListener("click",()=>chooseMarket(b.dataset.symbol));
-async function refresh(){if(busy)return;busy=true;try{const r=await fetch("/api/overview",{cache:"no-store"});if(!r.ok)throw Error();data=await r.json();healthRefreshState="observed";document.dispatchEvent(new CustomEvent("recover:overview",{detail:data.markets.map(m=>m.chart_overlay).filter(Boolean)}));render();$("refresh").textContent="Updated "+time(data.generated)}catch{healthRefreshState="failed";healthConnectionView();const retained=data?.markets?.find(m=>m.symbol===chosen);if(retained){try{healthView(retained)}catch{healthConnectionView()}}$("refresh").textContent="Refresh failed · retained data";$("warning").textContent="Dashboard connection unavailable. Previously displayed data may be stale."}finally{busy=false}}
+function initialLoadState(state){
+ const panel=$("initialLoad"),button=$("retryOverview");
+ if(state==="ready"){panel.hidden=true;button.hidden=true;return}
+ panel.hidden=false;panel.classList.toggle("load-failed",state==="failed");
+ $("loadMessage").textContent=state==="failed"?"Could not load the first snapshot. Retry or wait for automatic refresh.":"Loading the first recorded market snapshot…";
+ button.hidden=state!=="failed";
+}
+let renderedOverview=false;
+$("retryOverview").addEventListener("click",refresh);
+async function refresh(){if(busy)return;busy=true;if(!renderedOverview)initialLoadState("loading");try{const r=await fetch("/api/overview",{cache:"no-store"});if(!r.ok)throw Error();const next=await r.json();if(!Array.isArray(next?.markets)||!finite(next.generated))throw Error();data=next;healthRefreshState="observed";document.dispatchEvent(new CustomEvent("recover:overview",{detail:data.markets.map(m=>m.chart_overlay).filter(Boolean)}));render();renderedOverview=true;initialLoadState("ready");$("refresh").textContent="Updated "+time(data.generated);$("refresh").classList.remove("refresh-error")}catch{healthRefreshState="failed";healthConnectionView();const retained=data?.markets?.find(m=>m.symbol===chosen);if(retained){try{healthView(retained)}catch{healthConnectionView()}}$("refresh").textContent=renderedOverview?"Refresh failed · retained data":"Connection unavailable";$("refresh").classList.add("refresh-error");$("warning").textContent=renderedOverview?"Dashboard connection unavailable. Previously displayed data may be stale.":"No complete dashboard snapshot rendered yet.";if(!renderedOverview)initialLoadState("failed")}finally{busy=false}}
 refresh();setInterval(refresh,10000);

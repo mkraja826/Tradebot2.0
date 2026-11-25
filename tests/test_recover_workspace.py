@@ -56,3 +56,15 @@ class WorkspaceTests(unittest.TestCase):
         self.assertIn('seconds<=180',js)
         self.assertIn('lag_at_observation_s',js)
         self.assertIn('["BTCUSD","XAUTUSD"].map',js)
+
+    def test_mobile_loading_and_navigation_polish(self):
+        html=(STATIC/"index.html").read_text();js=(STATIC/"app.js").read_text();css=(STATIC/"style.css").read_text()
+        for identifier in ("initialLoad","loadMessage","retryOverview","moreLabel"):
+            self.assertIn(f'id="{identifier}"',html)
+        self.assertIn('viewport-fit=cover',html)
+        self.assertIn('initialLoadState("ready")',js)
+        self.assertIn('initialLoadState("failed")',js)
+        self.assertIn('wrap.scrollLeft=left',js)
+        self.assertIn('closeMore(true)',js)
+        self.assertIn('prefers-reduced-motion:reduce',css)
+        self.assertIn('safe-area-inset-bottom',css)
