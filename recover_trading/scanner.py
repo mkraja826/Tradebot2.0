@@ -2,6 +2,8 @@
 import argparse
 import json
 import time
+import math
+from .macro_feed import collect_context, apply_context
 from collections import Counter
 from tradebot.market_data_v3 import MARKETS, FRAMES, collect, public_client
 from tradebot.market_store_v3 import MarketStore
@@ -17,7 +19,7 @@ SCANNERS = {"BTCUSD": scan_btc, "XAUTUSD": scan_gold}
 
 
 def scan_market(store, client, symbol, *, clock=time.time,
-                gold_reference=collect_gold_reference):
+                gold_reference=collect_gold_reference, external_context=collect_context):
     if symbol not in MARKETS:
         raise ValueError("Unknown market")
     as_of = int(clock())
@@ -68,8 +70,18 @@ def scan_market(store, client, symbol, *, clock=time.time,
     else:
         attempt("xau_reference", lambda: store.intelligence(symbol, "xau_reference", gold_reference()))
 
-    now = int(clock())
+    refs = {}
+    if symbol == "XAUTUSD":
+        try:
+            refs = external_context()
+            health.update({"external:" + k: {"status": v["status"]} for k, v in refs.items()})
+        except Exception as exc:
+            health["external"] = {"status": "unavailable", "reason": type(exc).__name__}
+    # Round the snapshot cutoff up so subsecond observations just recorded are included.
+    now = math.ceil(clock())
     data = snapshot(store.path, now, symbols=(symbol,))
+    if symbol == "XAUTUSD":
+        apply_context(data, refs, now)
     report = SCANNERS[symbol](data)
     rows = report["results"]
     ids = {r["id"] for r in rows}
@@ -93,7 +105,7 @@ def scan_once(path, *, client=None, symbols=MARKETS, clock=time.time,
     reports = {}
     for symbol in symbols:
         try:
-            reports[symbol] = scan_market(store, client, symbol, clock=clock, gold_reference=gold_reference)
+            reports[symbol] = scan_market(store, client, symbol, clock=clock, gold_reference=gold_reference, external_context=external_context)
         except Exception as exc:
             reports[symbol] = {"symbol": symbol, "status": "scan_error", "reason": type(exc).__name__}
     return {"mode": "read_only", "markets": reports, "orders_submitted": 0, "ai_calls": 0}

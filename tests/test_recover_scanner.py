@@ -34,7 +34,7 @@ class ScannerTests(unittest.TestCase):
     def test_both_catalogs_and_partial_feed_coverage(self):
         with tempfile.TemporaryDirectory() as tmp:
             report = scan_once(Path(tmp)/"market.sqlite", client=FixtureClient(),
-                               clock=lambda: NOW, gold_reference=missing_reference)
+                               clock=lambda: NOW, gold_reference=missing_reference, external_context=lambda: {})
         for symbol, implemented, deferred in (("BTCUSD", 48, 2), ("XAUTUSD", 47, 3)):
             row = report["markets"][symbol]
             self.assertIn("coverage", row, row)
