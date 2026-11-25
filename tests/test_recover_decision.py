@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 from recover_trading.decision import DecisionJournal,evaluate_report,validate
 
@@ -55,3 +56,36 @@ class DecisionTests(unittest.TestCase):
         self.assertEqual(validate({"symbol":"BTCUSD","action":"no_trade","reason":"fixture"},"BTCUSD")["action"],"no_trade")
         raw=Fake().propose("test",{"symbol":"BTCUSD"});raw["size"]=True
         with self.assertRaises(ValueError):validate(raw,"BTCUSD")
+
+    def test_failed_provider_request_recovers_once_using_fresh_context(self):
+        class Flaky(Fake):
+            def propose(self,model,context):
+                self.calls+=1
+                if self.calls==1: raise TimeoutError()
+                return {"symbol":context["symbol"],"action":"no_trade","reason":"recovered"}
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp)/"db"; p=Flaky(); models={"BTCUSD":"test"}
+            with patch("recover_trading.decision.time.time",return_value=1800000000):
+                a=evaluate_report(report(),DecisionJournal(path),p,models)
+                self.assertEqual(a["status"],"failed")
+            with patch("recover_trading.decision.time.time",return_value=1800000179):
+                self.assertEqual(evaluate_report(report(),DecisionJournal(path),p,models)["status"],"already_evaluated")
+            with patch("recover_trading.decision.time.time",return_value=1800000180):
+                b=evaluate_report(report(),DecisionJournal(path),p,models)
+                self.assertEqual(b["status"],"proposed")
+                self.assertNotEqual(a["decision_id"],b["decision_id"])
+            with patch("recover_trading.decision.time.time",return_value=1800001000):
+                self.assertEqual(evaluate_report(report(),DecisionJournal(path),p,models)["status"],"already_evaluated")
+            self.assertEqual(p.calls,2)
+
+    def test_repeated_timeout_never_retries_indefinitely(self):
+        class Flaky(Fake):
+            def propose(self,model,context):
+                self.calls+=1
+                raise TimeoutError()
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp)/"db"; p=Flaky(); models={"BTCUSD":"test"}
+            for now,expected in [(1800000000,"failed"),(1800000180,"failed"),(1800001000,"already_evaluated")]:
+                with patch("recover_trading.decision.time.time",return_value=now):
+                    self.assertEqual(evaluate_report(report(),DecisionJournal(path),p,models)["status"],expected)
+            self.assertEqual(p.calls,2)

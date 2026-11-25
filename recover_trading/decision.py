@@ -161,8 +161,23 @@ class Provider:
         return parse_completion(envelope)
 
 
+RETRY_DELAY_SECONDS = 180
+
+def retryable_failure(result):
+    if not result:
+        return False
+    outcome = json.loads(result)
+    if outcome.get("error") in ("TimeoutError", "JSONDecodeError", "HTTPError"):
+        # Legacy records lack detailed provider metadata; permit one recovery.
+        return True
+    return outcome.get("response_error") in (
+        "http_408", "http_429", "http_500", "http_502", "http_503", "http_504",
+        "completion_limit", "empty_content", "invalid_json", "invalid_provider_json",
+    )
+
+
 class DecisionJournal:
-    """Atomic signal reservation prevents repeated paid requests for the same signal."""
+    """Reserve each signal once, with one audited recovery for failed AI calls."""
     def __init__(self,path):
         self.path=Path(path)
         self.path.parent.mkdir(parents=True,exist_ok=True)
@@ -173,6 +188,9 @@ class DecisionJournal:
               result TEXT)""")
             db.execute("""CREATE TABLE IF NOT EXISTS claimed_signals (
               id TEXT PRIMARY KEY, decision_id TEXT NOT NULL)""")
+            db.execute("""CREATE TABLE IF NOT EXISTS signal_recovery (
+              signal_id TEXT PRIMARY KEY, previous_decision_id TEXT NOT NULL,
+              recovery_decision_id TEXT NOT NULL)""")
     def connect(self):
         return sqlite3.connect(self.path,timeout=10)
     def reserve(self, report, model, *, account=None):
@@ -181,11 +199,24 @@ class DecisionJournal:
             return None
         with closing(self.connect()) as db,db:
             db.execute("BEGIN IMMEDIATE")
-            fresh={k:s for k,s in keys.items() if not db.execute(
-                "SELECT 1 FROM claimed_signals WHERE id=?",(k,)).fetchone()}
+            now = int(time.time())
+            fresh, recovered = {}, {}
+            for k,s in keys.items():
+                previous=db.execute(
+                    """SELECT d.id,d.status,d.created,d.result
+                       FROM claimed_signals c JOIN decisions d ON d.id=c.decision_id
+                       WHERE c.id=?""",(k,)).fetchone()
+                if previous is None:
+                    fresh[k]=s
+                elif (previous[1]=="failed" and now-previous[2]>=RETRY_DELAY_SECONDS
+                      and retryable_failure(previous[3])
+                      and not db.execute("SELECT 1 FROM signal_recovery WHERE signal_id=?",(k,)).fetchone()):
+                    recovered[k]=previous[0]
+                    fresh[k]=s
             if not fresh:
                 return None
-            ident=hashlib.sha256(encode(sorted(fresh)).encode()).hexdigest()
+            identity = [sorted(fresh), sorted(recovered.items())] if recovered else sorted(fresh)
+            ident=hashlib.sha256(encode(identity).encode()).hexdigest()
             context={"symbol":report["symbol"],"as_of":report["as_of"],
                      "signals":list(keys.values()),"new_signals":list(fresh.values()),
                      "market":report["market_context"],"coverage":report.get("coverage",{})}
@@ -193,7 +224,9 @@ class DecisionJournal:
                 context["demo_account"] = account
             db.execute("INSERT INTO decisions VALUES (?,?,?,?,?,?,NULL)",
                        (ident,report["symbol"],model,"requested",int(time.time()),encode(context)))
-            db.executemany("INSERT INTO claimed_signals VALUES (?,?)",[(k,ident) for k in fresh])
+            db.executemany("INSERT INTO claimed_signals VALUES (?,?)",[(k,ident) for k in fresh if k not in recovered])
+            db.executemany("INSERT INTO signal_recovery VALUES (?,?,?)",[(k,v,ident) for k,v in recovered.items()])
+            db.executemany("UPDATE claimed_signals SET decision_id=? WHERE id=?",[(ident,k) for k in recovered])
             return ident,context
     def finish(self, ident, status, result):
         with closing(self.connect()) as db,db:
@@ -215,7 +248,7 @@ def evaluate_report(report, journal, provider, models, *, account=None):
     try:
         result=validate(provider.propose(model,context),symbol,require_capital=account is not None)
     except Exception as exc:
-        # Never replay a potentially billed request after an ambiguous failure.
+        # Persist failure; only the journal may reserve one later recovery.
         outcome={"error":type(exc).__name__}
         if isinstance(exc,ProviderResponseError):
             outcome["response_error"]=exc.code
