@@ -1,7 +1,7 @@
 "use strict";
 (()=>{
  const id=x=>document.getElementById(x),root=id("marketChart"),ns="http://www.w3.org/2000/svg";
- let symbol=document.querySelector("[data-symbol][aria-pressed=true]")?.dataset.symbol||"BTCUSD",frame="5m",packet=null,windowSize=80,offset=0,ema=false,generation=0,busy=false,drag=null,hover=null,levels=true,showFills=true,overlays=new Map(),dockKey="";
+ let symbol=document.querySelector("[data-symbol][aria-pressed=true]")?.dataset.symbol||"BTCUSD",frame="5m",packet=null,windowSize=80,offset=0,selected=new Set(),generation=0,busy=false,drag=null,hover=null,levels=true,showFills=true,overlays=new Map(),dockKey="";
  const colors={up:"#29c99a",down:"#f27783",grid:"#303943",muted:"#a1aebb",ema:"#e6b65c"};
  const fmt=(n,d=2)=>Number.isFinite(n)?n.toLocaleString(undefined,{minimumFractionDigits:d,maximumFractionDigits:d}):"—";
  const node=(tag,attrs={},text)=>{const el=document.createElementNS(ns,tag);for(const [k,v] of Object.entries(attrs))el.setAttribute(k,String(v));if(text!==undefined)el.textContent=text;return el};
@@ -19,16 +19,43 @@
    list.append(text("dt","Bracket"),text("dd",o.bracket_state==="matching_legs_observed"?"Matching legs":"Unverified"),text("dt","Latest management"),text("dd",[o.management?.action,o.management?.status].filter(Boolean).join(" · ").replaceAll("_"," ")||"—"));
    wrap.append(list,text("p","Observed "+new Date(o.observed*1000).toLocaleTimeString(),"empty"));
  }
+ const defs={ema9:[["ema9","EMA 9","#83a9ff"]],ema20:[["ema20","EMA 20","#e6b65c"]],ema50:[["ema50","EMA 50","#b79af6"]],ema200:[["ema200","EMA 200","#ef9e70"]],bb:[["bb_upper","BB upper","#779bc9"],["bb_mid","BB mid","#779bc9"],["bb_lower","BB lower","#779bc9"]],vwap:[["vwap","UTC VWAP","#39cdb7"]],sr:[["support","Prior low","#29c99a"],["resistance","Prior high","#f27783"]],rsi:[["rsi","RSI 14","#b79af6"]],macd:[["macd","MACD","#83a9ff"],["macd_signal","Signal","#e6b65c"],["macd_hist","Histogram","#29c99a"]],atr:[["atr","ATR 14","#e6b65c"]]};
+ const lower=new Set(["rsi","macd","atr"]);
+ function paths(series,key,step,X,Y,add,color){
+   let seg=[],prev=null;const draw=()=>{if(seg.length>1)add("polyline",{points:seg.join(" "),stroke:color,"stroke-width":1.4,fill:"none"});else if(seg.length===1){const [x,y]=seg[0].split(",");add("circle",{cx:x,cy:y,r:1.6,fill:color})}seg=[]};
+   for(const r of series){if(prev!==null&&r.time-prev!==step)draw();if(Number.isFinite(r[key]))seg.push(X(r.time)+","+Y(r[key]));else draw();prev=r.time}draw();
+ }
+ function studyPanels(series,step,X,W,left,right,chosenTime){
+   const wrap=id("studyPanels");wrap.replaceChildren();
+   for(const k of lower){if(!selected.has(k))continue;
+     const panel=document.createElement("div");panel.className="study-panel";
+     const title=document.createElement("div");title.className="study-panel-title";
+     const row=series.find(r=>r.time===chosenTime);title.textContent=defs[k].map(([key,label])=>label+" "+fmt(row?.[key])).join("  ·  ");panel.append(title);
+     const vs=series.flatMap(r=>defs[k].map(([key])=>r[key]).filter(Number.isFinite));
+     if(!vs.length){const p=document.createElement("p");p.className="empty";p.textContent="Insufficient contiguous history";panel.append(p);wrap.append(panel);continue}
+     const H=104,top=9,bottom=H-12;let lo=k==="rsi"?0:k==="macd"?Math.min(0,...vs):Math.min(...vs),hi=k==="rsi"?100:k==="macd"?Math.max(0,...vs):Math.max(...vs);
+     if(lo===hi){lo-=1;hi+=1}const Y=p=>top+(hi-p)/(hi-lo)*(bottom-top);
+     const svg=node("svg",{viewBox:"0 0 "+W+" "+H,role:"img","aria-label":k+" technical indicator"});
+     const add=(tag,a,t)=>{const n=node(tag,a,t);svg.append(n);return n};
+     const guides=k==="rsi"?[30,70]:k==="macd"?[0,lo,hi]:[lo,hi];
+     for(const v of new Set(guides)){const y=Y(v);add("line",{x1:left,x2:right,y1:y,y2:y,stroke:colors.grid,"stroke-dasharray":"4 3"});add("text",{x:right+6,y:y+4,fill:colors.muted,"font-size":10},fmt(v))}
+     if(k==="macd"){const w=Math.max(1,(right-left)/windowSize*.55);for(const r of series)if(Number.isFinite(r.macd_hist)){const y=Y(r.macd_hist),z=Y(0);add("rect",{x:X(r.time)-w/2,y:Math.min(y,z),width:w,height:Math.max(1,Math.abs(z-y)),fill:r.macd_hist>=0?colors.up:colors.down,opacity:.6})}}
+     for(const [key,label,c] of defs[k])if(key!=="macd_hist")paths(series,key,step,X,Y,add,c);
+     if(hover!==null&&row)add("line",{x1:X(row.time),x2:X(row.time),y1:top,y2:bottom,stroke:"#91a1b6","stroke-dasharray":"4 4"});
+     panel.append(svg);wrap.append(panel)
+   }
+ }
  function view(){
    dock();
-   if(!packet?.candles?.length){root.replaceChildren();return}
+   if(!packet?.candles?.length){root.replaceChildren();id("studyPanels").replaceChildren();id("studyLegend").replaceChildren();return}
    const all=packet.candles,step=packet.step,last=all.at(-1).time,finish=last-offset*step,start=finish-(windowSize-1)*step;
    const rows=all.filter(r=>r.time>=start&&r.time<=finish);
    if(!rows.length){root.replaceChildren();return}
    const W=Math.max(300,root.clientWidth||600),H=Math.max(270,root.clientHeight||400),left=10,right=W-108,top=12,bottom=H-77,volTop=H-59,volBottom=H-28;
    const o=overlay(),liveLines=levels&&offset===0&&isFresh(o)&&o.status==="position_observed"?(o.lines||[]).filter(l=>lineStyle[l.kind]&&Number.isFinite(l.price)&&l.price>0):[];
    const times=new Set(rows.map(r=>r.time)),fills=showFills?(o.fills||[]).filter(f=>Number.isFinite(f.price)&&f.price>0&&times.has(Math.floor(f.time/step)*step)):[];
-   const prices=[...liveLines.map(l=>l.price),...fills.map(f=>f.price)];
+   const series=(packet.studies||[]).filter(r=>r.time>=start&&r.time<=finish),active=[...selected].filter(k=>!lower.has(k)).flatMap(k=>defs[k]);
+   const prices=[...liveLines.map(l=>l.price),...fills.map(f=>f.price),...series.flatMap(r=>active.map(([key])=>r[key]).filter(Number.isFinite))];
    const high=Math.max(...rows.map(r=>r.high),...prices),low=Math.min(...rows.map(r=>r.low),...prices),pad=(high-low||high*.001)*.07,lo=low-pad,hi=high+pad;
    id("chartOverlayNote").textContent=fills.length+" recorded fills in visible completed candles · "+(liveLines.length?"Current snapshot levels (not historical levels)":offset!==0?"Current levels hidden while panning history":!isFresh(o)?"Position snapshot unavailable or stale":"No active levels")+" · Fill markers may include earlier account trades.";
    const dx=(right-left)/windowSize,X=t=>left+((t-start)/step+.5)*dx,Y=p=>top+(hi-p)/(hi-lo)*(bottom-top);
@@ -42,8 +69,7 @@
      add("rect",{x:x-w/2,y:Math.min(Y(r.open),Y(r.close)),width:w,height:Math.max(1,Math.abs(Y(r.open)-Y(r.close))),fill:c,rx:.5});
      const v=(volBottom-volTop)*r.volume/maxVol;add("rect",{x:x-w/2,y:volBottom-v,width:w,height:v,fill:c,opacity:.48});
    }
-   if(ema){let e=null,prev=null,segment=[];const draw=()=>{if(segment.length>1)add("polyline",{points:segment.join(" "),stroke:colors.ema,"stroke-width":1.4,fill:"none"});segment=[]};
-     for(const r of all){if(prev!==null&&r.time-prev!==step){e=null;draw()}e=e===null?r.close:e+(r.close-e)*2/21;if(r.time>=start&&r.time<=finish)segment.push(X(r.time)+","+Y(e));prev=r.time}draw()}
+   for(const [key,label,c] of active)paths(series,key,step,X,Y,add,c);
    for(let i=0;i<4;i++){const t=start+Math.round((windowSize-1)*i/3)*step,x=X(t);add("line",{x1:x,x2:x,y1:top,y2:volBottom,stroke:colors.grid,"stroke-width":.6});const date=new Date(t*1000);add("text",{x:Math.min(right-22,Math.max(33,x)),y:H-9,fill:colors.muted,"font-size":10,"text-anchor":"middle"},step>=3600?date.toLocaleDateString(undefined,{month:"short",day:"numeric"}):date.toLocaleTimeString(undefined,{hour:"2-digit",minute:"2-digit"}))}
    // All prices are actual recorded values; labels are staggered without moving the lines.
    const positioned=liveLines.map(l=>({...l,y:Y(l.price)})).sort((a,b)=>a.y-b.y);let prev=top-15;
@@ -57,6 +83,8 @@
    const r=hover===null?rows.at(-1):rows.reduce((a,b)=>Math.abs(b.time-hover)<Math.abs(a.time-hover)?b:a);
    id("chartReadout").textContent=new Date(r.time*1000).toLocaleString()+" · O "+fmt(r.open)+" · H "+fmt(r.high)+" · L "+fmt(r.low)+" · C "+fmt(r.close)+" · V "+fmt(r.volume,0);
    if(hover!==null){const x=X(r.time);add("line",{x1:x,x2:x,y1:top,y2:volBottom,stroke:"#91a1b6","stroke-dasharray":"4 4"});add("line",{x1:left,x2:right,y1:Y(r.close),y2:Y(r.close),stroke:"#91a1b6","stroke-dasharray":"4 4"})}
+   const selectedRow=series.find(x=>x.time===r.time);id("studyLegend").replaceChildren(...active.map(([key,label,c])=>{const n=document.createElement("span");n.textContent=label+" "+fmt(selectedRow?.[key]);return n}));
+   studyPanels(series,step,X,W,left,right,r.time);
    root.replaceChildren(svg);
  }
  function limit(){const rows=packet?.candles||[];return rows.length?Math.max(0,Math.round((rows.at(-1).time-rows[0].time)/packet.step)+1-windowSize):0}
@@ -79,7 +107,7 @@
    }catch(e){if(g===generation){id("marketChartStatus").textContent="Chart connection unavailable · retained data may be stale";id("marketChartStatus").className="caution"}}
    finally{if(g===generation)busy=false}
  }
- function resetSelection(){generation++;busy=false;packet=null;offset=0;hover=null;root.replaceChildren();id("marketChartTitle").textContent=symbol+" · "+frame;id("marketChartLast").textContent="—";id("marketChartStatus").textContent="Loading chart…";id("chartOverlayNote").textContent="";load(true)}
+ function resetSelection(){generation++;busy=false;packet=null;offset=0;hover=null;root.replaceChildren();id("studyPanels").replaceChildren();id("studyLegend").replaceChildren();id("marketChartTitle").textContent=symbol+" · "+frame;id("marketChartLast").textContent="—";id("marketChartStatus").textContent="Loading chart…";id("chartOverlayNote").textContent="";load(true)}
  document.addEventListener("recover:overview",e=>{overlays=new Map(e.detail.map(o=>[o.symbol,o]));if(visible())view()});
  document.addEventListener("recover:market",e=>{if(symbol!==e.detail){symbol=e.detail;resetSelection();dock()}});
  for(const b of document.querySelectorAll("[data-frame]"))b.addEventListener("click",()=>{frame=b.dataset.frame;for(const a of document.querySelectorAll("[data-frame]"))a.setAttribute("aria-pressed",String(a===b));resetSelection()});
@@ -87,7 +115,7 @@
  id("chartLeft").addEventListener("click",()=>pan(Math.ceil(windowSize/4)));id("chartRight").addEventListener("click",()=>pan(-Math.ceil(windowSize/4)));id("chartReset").addEventListener("click",()=>{offset=0;windowSize=80;hover=null;view();load()});
  id("chartLevels").addEventListener("click",()=>{levels=!levels;id("chartLevels").setAttribute("aria-pressed",String(levels));view()});
  id("chartFills").addEventListener("click",()=>{showFills=!showFills;id("chartFills").setAttribute("aria-pressed",String(showFills));view()});
- id("chartEma").addEventListener("click",()=>{ema=!ema;id("chartEma").setAttribute("aria-pressed",String(ema));view()});
+ for(const b of document.querySelectorAll("[data-study]"))b.addEventListener("click",()=>{const k=b.dataset.study;if(selected.has(k))selected.delete(k);else selected.add(k);b.setAttribute("aria-pressed",String(selected.has(k)));id("indicatorCount").textContent=selected.size+" active";view()});
  id("marketFullscreen").addEventListener("click",()=>{const on=id("marketTerminal").classList.toggle("expanded-chart");id("marketFullscreen").textContent=on?"Close expanded chart":"Expand chart";view()});
  document.addEventListener("keydown",e=>{if(e.key==="Escape"&&id("marketTerminal").classList.contains("expanded-chart")){id("marketTerminal").classList.remove("expanded-chart");id("marketFullscreen").textContent="Expand chart";view()}});
  root.addEventListener("keydown",e=>{if(e.key==="ArrowLeft"){pan(5)}else if(e.key==="ArrowRight"){pan(-5)}else if(e.key==="+"||e.key==="="){zoom(.8)}else if(e.key==="-"){zoom(1.25)}else return;e.preventDefault()});

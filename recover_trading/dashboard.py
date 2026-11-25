@@ -25,6 +25,7 @@ from .decision_quality import report as decision_quality
 from .execution_cost import report as execution_cost
 from .exit_cost_preview import build as exit_cost_preview
 from .chart_overlay import build as chart_overlay
+from .chart_studies import studies as chart_studies
 from .outcome_learning import report as outcome_learning
 from .learning_memory import build as learning_memory
 from .memory_comparison import report as memory_comparison
@@ -198,7 +199,7 @@ def chart_data(root,symbol,frame,now):
     gaps=sum(b["time"]-a["time"]!=step for a,b in zip(candles,candles[1:]))
     return {"symbol":symbol,"frame":frame,"step":step,"source":"demo_archived_completed_candles","generated":now,
         "status":"unavailable" if rows is None else "observed" if candles else "empty",
-        "candles":candles,"invalid_rows":invalid,"gap_count":gaps,
+        "candles":candles,"studies":chart_studies(candles,step),"invalid_rows":invalid,"gap_count":gaps,
         "last_close_age_s":now-candles[-1]["time"]-step if candles else None}
 
 def handler(root):

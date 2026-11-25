@@ -1,0 +1,2 @@
+# Chart studies
+Display-only EMA 9/20/50/200 (SMA seed), Bollinger 20 population SD ±2, UTC session typical-price volume weighted average (only complete midnight start without gaps, intraday only), prior 20-bar extrema S/R, Wilder RSI14 and ATR14, MACD12/26/9 SMA-seeded EMA. Reset rolling state at gaps; null during warmup. Uses bounded 350 completed archived candles, so values may differ from longer history or platform conventions. Separate aligned RSI/MACD/ATR panels, selectable overlays, hover readout. No strategy/execution changes.
