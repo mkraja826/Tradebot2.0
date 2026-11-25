@@ -20,7 +20,11 @@ class Fake(DeltaDemo):
             return []
         if path.endswith("/leverage"):
             return {"leverage":self.leverage}
-        if path == "/v2/orders":
+        if method == "GET" and path in ("/v2/orders", "/v2/fills"):
+            return {"result": []}
+        if path == "/v2/positions/margined":
+            return []
+        if method == "POST" and path == "/v2/orders":
             if self.timeout:
                 raise TimeoutError()
             return {"id": 42}

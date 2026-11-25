@@ -39,7 +39,7 @@ class ServiceTests(unittest.TestCase):
                 self.assertEqual(events[0]["execution_status"], "acknowledged")
                 self.assertEqual(events[1]["status"], "already_evaluated")
                 self.assertEqual(provider.calls, 1)
-                self.assertEqual(sum(p == "/v2/orders" for m,p,k in broker.calls), 1)
+                self.assertEqual(sum(m == "POST" and p == "/v2/orders" for m,p,k in broker.calls), 1)
     def test_cycle_exception_does_not_terminate_worker(self):
         with tempfile.TemporaryDirectory() as directory:
             events, stop = [], threading.Event()
