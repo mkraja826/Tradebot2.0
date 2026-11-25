@@ -8,3 +8,6 @@
 
 ## Offline integration checks
 CLI default and opt-in startup, BTC/Gold routing for flat/open/unknown positions, unavailable journal fallback, one management dispatch without a simultaneous entry dispatch. These are mocked routing tests, not exchange validation or proof of performance. No deployment or activation in this PR.
+
+## Position scenario coverage
+Synthetic BTC/Gold LONG/SHORT fixtures exercise exit geometry, persisted management proposals and lifecycle plans for stop-only profit retention, reduction/full close in a losing scenario, target-only extension, maintain, and rejection of invalid dual-leg amendments or oversize reductions. Mock responses intentionally select actions; tests do not establish that GPT would choose the correct action, actual fill prices, profitability, or exchange mutation compatibility. No production or demo broker is contacted.
