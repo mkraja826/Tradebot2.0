@@ -1,0 +1,8 @@
+[Unit]
+Description=Collect paired forward comparison every five minutes
+[Timer]
+OnActiveSec=5min
+OnUnitActiveSec=5min
+Unit=recover-paired-forward.service
+[Install]
+WantedBy=timers.target

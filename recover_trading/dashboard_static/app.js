@@ -98,6 +98,11 @@ function render(){
  $("referenceStrategyNote").textContent=sr?"Cutoff "+time(sr.as_of)+" · Matched demo: "+fmt(sr.matched_demo?.direction)+" · Matched reference: "+fmt(sr.matched_reference?.direction)+" · Comparable rule/timeframes: "+fmt(sr.comparable_rule_frames):"Reference strategy comparison unavailable.";
  bars("referenceStrategyCounts",Object.entries(sr?.comparison_counts||{}).map(([status,count])=>({status,count})));
  table("referenceStrategyRows",sr?.rows??null,[["Rule",r=>r.id+" "+r.name],["Frame",r=>r.frame],["Demo",r=>r.demo===null?"Unavailable":r.demo.join(", ")||"Inactive"],["Reference",r=>r.reference===null?"Unavailable":r.reference.join(", ")||"Inactive"],["Comparison",r=>human(r.comparison)]]);
+ const paired=m.paired_forward;
+ $("pairedNote").textContent=paired?"Protocol started "+time(paired.start)+" · Last collection "+time(paired.generated)+" · Assumed cost "+fmt(paired.assumed_cost_bps)+" bps · "+human(paired.reference_feed):"Paired forward research unavailable.";
+ const pairedBps=v=>finite(v)?Number(v).toFixed(3)+" bps":"—";
+ const pairedRows=paired?paired.horizons.flatMap(r=>[{...r,scope:"All paired windows"},{...r.disagreement_only,horizon_s:r.horizon_s,scope:"Disagreement only"}]):null;
+ table("pairedRows",pairedRows,[["Horizon",r=>r.horizon_s/60+"m"],["Scope",r=>r.scope],["Completed",r=>r.paired_windows],["Pending",r=>r.counts?.pending??"—"],["Demo entries",r=>r.demo_entries],["Reference entries",r=>r.reference_entries],["Demo / window",r=>pairedBps(r.mean_demo_net_bps_per_window)],["Reference / window",r=>pairedBps(r.mean_reference_net_bps_per_window)],["Paired difference",r=>pairedBps(r.mean_reference_minus_demo_bps)]]);
  table("wallet",wallets??null,[["Asset",r=>r.asset_symbol],["Balance",r=>r.balance],["Available",r=>r.available_balance],["Position margin",r=>r.position_margin],["Order margin",r=>r.order_margin]]);
  $("brackets").textContent="Bracket evidence: "+human(snap.bracket_evidence)+" · Observed "+time(snap.observed)+" · Not a coverage guarantee.";
  table("positions",positions??null,[["Contracts",r=>r.size],["Entry",r=>r.entry_price],["Mark",r=>r.mark_price],["Margin",r=>r.margin],["Unrealized P&L",r=>r.unrealized_pnl],["Liquidation",r=>r.liquidation_price]]);
