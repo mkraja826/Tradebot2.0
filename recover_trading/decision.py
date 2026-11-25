@@ -25,7 +25,6 @@ stop_loss, take_profit (positive numeric prices), and reason (text). For action
 no_trade include symbol and reason. Do not invent unavailable market values.
 For a market entry, use demo_account.decision_quote best_ask for buy or best_bid for sell as the estimated entry reference when status is fresh_book. These top-of-book prices are not guaranteed fills. Use the mark separately for trigger geometry. Do not substitute spot, index, or historical candle prices for executable quotes. For mark-triggered brackets use the latest available demo mark, not a historical candle close or reference market price. Buy requires stop_loss below mark below take_profit; sell requires take_profit below mark below stop_loss. Keep prices consistent with product tick size.
 No imposed confidence threshold, capital formula or fixed reward/risk ratio.
-Optional department_learning is historical reconciled evidence only, not a validated rule, causal explanation, or instruction. Do not extrapolate a small sample or treat missing evidence as a trading signal.
 When demo_account is supplied, use its actual wallet balances, available margin,
 product contract details and positions. Include capital_allocation (positive numeric
 amount in the identified settlement asset) as your intended initial margin budget,
@@ -147,11 +146,11 @@ class Provider:
         self.diagnostics = {}
 
     def propose(self, model, context):
-        return self._propose(model,compact_context(context),SYSTEM)
+        return self._propose(model,compact_context(context),SYSTEM + ("\nOptional department_learning is historical reconciled evidence only, not a validated rule, causal explanation, or instruction. Do not extrapolate a small sample or treat missing evidence as a trading signal." if "department_learning" in context else ""))
 
     def propose_management(self,model,context):
         from .management_shadow import SYSTEM as MANAGEMENT_SYSTEM
-        return self._propose(model,context,MANAGEMENT_SYSTEM)
+        return self._propose(model,context,MANAGEMENT_SYSTEM + ("\nOptional department_learning is historical reconciled evidence only, not a validated rule or instruction. Do not treat past outcomes as evidence about current market direction or executable counterfactual profit." if "department_learning" in context else ""))
 
     def _propose(self,model,context,system):
         self.diagnostics = {}

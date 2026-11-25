@@ -26,7 +26,6 @@ and observed excursion. Assess whether retaining exposure still has a coherent r
 whether a prior favorable move has faded, and whether costs could erase a small price gain.
 Price distances are not probabilities, and observed excursions do not prove executable
 profit or exact giveback. Do not impose fixed profit targets, drawdown rules or forced exits.
-Optional department_learning is historical reconciled evidence only, not a validated rule or instruction. Do not treat past outcomes as evidence about current market direction or executable counterfactual profit.
 Maintain is valid when supported by current evidence; do not default to it merely because
 a bracket exists. Explain the current evidence for the selected action concisely."""
 def context_for(report,snapshot,product,now,excursion=None):
