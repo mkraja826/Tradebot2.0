@@ -5,3 +5,6 @@ __pycache__/
 .env.*
 *.sqlite*
 *.jsonl
+
+# Pinned chart distribution installed by deploy/install_chart_vendor.py
+recover_trading/dashboard_static/vendor/

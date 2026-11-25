@@ -73,3 +73,6 @@ html{scroll-padding-top:calc(var(--header) + 12px)}.workspace-link,.quiet-button
  .lab-controls input,.lab-controls select{width:100%;max-width:100%}
  .scroll{max-width:100%}
 }
+
+/* TradingView Lightweight Charts canvas layout */
+.market-chart{height:clamp(380px,55vh,680px);cursor:default;touch-action:auto}.market-chart.study-count-1{height:clamp(490px,69vh,790px)}.market-chart.study-count-2{height:clamp(620px,80vh,920px)}.market-chart.study-count-3{height:clamp(740px,90vh,1040px)}.market-chart canvas{max-width:none}.chart-legend a{color:var(--muted);margin-left:auto}.expanded-chart .market-chart{height:calc(100dvh - 220px);min-height:320px}@media(max-width:760px){.market-chart{height:410px}.market-chart.study-count-1{height:540px}.market-chart.study-count-2{height:660px}.market-chart.study-count-3{height:780px}.expanded-chart .market-chart{height:calc(100dvh - 230px);min-height:320px}.market-chart:focus-visible{outline-offset:-2px}}

@@ -24,6 +24,7 @@ jobs:
           python-version: '3.11'
       - run: python -m pip install playwright==1.51.0
       - run: python -m playwright install --with-deps chromium
+      - run: python deploy/install_chart_vendor.py
       - run: python tests/browser_dashboard_smoke.py
         env:
           PYTHONPATH: .

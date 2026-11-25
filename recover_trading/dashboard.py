@@ -227,10 +227,15 @@ def handler(root):
             assets = {"/":("index.html","text/html; charset=utf-8"),
                       "/app.js":("app.js","text/javascript; charset=utf-8"),
                       "/market-chart.js":("market-chart.js","text/javascript; charset=utf-8"),
+                      "/vendor/lightweight-charts.js":("vendor/lightweight-charts.js","text/javascript; charset=utf-8"),
+                      "/vendor/LICENSE":("vendor/LICENSE","text/plain; charset=utf-8"),
+                      "/vendor/NOTICE":("vendor/NOTICE","text/plain; charset=utf-8"),
                       "/style.css":("style.css","text/css; charset=utf-8")}
             if path in assets:
                 name,mime = assets[path]
-                return self.send(200,(STATIC/name).read_bytes(),mime)
+                try: content=(STATIC/name).read_bytes()
+                except FileNotFoundError: return self.send(503,b"Dashboard asset unavailable","text/plain")
+                return self.send(200,content,mime)
             if path == "/api/chart":
                 try:
                     q=parse_qs(urlsplit(self.path).query,strict_parsing=True,max_num_fields=2)
