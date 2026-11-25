@@ -398,9 +398,9 @@ function kimiView(m){
  const names={not_reviewed:"Not reviewed",reviewed:"Review ready",request_reserved:"Review in progress",review_failed:"Review unavailable",provider_unconfigured:"Connection not configured",insufficient_evidence:"Not enough completed trades"};
  $("kimiStatus").textContent=names[k.status]||"Not reviewed";
  $("kimiMeta").textContent="Kimi K3 · "+fmt(k.evidence_count??0)+" completed trades reviewed"+(k.reviewed_at?" · "+time(k.reviewed_at):"");
- $("kimiSummary").textContent=ready?r.summary:"No verified Kimi report available yet.";
+ const records=k.evidence?.records||[],wins=records.filter(x=>x.outcome==="win").length,losses=records.filter(x=>x.outcome==="loss").length,even=records.filter(x=>x.outcome==="breakeven").length;
+ $("kimiSummary").textContent=ready?"Kimi reviewed "+records.length+" completed demo "+(records.length===1?"trade":"trades")+". "+wins+" "+(wins===1?"win":"wins")+", "+losses+" "+(losses===1?"loss":"losses")+", "+even+" broke even. Results exclude funding payments. This is a selected sample, not the entire trading history.":"No verified Kimi report available yet.";
  $("kimiMethod").textContent=ready?r.method:"Kimi compares completed trade records and later price movement. It does not change the trading engine.";
- const records=k.evidence?.records||[];
  $("kimiLessons").replaceChildren(...(ready?(r.lessons||[]):[]).map((x,i)=>{
    const n=el("article",undefined,"kimi-lesson"),head=el("div",undefined,"kimi-lesson-head");
    head.append(el("span","Lesson "+(i+1),"kimi-number"),el("span",x.kind==="hypothesis"?"Still investigating":"Observed in records","kimi-type"));
