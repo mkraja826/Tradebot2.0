@@ -63,13 +63,19 @@ def compare_reports(demo,reference):
             "matched_demo":summary(demo,True) if common else None,
             "matched_reference":summary(reference,True) if common else None,"rows":rows}
 
+def matched_cutoff(db,symbol,now):
+    expected=now//300*300
+    last=db.execute("SELECT max(stamp) FROM samples WHERE symbol=? AND series='candle:5m' AND stamp<?",(symbol,expected)).fetchone()[0]
+    return min(expected,last+300) if type(last) is int and last%300==0 else expected
+
 def run(root,symbol,now,fetch=candles):
     if symbol not in MARKETS or type(now) is not int:raise ValueError("invalid market")
     root=Path(root)/symbol
-    at=now//300*300
+    expected=now//300*300
     demo={};reference={};coverage={}
     with closing(sqlite3.connect((root/"market.sqlite").resolve().as_uri()+"?mode=ro",uri=True,timeout=2)) as db:
         db.execute("BEGIN")
+        at=matched_cutoff(db,symbol,now)
         raw={}
         for frame,count in targets(symbol).items():
             end=at//FRAMES[frame]*FRAMES[frame]
@@ -96,9 +102,10 @@ def run(root,symbol,now,fetch=candles):
             break
         coverage[frame]=info
     report={"version":VERSION,"symbol":symbol,"generated":now,"as_of":at,"completed":int(time.time()),
-        "execution_effect":"none","coverage":coverage,
+        "execution_effect":"none","expected_as_of":expected,"cutoff_lag_s":expected-at,"coverage":coverage,
         **compare_reports(scan_windows(symbol,at,demo),scan_windows(symbol,at,reference)),
         "limitations":["Matched candle-only evaluations; no noncandle inputs or full live consensus comparison.",
+           "Cutoff uses latest stored closed demo 5m candle, with lag explicitly recorded.",
            "Unmatched and unavailable rule/frame rows excluded from matched votes; neutral may mean no active comparable signal.",
            "Regime weighting uses each source's own candle features.",
            "Reference windows fetched after cutoff, not proof of historic availability. No model requests or order actions."]}

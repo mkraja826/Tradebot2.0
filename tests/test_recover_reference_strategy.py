@@ -22,3 +22,14 @@ class ReferenceStrategyTests(unittest.TestCase):
         self.assertEqual(c["comparison_counts"].get("different",0),0)
         self.assertEqual(c["matched_demo"],c["matched_reference"])
         self.assertGreater(c["comparison_counts"]["both_unavailable"],0)
+
+    def test_cutoff_uses_latest_stored_closed_candle(self):
+        import sqlite3
+        from contextlib import closing
+        from recover_trading.reference_strategy import matched_cutoff
+        t=1800000000
+        with closing(sqlite3.connect(":memory:")) as db:
+            db.execute("CREATE TABLE samples(symbol TEXT,series TEXT,stamp INTEGER)")
+            db.executemany("INSERT INTO samples VALUES(?,?,?)",[("BTCUSD","candle:5m",t-600),("BTCUSD","candle:5m",t),("XAUTUSD","candle:5m",t-300)])
+            self.assertEqual(matched_cutoff(db,"BTCUSD",t+5),t-300)
+            self.assertEqual(matched_cutoff(db,"XAUTUSD",t+5),t)
