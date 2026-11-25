@@ -74,12 +74,12 @@ def scan_market(store, client, symbol, *, clock=time.time,
     if symbol == "XAUTUSD":
         try:
             refs = external_context()
-            health.update({"external:" + k: {"status": v["status"]} for k, v in refs.items()})
+            health.update({"external:" + k: {"status": v["status"], **({"reason": v["reason"]} if "reason" in v else {})} for k, v in refs.items()})
         except Exception as exc:
             health["external"] = {"status": "unavailable", "reason": type(exc).__name__}
     # Round the snapshot cutoff up so subsecond observations just recorded are included.
     now = math.ceil(clock())
-    data = snapshot(store.path, now, symbols=(symbol,))
+    data = snapshot(store.path, now, symbols=(symbol,), candle_as_of=as_of)
     if symbol == "XAUTUSD":
         apply_context(data, refs, now)
     report = SCANNERS[symbol](data)
@@ -95,6 +95,7 @@ def scan_market(store, client, symbol, *, clock=time.time,
         "missing_features": dict(Counter(k for r in rows for k in r.get("missing", []))),
     }
     report["feed_health"] = health
+    report["candle_as_of"] = as_of
     return report
 
 

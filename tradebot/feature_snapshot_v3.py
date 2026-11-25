@@ -8,9 +8,13 @@ from tradebot.advanced_indicators_v3 import advanced_technicals,daily_pivots
 from tradebot.session_context_v3 import session_features,ticker_changes
 from tradebot.gold_context_v3 import gold_context
 
-def snapshot(database,as_of,*,symbols=MARKETS):
+def snapshot(database,as_of,*,symbols=MARKETS,candle_as_of=None):
     if type(as_of) is not int or as_of<=0: raise ValueError("invalid_as_of")
     if not symbols or any(x not in MARKETS for x in symbols) or len(set(symbols))!=len(symbols): raise ValueError("invalid_symbols")
+    observed_as_of=as_of
+    if candle_as_of is not None:
+        if type(candle_as_of) is not int or not 0<candle_as_of<=as_of: raise ValueError("invalid_candle_as_of")
+        as_of=candle_as_of
     uri=Path(database).resolve().as_uri()+"?mode=ro"
     with closing(sqlite3.connect(uri,uri=True)) as db:
         db.execute("BEGIN")
@@ -39,7 +43,7 @@ def snapshot(database,as_of,*,symbols=MARKETS):
                     frames[frame]=item
                 except ValueError as e: frames[frame]={"status":"unavailable","reason":str(e)}
             context=session_features(history(symbol,"candle:5m",as_of//300*300,600),as_of=as_of)
-            context.update(ticker_changes(history(symbol,"ticker",as_of*1_000_000+1,180),as_of=as_of))
+            context.update(ticker_changes(history(symbol,"ticker",observed_as_of*1_000_000+1,180),as_of=observed_as_of))
             daily=history(symbol,"candle:1d",as_of//86400*86400,1)
             try:
                 row=normalize(daily,"1d",as_of=as_of,count=1)[0]
@@ -59,10 +63,10 @@ def snapshot(database,as_of,*,symbols=MARKETS):
                 context.update(derivative_features(history(symbol,"funding:1h",as_of//3600*3600,74),history(symbol,"mark:5m",as_of//300*300,2),history(symbol,"index:5m",as_of//300*300,2),as_of=as_of))
             quotes={}
             for kind in ("ticker","book","flow",*(("xau_reference",) if symbol=="XAUTUSD" else ())):
-                latest=history(symbol,kind,as_of*1_000_000+1,1)
-                quotes[kind]=latest[0] if latest and 0<=as_of*1_000_000-latest[0]["timestamp_us"]<=120_000_000 else None
+                latest=history(symbol,kind,observed_as_of*1_000_000+1,1)
+                quotes[kind]=latest[0] if latest and 0<=observed_as_of*1_000_000-latest[0]["timestamp_us"]<=120_000_000 else None
             if symbol=="XAUTUSD":
                 from tradebot.gold_reference_v3 import features as reference_features
-                context.update(reference_features(quotes,as_of=as_of))
+                context.update(reference_features(quotes,as_of=observed_as_of))
             result[symbol]={"frames":frames,"context":context,"quotes":quotes}
-        return {"mode":"read_only_research","as_of":as_of,"markets":result}
+        return {"mode":"read_only_research","as_of":observed_as_of,"candle_as_of":as_of,"markets":result}

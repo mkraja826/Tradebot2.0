@@ -47,3 +47,13 @@ class ScannerTests(unittest.TestCase):
             self.assertEqual(row["feed_health"]["ticker"]["status"], "unavailable")
         self.assertEqual(report["orders_submitted"], 0)
         self.assertEqual(report["ai_calls"], 0)
+
+    def test_collection_crosses_candle_boundary(self):
+        # A scan that crosses a candle close must retain its original historical cutoff.
+        with tempfile.TemporaryDirectory() as tmp:
+            t = iter([NOW-1, NOW+1])
+            report = scan_once(Path(tmp)/"market.sqlite", client=FixtureClient(),
+                               symbols=("BTCUSD",), clock=lambda: next(t))
+        row=report["markets"]["BTCUSD"]
+        self.assertEqual(row["candle_as_of"],NOW-1)
+        self.assertGreater(row["coverage"]["evaluable_rules"],20)
