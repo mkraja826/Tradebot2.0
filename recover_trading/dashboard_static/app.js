@@ -427,10 +427,70 @@ function learnIntelligence(m){
 }
 $("learnOutcomeFilter").addEventListener("change",()=>{const m=data?.markets.find(x=>x.symbol===chosen);if(m)learnLessonView(m)});
 
+
+let healthRefreshState="pending";
+function healthAge(value,now){
+ if(!finite(value))return {label:"Unavailable",tone:"neutral",age:"—"};
+ const age=now-Number(value);
+ if(age< -5)return {label:"Clock mismatch",tone:"caution",age:"Future timestamp"};
+ const seconds=Math.max(0,Math.floor(age));
+ return {label:seconds<=180?"Recent":"Stale",tone:seconds<=180?"gain":"caution",age:seconds<60?seconds+"s":Math.floor(seconds/60)+"m "+seconds%60+"s"};
+}
+function healthConnectionView(){
+ const n=$("healthConnection"),a=healthAge(data?.generated,Date.now()/1000);
+ n.textContent=healthRefreshState==="failed"?"Refresh failed · retained data may be stale"+(data?" · last snapshot "+time(data.generated):""):healthRefreshState==="pending"?"Awaiting dashboard observation…":"Dashboard snapshot "+a.age+" ago · "+a.label;
+ n.className=healthRefreshState==="failed"||a.tone==="caution"?"caution":"empty";
+}
+function healthView(m){
+ const now=Date.now()/1000;
+ healthConnectionView();
+ const markets=data?.markets||[];
+ function badgeLine(label,value,tone="neutral"){
+  const row=el("div",undefined,"health-line");row.append(el("span",label),el("strong",value,tone));return row;
+ }
+ $("healthMarkets").replaceChildren(...["BTCUSD","XAUTUSD"].map(symbol=>{
+  const x=markets.find(y=>y.symbol===symbol),h=x?.heartbeat||{},snap=x?.snapshot||{},p=x?.position_preview||{},a=healthAge(h.timestamp,now),b=healthAge(snap.observed,now),err=snap.errors||{};
+  const card=el("article",undefined,"health-market"),top=el("div",undefined,"health-market-head");
+  const worker=h.status==="cycle_error"?{label:"Cycle error",tone:"loss"}:a;
+  top.append(el("span",symbol==="BTCUSD"?"₿":"Au","coin "+(symbol==="BTCUSD"?"btc":"gold")),el("h3",symbol==="BTCUSD"?"Bitcoin · BTCUSD":"Gold · XAUTUSD"),el("span",worker.label,"health-state "+worker.tone));card.append(top);
+  card.append(badgeLine("Worker heartbeat",a.age,a.tone),badgeLine("Last cycle status",human(h.status),h.status==="cycle_error"?"loss":"neutral"),badgeLine("Exchange snapshot",b.age,b.tone),badgeLine("Wallet observation",x?.availability?.wallets&&Array.isArray(snap.wallets)&&!Object.hasOwn(err,"wallets")?"Recorded":"Unavailable"),badgeLine("Position observation",human(p.position_state)),badgeLine("Bracket evidence",human(p.bracket_state)),badgeLine("Unresolved submissions",fmt(p.unresolved_submissions),finite(p.unresolved_submissions)&&Number(p.unresolved_submissions)>0?"caution":"neutral"));
+  if(healthRefreshState==="failed")card.append(el("p","Retained snapshot · refresh failed","caution"));
+  const route=el("button","Inspect "+symbol,"quiet-button");route.type="button";route.addEventListener("click",()=>chooseMarket(symbol));card.append(route);return card;
+ }));
+ const h=m.heartbeat||{},snap=m.snapshot||{},p=m.position_preview||{},mr=m.management_report||{},q=h.market_quality||{},r=q.recent_24h||{},timing=h.cycle_timing_ms||{},a=healthAge(h.timestamp,now);
+ const coverage=finite(r.rows)&&finite(r.expected_rows)&&Number(r.expected_rows)>0?Number(r.rows)/Number(r.expected_rows):null;
+ metrics([["Heartbeat age",a.age,"Recorded worker heartbeat"],["Cycle duration",finite(timing.total)?(Number(timing.total)/1000).toFixed(2)+" s":"—","Last recorded cycle"],["24h candle coverage",finite(coverage)?percent(coverage):"—",fmt(r.rows)+" / "+fmt(r.expected_rows)+" 5m candles"],["Unresolved submissions",fmt(p.unresolved_submissions),"Journal count · not losses"]],"healthMetrics");
+ const issues=[],errors=snap.errors||{};
+ if(!finite(h.timestamp)||a.tone!=="gain")issues.push(["Worker heartbeat",a.label,a.tone]);
+ if(h.status==="cycle_error")issues.push(["Latest worker cycle","Reported error","loss"]);
+ const sa=healthAge(snap.observed,now);if(sa.tone!=="gain")issues.push(["Exchange observation",sa.label,sa.tone]);
+ for(const name of ["wallets","positions"])if(!m.availability?.[name]||!Array.isArray(snap[name])||Object.hasOwn(errors,name))issues.push([human(name),"Unavailable or incomplete","caution"]);
+ if(Object.keys(errors).length)issues.push(["Exchange snapshot",Object.keys(errors).length+" reported error categories","caution"]);
+ if(p.bracket_state==="incomplete_or_mismatched_legs")issues.push(["Position bracket","Incomplete or mismatched legs","caution"]);
+ if(finite(p.unresolved_submissions)&&Number(p.unresolved_submissions)>0)issues.push(["Submission journal",fmt(p.unresolved_submissions)+" unresolved","caution"]);
+ if(healthRefreshState==="failed")issues.push(["Dashboard refresh","Retained data","caution"]);
+ const box=$("healthObservations");box.replaceChildren(...(issues.length?issues:[["Reported observations","No listed diagnostic warnings","neutral"]]).map(x=>badgeLine(...x)));
+ box.append(badgeLine("Management configuration",mr.enabled===true?"Enabled":mr.enabled===false?"Disabled":"Unverified"),badgeLine("Management runtime",human(mr.runtime_status)),el("p","Absence of a listed warning is not an operational guarantee.","empty"));
+ const telemetry=m.decision_review?.provider_telemetry||{},provider=$("healthProvider");
+ const rows=Object.entries(telemetry).flatMap(([status,fields])=>fields?.elapsed_ms?[{status,...fields.elapsed_ms}]:[]);
+ if(!rows.length)empty("healthProvider","No recorded entry provider timing");
+ else table("healthProvider",rows,[["Entry status",x=>human(x.status)],["Samples",x=>fmt(x.samples)],["Median ms",x=>fmt(x.median)],["Maximum ms",x=>fmt(x.maximum)]]);
+ provider.append(badgeLine("Management median",finite(mr.median_response_ms)?fmt(mr.median_response_ms)+" ms":"—"),badgeLine("Management timing samples",fmt(mr.latency_samples)));
+ const feed=$("healthFeeds"),frames=Object.entries(q.frames||{}),quotes=Object.entries(q.quotes||{});
+ if(!frames.length&&!quotes.length)empty("healthFeeds","No archived feed observations");
+ else{
+  const cards=el("div",undefined,"health-feed-grid");
+  for(const [name,v] of frames){const c=el("div",undefined,"health-feed");c.append(el("strong",name+" candles"),badgeLine("Collection",human(v.collection_status)),badgeLine("Snapshot",human(v.snapshot_status)),badgeLine("Lag at observation",finite(v.lag_at_observation_s)?fmt(v.lag_at_observation_s)+" s":"—"));cards.append(c)}
+  for(const [name,v] of quotes){const c=el("div",undefined,"health-feed");c.append(el("strong",human(name)+" quote"),badgeLine("Collection",human(v.collection_status)),badgeLine("Age at observation",finite(v.age_s)?fmt(v.age_s)+" s":"—"));cards.append(c)}
+  feed.replaceChildren(cards);
+ }
+}
+
 function render(){
  if(!data)return;
  overviewView();
  const m=data.markets.find(x=>x.symbol===chosen);if(!m)return;
+ healthView(m);
  const snap=m.snapshot||{},h=m.heartbeat||{},wallets=snap.wallets,positions=snap.positions;
  const alerts=[];if(!h.timestamp)alerts.push("Worker heartbeat unavailable");else if(Date.now()/1000-h.timestamp>180)alerts.push("Worker observation older than 3 minutes");
  if(!m.availability.wallets)alerts.push("Wallet data unavailable");if(Object.keys(snap.errors||{}).length)alerts.push("Exchange observations incomplete");
@@ -575,5 +635,5 @@ function render(){
 $("scopeRecover").addEventListener("click",()=>{scope="recover";render()});
 $("scopeAccount").addEventListener("click",()=>{scope="account";render()});
 for(const b of document.querySelectorAll("[data-symbol]"))b.addEventListener("click",()=>chooseMarket(b.dataset.symbol));
-async function refresh(){if(busy)return;busy=true;try{const r=await fetch("/api/overview",{cache:"no-store"});if(!r.ok)throw Error();data=await r.json();document.dispatchEvent(new CustomEvent("recover:overview",{detail:data.markets.map(m=>m.chart_overlay).filter(Boolean)}));render();$("refresh").textContent="Updated "+time(data.generated)}catch{$("refresh").textContent="Refresh failed · retained data";$("warning").textContent="Dashboard connection unavailable. Previously displayed data may be stale."}finally{busy=false}}
+async function refresh(){if(busy)return;busy=true;try{const r=await fetch("/api/overview",{cache:"no-store"});if(!r.ok)throw Error();data=await r.json();healthRefreshState="observed";document.dispatchEvent(new CustomEvent("recover:overview",{detail:data.markets.map(m=>m.chart_overlay).filter(Boolean)}));render();$("refresh").textContent="Updated "+time(data.generated)}catch{healthRefreshState="failed";healthConnectionView();const retained=data?.markets?.find(m=>m.symbol===chosen);if(retained){try{healthView(retained)}catch{healthConnectionView()}}$("refresh").textContent="Refresh failed · retained data";$("warning").textContent="Dashboard connection unavailable. Previously displayed data may be stale."}finally{busy=false}}
 refresh();setInterval(refresh,10000);

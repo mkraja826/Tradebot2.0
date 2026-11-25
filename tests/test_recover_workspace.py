@@ -6,7 +6,7 @@ class WorkspaceTests(unittest.TestCase):
         ids=re.findall(r'\bid="([^"]+)"',html)
         self.assertEqual(len(ids),len(set(ids)))
         self.assertTrue(set(re.findall(r'\$\("([^"]+)"\)',js))<=set(ids))
-        self.assertEqual(len(re.findall(r'<section class="panel\b',html)),45)
+        self.assertEqual(len(re.findall(r'<section class="panel\b',html)),47)
     def test_routes_and_market_controls(self):
         html=(STATIC/"index.html").read_text()
         self.assertEqual(set(re.findall(r'data-page="([^"]+)"',html)),set(re.findall(r'data-workspace="([^"]+)"',html)))
@@ -45,3 +45,14 @@ class WorkspaceTests(unittest.TestCase):
         self.assertIn("x.mean_alternative_net_bps",js)
         self.assertIn("r.outcome===filter",js)
         self.assertIn("followups below remain unfiltered",js)
+
+    def test_system_health_workspace(self):
+        html=(STATIC/"index.html").read_text();js=(STATIC/"app.js").read_text()
+        health=html.split('data-workspace="health"',1)[1]
+        for identifier in ("healthConnection","healthMarkets","healthMetrics","healthObservations","healthProvider","healthFeeds"):
+            self.assertIn(f'id="{identifier}"',health)
+        self.assertIn('healthView(m);',js)
+        self.assertIn('healthRefreshState="failed"',js)
+        self.assertIn('seconds<=180',js)
+        self.assertIn('lag_at_observation_s',js)
+        self.assertIn('["BTCUSD","XAUTUSD"].map',js)
