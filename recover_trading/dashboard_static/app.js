@@ -78,6 +78,9 @@ function render(){
  if(!m.availability.wallets)alerts.push("Wallet data unavailable");if(Object.keys(snap.errors||{}).length)alerts.push("Exchange observations incomplete");
  if(snap.observed&&Date.now()/1000-snap.observed>180)alerts.push("Position snapshot may be stale");
  if(h.status==="cycle_error")alerts.push("Latest cycle reported an error");
+ const pf=m.postfill_bracket||{};
+ if(pf.status==="bracket_evidence_missing_or_mismatched")alerts.push("Open position: matching SL/TP legs not verified");
+ if(pf.entry_evidence?.bracket_price_geometry===false)alerts.push("Recorded SL/TP prices do not straddle the matched entry fill correctly");
  $("warning").textContent=alerts.join(" • ");
  const sum=rows=>rows?.reduce((s,r)=>s+r.count,0)??null;
  metrics([["Market price",fmt(m.prices.at(-1)?.close),"Last recorded 5m close"],["Open positions",positions?.length??"—","Exchange observation"],["AI decisions",fmt(sum(m.decision_counts)),"Journal count"],["Order submissions",fmt(sum(m.order_counts)),"Not completed trades"],["Recover win rate",percent(m.performance?.recover_attributed?.win_rate_before_funding),"Reconciled, before funding"],["Recover net P&L",money(m.performance?.recover_attributed?.net_before_funding,m.performance?.currency||"USD"),"Closed episodes, before funding"]]);
