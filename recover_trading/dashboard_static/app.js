@@ -111,6 +111,9 @@ function render(){
  const pp=m.position_preview||{};
  $("positionPreviewNote").textContent="Position: "+human(pp.position_state)+" · Contracts: "+fmt(pp.size)+" · Bracket: "+human(pp.bracket_state)+" · Unresolved submissions: "+fmt(pp.unresolved_submissions);
  table("positionPreviewLegs",pp.legs??null,[["Leg",r=>human(r.type)],["Trigger",r=>r.trigger],["Remaining",r=>r.remaining],["Quantity matches",r=>r.matching_quantity?"Yes":"No"],["Side matches",r=>r.matching_side?"Yes":"No"],["Reduce only",r=>r.reduce_only?"Yes":"No"]]);
+ const mc=m.management_compat||{};
+ $("managementNote").textContent="Status: "+human(mc.status)+" · Amendment: "+human(mc.amendment)+" · Close: "+human(mc.reduce_only_close)+" · Historical fills: "+fmt(mc.historical_fills);
+ bars("managementCounts",Object.entries(mc.fill_transitions||{}).map(([status,count])=>({status,count})));
  table("positions",positions??null,[["Contracts",r=>r.size],["Entry",r=>r.entry_price],["Mark",r=>r.mark_price],["Margin",r=>r.margin],["Unrealized P&L",r=>r.unrealized_pnl],["Liquidation",r=>r.liquidation_price]]);
  table("active",snap.active_orders??null,[["Type",r=>human(r.stop_order_type)],["Side",r=>r.side],["Size",r=>r.size],["Trigger",r=>r.stop_price],["State",r=>human(r.state)]]);
  const coverage=h.coverage||{}; $("strategies").replaceChildren(el("p","Latest cycle: "+human(h.status)),el("p","Signals: "+fmt(h.signal_count)+" · Evaluable: "+fmt(coverage.evaluable_rules)+" / "+fmt(coverage.implemented_rules)+" · Deferred: "+fmt(coverage.deferred_rules)));
