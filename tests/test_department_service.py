@@ -19,6 +19,7 @@ class DepartmentServiceTests(unittest.TestCase):
                         kw=factory.call_args.kwargs
                         self.assertEqual(kw["learning_journal"],extra[1] if extra else None)
                         self.assertFalse(kw["manage_demo"])
+                        self.assertIsNone(kw["management_model"])
                         self.assertIsNone(kw["broker"])
                         fake.run.assert_called_once()
 
@@ -51,12 +52,17 @@ class DepartmentServiceTests(unittest.TestCase):
                         stack.enter_context(patch.object(service,name,return_value={}))
                     entry=stack.enter_context(patch.object(service,"evaluate_and_execute",return_value={"status":"test_entry"}))
                     result=svc.cycle()
-                    packet=svc.management.capture.call_args.args[0]["department_learning"]
+                    capture_args=svc.management.capture.call_args.args
+                    self.assertEqual(capture_args[2],"tb-deepseek-v4-pro")
+                    self.assertEqual(result["entry_model"],"fake")
+                    self.assertEqual(result["management_model"],"tb-deepseek-v4-pro")
+                    packet=capture_args[0]["department_learning"]
                     self.assertEqual(packet["symbol"],symbol)
                     self.assertEqual(packet["status"],"unavailable")
                     if state=="flat":
                         entry.assert_called_once()
                         self.assertEqual(entry.call_args.args[0]["department_learning"],packet)
+                        self.assertEqual(entry.call_args.args[3],{symbol:"fake"})
                         svc.management_executor.execute.assert_not_called()
                     elif state=="open":
                         entry.assert_not_called()
@@ -66,3 +72,31 @@ class DepartmentServiceTests(unittest.TestCase):
                         entry.assert_not_called()
                         svc.management_executor.execute.assert_not_called()
                         self.assertEqual(result["status"],"position_management_cycle")
+
+    def test_management_model_override_is_separate(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for symbol in ("BTCUSD","XAUTUSD"):
+                with self.subTest(symbol=symbol):
+                    plain=service.MarketService(symbol,tmp,model="entry-model")
+                    self.assertEqual(plain.management_model,"entry-model")
+                    self.assertFalse(plain.manage_demo)
+                    active=service.MarketService(symbol,tmp,model="entry-model",manage_demo=True,
+                        management_model="test-management-model")
+                    self.assertEqual(active.model,"entry-model")
+                    self.assertEqual(active.management_model,"test-management-model")
+
+    def test_cli_management_model_selection(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for extra,env,expected in (
+                ([],{},service.DEFAULT_MANAGEMENT_MODEL),
+                ([],{"RECOVER_MANAGEMENT_MODEL":"configured-manager"},"configured-manager"),
+                (["--management-model","explicit-manager"],{"RECOVER_MANAGEMENT_MODEL":"configured-manager"},"explicit-manager")):
+                with self.subTest(extra=extra,env=env):
+                    fake=Mock()
+                    fake.symbol="BTCUSD"
+                    with patch.dict(service.os.environ,{"TB_API_KEY":"fixture","RECOVER_BTC_DEMO_KEY":"key","RECOVER_BTC_DEMO_SECRET":"secret",**env},clear=True), patch.object(sys,"argv",["recover","--once","--symbol","BTCUSD","--data-dir",tmp,"--execute-demo","--manage-demo"]+extra), patch.object(service,"MarketService",return_value=fake) as factory, patch.object(service,"configured_models",return_value={"BTCUSD":"entry-model"}), patch.object(service,"DeltaDemo"), patch.object(service,"Provider"), patch.object(service.signal,"signal"):
+                        self.assertEqual(service.main(),0)
+                        kw=factory.call_args.kwargs
+                        self.assertEqual(kw["model"],"entry-model")
+                        self.assertEqual(kw["management_model"],expected)
+                        self.assertTrue(kw["manage_demo"])
