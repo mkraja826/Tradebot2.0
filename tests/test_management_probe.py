@@ -65,3 +65,20 @@ class ManagementProbeTests(unittest.TestCase):
             self.assertEqual(mp.main(),0)
             provider.assert_not_called()
         self.assertEqual(json.loads(out.getvalue())["provider_calls"],0)
+
+    def test_validation_diagnostics_are_exact_and_redacted(self):
+        f=mp.context("BTCUSD","profit_retention","SHORT")
+        base={"symbol":"BTCUSD","action":"reduce","reason":"fixture","contracts":3}
+        for change,code in (({"secret-like-field":"do not log me"},"management_unexpected_fields"),
+            ({"reason":"x"*301},"management_action_or_reason"),
+            ({"contracts":"3"},"management_reduce_quantity"),
+            ({"action":"repair_bracket","stop_loss":61200,"take_profit":57600},"management_repair_state")):
+            with self.subTest(code=code):
+                r=mp.probe(Provider(api_key="fixture",opener=self.transport(json.dumps({**base,**change}))),
+                           mp.DEFAULT_MANAGEMENT_MODEL,f)
+                self.assertEqual(r["status"],"failed")
+                self.assertEqual(r["failure_stage"],"proposal_validation")
+                self.assertEqual(r["response_error"],code)
+                self.assertNotIn("secret-like-field",json.dumps(r))
+                self.assertNotIn("do not log me",json.dumps(r))
+                self.assertNotIn("x"*301,json.dumps(r))
