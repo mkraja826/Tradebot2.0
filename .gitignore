@@ -1,14 +1,7 @@
 __pycache__/
 *.py[cod]
-.pytest_cache/
 .venv/
-*.egg-info/
 .env
 .env.*
-!.env.example
-data/
 *.sqlite*
-*.log
-
-# Temporary Google GitHub Actions short-lived federated credential files
-gha-creds-*.json
+*.jsonl

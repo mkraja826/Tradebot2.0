@@ -1,0 +1,1 @@
+"""Recover Trading demo foundation."""
