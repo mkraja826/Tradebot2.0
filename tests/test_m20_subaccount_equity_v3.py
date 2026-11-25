@@ -22,3 +22,22 @@ class SubaccountEquityTests(unittest.TestCase):
  def test_gold_withdrawal(self):
     r=analyse("XAUTUSD","100","80",[self.p("sub_account_transfer","-20","XAUTUSD")],start_us=1,end_us=3,complete=True)
     self.assertEqual(r["adjusted_equity_change_usd"],"0")
+
+ def test_miscellaneous_keeps_known_losses_and_unknown_values(self):
+    rows=[self.p("conversion","50"),self.p("commission","-3",i="b"),dict(self.p("conversion","20",i="c"),asset="EUR")]
+    r=self.calc(rows,complete=True);m=r["miscellaneous"]
+    self.assertEqual(r["status"],"unclassified_postings")
+    self.assertIsNone(r["adjusted_equity_change_usd"])
+    self.assertEqual(m["known_unclassified_usd"],"50")
+    self.assertEqual(m["known_posted_trading_cashflow_usd"],"-3")
+    self.assertEqual(m["unconverted_posting_count"],1)
+    self.assertEqual(m["historical_missing_valuations"],"unknown")
+    self.assertEqual(m["eligible_trading_credit_usd"],"0")
+    self.assertFalse(r["execution_authorized"])
+ def test_miscellaneous_incomplete_window_never_assumes_zero(self):
+    r=self.calc([]);self.assertIsNone(r["miscellaneous"]["known_unclassified_usd"])
+    self.assertIsNone(r["miscellaneous"]["unexplained_or_unrealized_usd"])
+ def test_miscellaneous_is_subaccount_scoped(self):
+    r=analyse("XAUTUSD","100","90",[self.p("conversion","-10","XAUTUSD")],start_us=1,end_us=3,complete=True)
+    self.assertEqual(r["miscellaneous"]["known_unclassified_usd"],"-10")
+    self.assertFalse(r["parent_equity_included"])
