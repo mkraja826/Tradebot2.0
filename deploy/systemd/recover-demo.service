@@ -1,0 +1,26 @@
+[Unit]
+Description=Recover Trading authenticated Delta India demo execution
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=recovertrading
+Group=recovertrading
+WorkingDirectory=/opt/recover-trading/current
+EnvironmentFile=/etc/recover-trading/demo.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStartPre=/usr/bin/python3 -m recover_trading.demo_preflight
+ExecStart=/usr/bin/python3 -m recover_trading.service --execute-demo --data-dir /var/lib/recover-trading/demo --interval 60
+Restart=on-failure
+RestartSec=15
+TimeoutStopSec=180
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/recover-trading/demo
+
+[Install]
+WantedBy=multi-user.target
