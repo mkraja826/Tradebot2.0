@@ -15,6 +15,7 @@ from .scanner import scan_once
 from .direction import direction_for
 from .research import SignalResearch
 from .opportunity import opportunity
+from .planner_shadow import packet,load_reference,ShadowJournal
 from .lifecycle import Lifecycle
 from tradebot.market_data_v3 import MARKETS
 
@@ -46,6 +47,7 @@ class MarketService:
 
     def open(self):
         self.research = SignalResearch(self.directory / "signal_research.sqlite")
+        self.planner = ShadowJournal(self.directory / "planner_shadow.sqlite")
         if self.broker is not None:
             self.decisions = DecisionJournal(self.directory / "decisions.sqlite")
             self.orders = Journal(self.directory / "orders.sqlite")
@@ -84,6 +86,7 @@ class MarketService:
         direction = None
         research = None
         evidence = None
+        planner = None
         if report.get("status") != "scan_error":
             direction = direction_for(report)
             try:
@@ -94,6 +97,12 @@ class MarketService:
                 research = self.research.record(report,direction)
             except Exception as exc:
                 research = {"status":"research_error","error":type(exc).__name__}
+        if report.get("status") != "scan_error":
+            try:
+                reference=load_reference(self.directory / "planner_reference.json")
+                planner=self.planner.record(packet(report,direction,reference))
+            except Exception as exc:
+                planner={"status":"shadow_error","error":type(exc).__name__,"execution_effect":"none"}
         if report.get("status") == "scan_error":
             result = {"status": "scan_error", "reason": report.get("reason")}
         elif self.executor is None:
@@ -116,6 +125,7 @@ class MarketService:
                  "direction_engine": direction,
                  "research": research,
                  "opportunity": evidence,
+                 "planner_shadow": planner,
                  "error": summary.get("error", summary.get("reason")),
                  "reconciliation_error": reconciliation_error,
                  "lifecycle": {"new_fills": lifecycle.get("new_fills"),
