@@ -16,3 +16,9 @@ class StrategyEvidenceTests(unittest.TestCase):
         self.assertEqual(b["implemented"]+g["implemented"],95)
         self.assertEqual(b["exact_entry_rule_sets"][0]["rules"],["B01","B02"])
         self.assertEqual(b["exact_entry_rule_sets"][0]["net_before_funding"],"4")
+
+    def test_deferred_metadata(self):
+        b=build("BTCUSD",[],{});g=build("XAUTUSD",[],{})
+        rows={r["id"]:r for r in b["rules"]+g["rules"] if r["implementation"]=="deferred"}
+        self.assertEqual(set(rows),{"B17","B18","G20","G21","G25"})
+        self.assertTrue(all(r["name"] and r["missing_dependency"] for r in rows.values()))

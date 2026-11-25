@@ -7,8 +7,8 @@ from statistics import mean
 from .regime import FAMILIES
 from .research import HORIZONS,TOLERANCE
 from .performance import stats
-from tradebot.bitcoin_strategies_v3 import RULES as BTC
-from tradebot.gold_strategies_v3 import RULES as GOLD
+from tradebot.bitcoin_strategies_v3 import RULES as BTC, DEFERRED as BTC_DEFERRED
+from tradebot.gold_strategies_v3 import RULES as GOLD, DEFERRED as GOLD_DEFERRED
 VERSION="strategy-evidence-v1"
 COST_BPS=15
 
@@ -31,6 +31,7 @@ def summarize(rows,horizon):
 def build(symbol,observations,performance):
     prefix="B" if symbol=="BTCUSD" else "G"
     registry={r.id:r for r in (BTC if prefix=="B" else GOLD)}
+    deferred=BTC_DEFERRED if prefix=="B" else GOLD_DEFERRED
     groups=defaultdict(list)
     for ident,rule,horizon,entry,status,exit_us,value in observations:
         if rule in FAMILIES and rule.startswith(prefix) and horizon in HORIZONS:
@@ -39,7 +40,7 @@ def build(symbol,observations,performance):
     rules=[]
     for ident in sorted(k for k in FAMILIES if k.startswith(prefix)):
         r=registry.get(ident)
-        rules.append({"id":ident,"name":r.name if r else None,"family":FAMILIES[ident],"implementation":"implemented" if r else "deferred",
+        rules.append({"id":ident,"name":r.name if r else deferred.get(ident,(None,None))[0],"missing_dependency":deferred.get(ident,(None,None))[1],"family":FAMILIES[ident],"implementation":"implemented" if r else "deferred",
             "frames":list(r.frames) if r else [],"actual_cooccurrence":co.get(ident),"research":[summarize(groups[ident,h],h) for h in HORIZONS]})
     exact=defaultdict(list)
     # Each attributed episode belongs to one exact signal set only, no duplicated P&L.
