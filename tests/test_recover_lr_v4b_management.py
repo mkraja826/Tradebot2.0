@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from recover_trading.engine import Journal
 from recover_trading.management_executor import ManagementExecutor
 from recover_trading.lr_v4b_attribution import Attribution
-from recover_trading.lr_v4b_management import LRManager
+from recover_trading.lr_v4b_management import LRManager, terminal_entry
 from test_recover_management_executor import Fake
 
 
@@ -81,3 +81,26 @@ class LRManagementTests(unittest.TestCase):
         self.assertEqual(self.run_m()["status"],"outcome_unverified")
         self.assertEqual(self.run_m()["status"],"already_reserved")
         self.assertEqual(self.b.calls,1)
+
+class MultiFillTests(unittest.TestCase):
+    def test_cancelled_remainder_and_multiple_fills(self):
+        def fill(id,oid,side,size,price,after,second):
+            return {"id":id,"order_id":oid,"product_id":84,"side":side,"size":size,
+                    "price":price,"new_position":{"size":after},
+                    "created_at":datetime.fromtimestamp(second,timezone.utc).isoformat()}
+        fills=[fill("a",8,"buy",1,100,0,100),
+               fill("b",9,"sell",4,101,-4,101),
+               fill("c",9,"sell",4,99,-8,102)]
+        p={"product_id":84,"size":-8,"entry_price":100}
+        intent={"product_id":84,"side":"sell","size":10,"stop_loss":105,"take_profit":90}
+        receipt={"id":9,"client_order_id":"cid","product_id":84,"side":"sell","size":10,
+                 "unfilled_size":2,"state":"cancelled","reduce_only":False,
+                 "bracket_stop_loss_price":105,"bracket_take_profit_price":90}
+        out=terminal_entry(fills,p,intent,receipt,"cid")
+        self.assertEqual(out["size"],"-8")
+        self.assertEqual(out["first_fill_time"],101)
+        self.assertEqual(out["last_fill_time"],102)
+        self.assertIsNone(terminal_entry(fills,p,intent,{**receipt,"state":"open"},"cid"))
+        self.assertIsNone(terminal_entry(fills,{**p,"entry_price":101},intent,receipt,"cid"))
+        self.assertIsNone(terminal_entry(fills[1:],p,intent,receipt,"cid"))
+        self.assertIsNone(terminal_entry(fills+[fill("d",10,"buy",1,99,-7,103)],p,intent,receipt,"cid"))
