@@ -6,6 +6,7 @@ from .direction import compact_context,direction_for
 from .decision import encode,Provider,ProviderResponseError
 from .bracket_contract import repair_status
 from .department_feedback import copy_to_context
+from .research_context import attach_context
 
 VERSION="management-shadow-v3"
 SYSTEM="""You are evaluating an existing demo derivatives position, not opening a new trade.
@@ -52,7 +53,7 @@ def context_for(report,snapshot,product,now,excursion=None):
         context["open_excursion"]=excursion
     from .exit_context import geometry
     context["exit_geometry"]=geometry(context["position"],context.get("open_excursion"),pos,context["direction_engine"]["direction"])
-    return compact_context(copy_to_context(report,context))
+    return compact_context(attach_context(copy_to_context(report,context),report.get("research_prior")))
 
 def validate(raw,context):
     if not isinstance(raw,dict) or raw.get("symbol")!=context["symbol"]:
