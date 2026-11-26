@@ -22,10 +22,12 @@ class LiquidationToolsTest(unittest.TestCase):
         self.t=self.m.tools
 
     def test_registration_missing_and_unsupported(self):
-        self.assertEqual(set(self.t),{"liquidation_status","liquidation_history","positioning_history","liquidation_ema_backtest"})
+        self.assertEqual(set(self.t),{"liquidation_status","liquidation_history","positioning_history","liquidation_ema_backtest","liquidation_forward_validation"})
         self.assertEqual(self.t["liquidation_status"]()["archives"]["events"]["status"],"unavailable_or_invalid")
         self.assertEqual(self.t["liquidation_ema_backtest"]("BTCUSD",0,60,120)["status"],"research_data_unavailable_or_invalid")
         self.assertEqual(self.t["liquidation_status"]("XAUTUSD")["status"],"unavailable")
+        self.assertEqual(self.t["liquidation_forward_validation"]()["status"],"research_data_unavailable_or_invalid")
+        self.assertEqual(self.t["liquidation_forward_validation"]("XAUTUSD")["status"],"unavailable")
         self.assertFalse((self.root/"ref").exists())
         with self.assertRaises(ValueError): self.t["liquidation_status"]("../")
         with self.assertRaises(ValueError): self.t["liquidation_history"]("BTCUSD",0,60,501)
@@ -62,4 +64,42 @@ class LiquidationToolsTest(unittest.TestCase):
         self.assertEqual(r["status"],"no_archived_observations_in_window")
         self.assertNotIn("trades",r)
 
+
+    def test_forward_snapshot_predates_enrollment(self):
+        p=self.root/"ref";p.mkdir()
+        (self.root/"BTCUSD").mkdir()
+        h=p/"hypotheses.sqlite";m=self.root/"BTCUSD"/"market.sqlite"
+        with sqlite3.connect(h) as db:
+            db.execute("CREATE TABLE observations(observed_ms,payload)")
+            db.execute("INSERT INTO observations VALUES(60000,'{}')")
+        with sqlite3.connect(m) as db:
+            db.execute("CREATE TABLE samples(symbol,series,stamp,payload)")
+            db.execute("INSERT INTO samples VALUES('BTCUSD','candle:1m',0,'{}')")
+        before=(h.read_bytes(),m.read_bytes())
+        r=self.t["liquidation_forward_validation"]()
+        self.assertEqual(r["status"],"snapshot_predates_enrollment")
+        self.assertEqual(r["coverage_cutoff"],60)
+        self.assertEqual(before,(h.read_bytes(),m.read_bytes()))
+
+    def test_forward_compact_report(self):
+        from recover_trading import liquidation_prospective_v6 as v
+        p=self.root/"ref";p.mkdir();(self.root/"BTCUSD").mkdir()
+        h=p/"hypotheses.sqlite";m=self.root/"BTCUSD"/"market.sqlite"
+        with sqlite3.connect(h) as db:
+            db.execute("CREATE TABLE observations(observed_ms,payload)")
+            db.execute("INSERT INTO observations VALUES(?,'{}')",(v.START*1000,))
+        with sqlite3.connect(m) as db:
+            db.execute("CREATE TABLE samples(symbol,series,stamp,payload)")
+            db.execute("INSERT INTO samples VALUES('BTCUSD','candle:1m',?,'{}')",(v.START-60,))
+        import os
+        for path in (h,m):os.utime(path,(v.START,v.START))
+        with patch("recover_trading.tb2_liquidation_tools.time.time",return_value=v.START+600):
+            r=self.t["liquidation_forward_validation"]()
+        self.assertEqual(r["status"],"collecting")
+        self.assertEqual(r["enrolled"],0)
+        self.assertEqual(r["snapshot_lag_seconds"],600)
+        self.assertEqual(r["opportunity_ids"],[])
+        self.assertEqual(set(r["all_available"]),set(v.POLICIES))
+
 if __name__=="__main__": unittest.main()
+

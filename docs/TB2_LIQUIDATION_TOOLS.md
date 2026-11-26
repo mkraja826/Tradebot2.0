@@ -1,4 +1,4 @@
-# Tb2.0 liquidation research extension (21 tools total after registration)
+# Tb2.0 liquidation research extension (22 tools total after registration)
 
 Install only in the separate read-only MCP server environment. Keep the current
 17 registrations, then before server.run() add:
@@ -21,8 +21,17 @@ must report unavailable; no fabricated zero events. Snapshot session heartbeat
 does not prove live collector health. Only BTC has a configured source.
 
 Tools: liquidation_status, liquidation_history, positioning_history,
-liquidation_ema_backtest. All history timestamps use UTC epoch seconds, end exclusive;
+liquidation_ema_backtest, liquidation_forward_validation. All history timestamps use UTC epoch seconds, end exclusive;
 event receipt must also precede end. Pages limited to 500. Backtest uses existing
 fixed-vs-V8 research module, not actual fills or an independent portfolio simulation.
 Gold explicitly unavailable until an authenticated-in-provenance market-specific
 public source is verified. No order operations.
+
+The forward tool has no mutable strategy arguments. It evaluates the frozen V6
+study at the minimum of current time, latest recorded observation, latest
+closed 1m candle timestamp and snapshot file timestamps. It returns compact
+overall and matched-cohort metrics, primary/reference regime summaries,
+opportunity IDs and archive lag. This is a conservative cutoff, not proof of
+continuous archive coverage. It never reports a zero sample as a profitable
+study. Archive refresh and local discovery must be verified before scheduling
+remote reviews. Retain the existing 17 tools and all trading services unchanged.

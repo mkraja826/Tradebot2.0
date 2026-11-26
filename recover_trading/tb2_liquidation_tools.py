@@ -1,14 +1,16 @@
 """Read-only BTC liquidation research MCP tools; operator-configured snapshots."""
 import json
 import sqlite3
+import time
 from contextlib import closing, contextmanager
 from pathlib import Path
 from typing import Literal
 
 from .tb2_backtest_tools import check_window, integer, signatures
 from .liquidation_ema9 import run
+from . import liquidation_prospective_v6 as forward
 
-VERSION = "tb2-liquidation-v1"
+VERSION = "tb2-liquidation-v2"
 SOURCE = "bybit_public_linear_BTCUSDT"
 Market = Literal["BTCUSD", "XAUTUSD"]
 
@@ -153,4 +155,68 @@ def register_liquidation_tools(mcp, *, data_dir, liquidation_dir):
             result["snapshot_mtime_ns"] = {p.name:s[2] for p,s in zip(paths,before)}
             return result
         except (sqlite3.Error,OSError,ValueError,TypeError,KeyError,ArithmeticError) as exc:
+            return response(status="research_data_unavailable_or_invalid",error_type=type(exc).__name__)
+
+    @mcp.tool()
+    def liquidation_forward_validation(symbol: Market="BTCUSD"):
+        """Read the frozen V6 study; no orders, parameter changes or new enrollment rule.
+        Returns compact matched metrics and opportunity IDs through conservative snapshot coverage.
+        """
+        if not supported(symbol):
+            return unsupported()
+        paths = [root/"market.sqlite", hypotheses]
+        try:
+            before = signatures(paths)
+            with reader(hypotheses) as db:
+                last_obs = db.execute("SELECT max(observed_ms) FROM observations").fetchone()[0]
+            with reader(paths[0]) as db:
+                latest = db.execute("SELECT max(stamp) FROM samples WHERE symbol=? AND series=? AND stamp+60<=?",
+                                    ("BTCUSD","candle:1m",int(time.time()))).fetchone()[0]
+            if last_obs is None or latest is None:
+                return response(status="insufficient_snapshot_coverage",symbol=symbol)
+            if type(last_obs) is not int or type(latest) is not int or last_obs<0 or latest<0:
+                raise ValueError("invalid archive timestamps")
+            now = int(time.time())
+            cutoff = min(now, last_obs//1000, latest+60, *(s[2]//1000000000 for s in before))
+            meta = dict(symbol=symbol, requested_at=now, coverage_cutoff=cutoff,
+                        last_observation_ms=last_obs,last_minute_close=latest+60,
+                        snapshot_mtime_ns={p.name:s[2] for p,s in zip(paths,before)},
+                        coverage="latest recorded timestamps, not proof of continuity",
+                        snapshot_lag_seconds=max(0,now-cutoff))
+            if before != signatures(paths):
+                return response(status="snapshot_changed_retry")
+            if cutoff < forward.START:
+                return response(status="snapshot_predates_enrollment",**meta)
+            result = forward.run(root,hypotheses,cutoff)
+            if before != signatures(paths) or result.get("status")=="snapshot_changed_retry":
+                return response(status="snapshot_changed_retry")
+            def compact(group,field):
+                out={}
+                for name,row in group[field].items():
+                    out[name]=dict(states=row["states"],complete_coverage=row["complete_coverage"],
+                        costs={c:{k:r["trade_metrics_bps"][k] for k in
+                                  ("net","wins","losses","breakeven","expectancy","profit_factor",
+                                   "closed_pnl_drawdown_original_close_order")}
+                               | {"opportunity_expectancy":r["opportunity_metrics_bps"]["expectancy"]}
+                               for c,r in row["costs"].items()})
+                return out
+            groups=result["groups"]
+            all_group=groups["all"]
+            return response(status=result["status"],**meta,
+                study_version=result["version"],start=result["start"],enrollment_end=result["enrollment_end"],
+                as_of=result["as_of"],target=result["target"],enrolled=result["enrolled"],
+                primary=result["primary"],reference=result["reference"],
+                observation_count=result["observation_count"],invalid_candles=result["invalid_candles"],
+                cohort_sha256=result["cohort_sha256"],
+                opportunity_ids=[e["observed_ms"] for e in result["events"]],
+                all_available=compact(all_group,"all_available"),
+                common_known_count=all_group["common_known_count"],
+                common_known=compact(all_group,"common_known"),
+                regimes={k:{"opportunities":v["all_available"][forward.PRIMARY]["opportunities"],
+                            "primary":v["all_available"][forward.PRIMARY]["costs"]["2"]["trade_metrics_bps"],
+                            "reference":v["all_available"]["breakout_fixed"]["costs"]["2"]["trade_metrics_bps"]}
+                         for k,v in groups.items() if k!="all"},
+                limitations=result["limitations"]+["Snapshot lag may delay enrollment; zero samples is not zero market activity.",
+                    "Interim results are descriptive only; no automatic strategy selection."])
+        except (sqlite3.Error,OSError,ValueError,TypeError,KeyError,ArithmeticError,AttributeError) as exc:
             return response(status="research_data_unavailable_or_invalid",error_type=type(exc).__name__)
