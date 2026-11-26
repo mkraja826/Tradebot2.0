@@ -25,6 +25,7 @@ from .execution import product_for
 from .market_quality import diagnostics
 from .department_feedback import attach
 from .research_context import prior as research_prior
+from .lr_v4b_archive import inspect as inspect_lr_v4b
 from tradebot.market_data_v3 import MARKETS
 
 PREFIX = {"BTCUSD": "RECOVER_BTC", "XAUTUSD": "RECOVER_GOLD"}
@@ -43,7 +44,7 @@ def emit(event):
 class MarketService:
     def __init__(self, symbol, directory, *, model="", provider=None, broker=None,
                  scan=scan_once, output=emit, manage_demo=False, learning_journal=None,
-                 management_model=None, research_context=False):
+                 management_model=None, research_context=False, lr_v4b_events=None):
         if symbol not in PREFIX:
             raise ValueError("Unsupported market")
         self.symbol = symbol
@@ -55,6 +56,7 @@ class MarketService:
         self.management_model = management_model or (DEFAULT_MANAGEMENT_MODEL if manage_demo else model)
         self.learning_journal=learning_journal
         self.research_context=research_context
+        self.lr_v4b_events=Path(lr_v4b_events) if symbol == "BTCUSD" and lr_v4b_events else None
         self.management_executor=None
         if broker is not None and (provider is None or not model):
             raise ValueError("Execution requires configured AI")
@@ -106,6 +108,10 @@ class MarketService:
         report = self.scan(self.directory / "market.sqlite", symbols=(self.symbol,),
                            include_context=True)["markets"][self.symbol]
         scan_ms=round((time.monotonic()-scan_started)*1000)
+        lr_v4b=None
+        if self.lr_v4b_events is not None:
+            try:lr_v4b=inspect_lr_v4b(self.directory / "market.sqlite", self.lr_v4b_events)
+            except Exception as exc:lr_v4b={"status":"unavailable","reason":type(exc).__name__,"execution_effect":"none"}
         report=attach(report,self.learning_journal)
         if self.research_context and report.get("status")!="scan_error":
             report={**report,"research_prior":research_prior(self.learning_journal,self.symbol,report["as_of"])}
@@ -186,6 +192,7 @@ class MarketService:
                  "open_excursion":excursion,
                  "management_execution": managed,
                  "research_context_enabled": self.research_context,
+                 "lr_v4b_shadow": lr_v4b,
                  "entry_model": self.model if self.executor else None,
                  "management_model": self.management_model if self.manage_demo else None,
                  "management_reconciliation": management_reconciliation,
@@ -223,6 +230,7 @@ def main():
     parser.add_argument("--manage-demo",action="store_true",help="Enable recurring AI management and demo position mutations")
     parser.add_argument("--learning-journal", help="Opt-in read-only prior outcome evidence for AI context")
     parser.add_argument("--research-context",action="store_true",help="Opt-in descriptive research evidence in existing AI requests")
+    parser.add_argument("--lr-v4b-events", help="BTC-only LR-V4-B read-only shadow archive; does not change orders or AI inputs")
     parser.add_argument("--management-model", default=os.environ.get("RECOVER_MANAGEMENT_MODEL") or DEFAULT_MANAGEMENT_MODEL,
                         help="Position-management model, shared by both demo workers when enabled")
     args = parser.parse_args()
@@ -253,7 +261,7 @@ def main():
                               broker=DeltaDemo(*accounts[s]) if args.execute_demo else None,
                               provider=Provider() if args.execute_demo else None,
                               output=output,manage_demo=args.manage_demo,learning_journal=args.learning_journal,
-                              management_model=args.management_model if args.manage_demo else None,research_context=args.research_context) for s in symbols]
+                              management_model=args.management_model if args.manage_demo else None,research_context=args.research_context,lr_v4b_events=args.lr_v4b_events) for s in symbols]
     failures = []
     def worker(service):
         try:
