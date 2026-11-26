@@ -12,6 +12,7 @@ from .decision import validate
 from .performance import dec
 from .lifecycle import pages
 from .lr_v4b_attribution import Attribution
+from .lr_v4b_local_sizing import local_sizing
 
 
 def bracket_proposal(signal, sizing, account):
@@ -42,11 +43,11 @@ def bracket_proposal(signal, sizing, account):
     p={"symbol":"BTCUSD","action":"trade","side":side,"size":sizing.get("size"),
        "leverage":sizing.get("leverage"),"capital_allocation":sizing.get("capital_allocation"),
        "entry_reference":float(entry),"stop_loss":float(stop),"take_profit":float(target),
-       "reason":"LR-V4-B deterministic bracket; AI sizing"}
+       "reason":"LR-V4-B deterministic bracket; " + ("local sizing" if sizing.get("sizing",{}).get("method")=="local_20pct" else "AI sizing")}
     return validate(p,"BTCUSD",require_capital=True)
 
 
-def submit(signal, sizing, executor, *, enabled=False, clock=time.time):
+def submit(signal, sizing, executor, *, enabled=False, clock=time.time, local=False):
     """One demo order at most. Never replay an ambiguous submission."""
     if not enabled:
         return {"status":"disabled","execution_effect":"none"}
@@ -54,7 +55,7 @@ def submit(signal, sizing, executor, *, enabled=False, clock=time.time):
         raise ValueError("demo client required")
     if signal.get("symbol")!="BTCUSD" or signal.get("version")!="lr-v4b":
         raise ValueError("BTC LR-V4-B only")
-    if sizing.get("action")=="no_trade":
+    if not local and sizing.get("action")=="no_trade":
         return {"status":"no_trade","execution_effect":"none"}
     now=int(clock())
     t=signal.get("signal_time")
@@ -62,6 +63,10 @@ def submit(signal, sizing, executor, *, enabled=False, clock=time.time):
         return {"status":"stale_signal","execution_effect":"none"}
     account=account_context(executor.broker,"BTCUSD")
     pid=account["product"]["id"]
+    if local:
+        sizing=local_sizing(signal,account)
+        if sizing["action"]=="no_trade":
+            return {"status":"no_trade","reason":sizing["reason"],"sizing":sizing["sizing"],"execution_effect":"none"}
     proposal=bracket_proposal(signal,sizing,account)
     # Ownership is position-level on this broker: never merge with another strategy.
     positions=executor.broker.margined_positions(pid)
@@ -94,4 +99,4 @@ def submit(signal, sizing, executor, *, enabled=False, clock=time.time):
     with db:
         db.execute("UPDATE lr_v4b_entries SET state=? WHERE signal_id=?",
                    (result["status"],claim["decision_id"]))
-    return result
+    return {**result,"sizing":sizing["sizing"]} if local else result
