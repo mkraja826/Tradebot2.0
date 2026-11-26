@@ -1,0 +1,6 @@
+# P7 unified validation
+Run only from a separate staged checkout, never replacing the live service release:
+```sh
+python3 -m recover_trading.research_validation --data-dir /var/lib/recover-trading/demo --learning-dir /actual/outcome/learning/directory --start <UTC epoch> --split <UTC epoch> --end <UTC epoch>
+```
+The learning directory must contain learning.sqlite. Confirm actual location and service user access on the VM. Use historical cutoffs, enough local temporary disk space, and optional pre-registered BTC/Gold plans via --btc-plan and --gold-plan. SQLite online backup copies the source DBs read-only to a private temporary directory; individual DB snapshots are consistent but not atomic across journals. Outputs are aggregate checks, not raw AI context or account credentials. No live restart or AI/broker request. The report checks episode identity and P&L agreement, availability, coverage and data-quality counts; missing and empty data cannot pass. It does not prove independently verified exchange accounting or strategy improvement. Next run against actual VM data, review coverage and flags, register prospective tests and only then design opt-in shadow decision comparisons. No runtime activation is authorized by this PR.
