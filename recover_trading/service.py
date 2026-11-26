@@ -24,6 +24,7 @@ from .management_executor import ManagementExecutor
 from .execution import product_for
 from .market_quality import diagnostics
 from .department_feedback import attach
+from .research_context import prior as research_prior
 from tradebot.market_data_v3 import MARKETS
 
 PREFIX = {"BTCUSD": "RECOVER_BTC", "XAUTUSD": "RECOVER_GOLD"}
@@ -42,7 +43,7 @@ def emit(event):
 class MarketService:
     def __init__(self, symbol, directory, *, model="", provider=None, broker=None,
                  scan=scan_once, output=emit, manage_demo=False, learning_journal=None,
-                 management_model=None):
+                 management_model=None, research_context=False):
         if symbol not in PREFIX:
             raise ValueError("Unsupported market")
         self.symbol = symbol
@@ -53,6 +54,7 @@ class MarketService:
         self.manage_demo=manage_demo
         self.management_model = management_model or (DEFAULT_MANAGEMENT_MODEL if manage_demo else model)
         self.learning_journal=learning_journal
+        self.research_context=research_context
         self.management_executor=None
         if broker is not None and (provider is None or not model):
             raise ValueError("Execution requires configured AI")
@@ -105,6 +107,8 @@ class MarketService:
                            include_context=True)["markets"][self.symbol]
         scan_ms=round((time.monotonic()-scan_started)*1000)
         report=attach(report,self.learning_journal)
+        if self.research_context and report.get("status")!="scan_error":
+            report={**report,"research_prior":research_prior(self.learning_journal,self.symbol,report["as_of"])}
         quality=None
         if report.get("status") != "scan_error":
             try:quality=diagnostics(report,self.directory / "market.sqlite")
@@ -181,6 +185,7 @@ class MarketService:
                  "management_shadow": management,
                  "open_excursion":excursion,
                  "management_execution": managed,
+                 "research_context_enabled": self.research_context,
                  "entry_model": self.model if self.executor else None,
                  "management_model": self.management_model if self.manage_demo else None,
                  "management_reconciliation": management_reconciliation,
@@ -217,9 +222,11 @@ def main():
     parser.add_argument("--execute-demo", action="store_true", help="Enable billable AI and demo orders")
     parser.add_argument("--manage-demo",action="store_true",help="Enable recurring AI management and demo position mutations")
     parser.add_argument("--learning-journal", help="Opt-in read-only prior outcome evidence for AI context")
+    parser.add_argument("--research-context",action="store_true",help="Opt-in descriptive research evidence in existing AI requests")
     parser.add_argument("--management-model", default=os.environ.get("RECOVER_MANAGEMENT_MODEL") or DEFAULT_MANAGEMENT_MODEL,
                         help="Position-management model, shared by both demo workers when enabled")
     args = parser.parse_args()
+    if args.research_context and not args.learning_journal:parser.error("--research-context requires --learning-journal")
     if args.manage_demo and not args.execute_demo:parser.error("--manage-demo requires --execute-demo")
     if not math.isfinite(args.interval) or args.interval <= 0:
         parser.error("Interval must be finite and positive")
@@ -246,7 +253,7 @@ def main():
                               broker=DeltaDemo(*accounts[s]) if args.execute_demo else None,
                               provider=Provider() if args.execute_demo else None,
                               output=output,manage_demo=args.manage_demo,learning_journal=args.learning_journal,
-                              management_model=args.management_model if args.manage_demo else None) for s in symbols]
+                              management_model=args.management_model if args.manage_demo else None,research_context=args.research_context) for s in symbols]
     failures = []
     def worker(service):
         try:
