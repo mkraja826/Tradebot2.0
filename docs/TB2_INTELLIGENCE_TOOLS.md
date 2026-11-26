@@ -1,0 +1,8 @@
+# Tb2.0 additional intelligence tools
+This module is an additive adapter for the existing VM-hosted FastMCP server, not a replacement server. Deploy the pinned research checkout separately. Inspect the actual current server and launch interpreter before adding the following registration before its existing mcp.run() call:
+```python
+from recover_trading.tb2_intelligence_tools import register
+register(mcp, data_dir=VERIFIED_DEMO_DATA_DIR, learning_dir=VERIFIED_LEARNING_DIR,
+         audit_file=VERIFIED_SAVED_AUDIT_PATH)
+```
+Use the existing trusted VM configuration; the names above are placeholders, not discovered paths. Ensure the research checkout is on the server interpreter's Python path, the server account has read-only journal access, and the saved audit is produced by the operator using research_validation. Verify local stdio tools/list before refreshing the app's tool registry. Keep the original four tools, existing tunnel and App ID. Only reload the MCP connection when authorized; do not restart recover-demo.service or replace its symlink. New methods: research_status, trade_intelligence_report, gold_entry_report, capital_allocation_report, position_management_report, trading_cost_report, market_regime_report, learning_evidence_report, saved_research_validation. Actual reports use live read-only journals; individual cross-database snapshots can differ. Saved validation is not a fresh audit and carries its age. No arbitrary paths, shell, order actions, deployment, AI calls or model mutations. Unit tests use a fake MCP registration object; actual FastMCP schema discovery and VM access must be verified.
