@@ -1,7 +1,7 @@
 """LR-V4-B management adapter. Not wired into the running service.
 
 Uses the existing demo management executor and its durable mutation journal.
-Only a receipt-linked, single-fill flat-to-open LR-V4-B position is eligible.
+Only a receipt-linked, terminal flat-to-open LR-V4-B entry is eligible.
 """
 import hashlib
 import json
@@ -10,7 +10,6 @@ import sqlite3
 import time
 from decimal import ROUND_FLOOR, ROUND_CEILING
 from .broker import DeltaDemo, DEMO_API
-from .bracket_repair import entry_lineage
 from .execution import product_for
 from .lifecycle import pages, normalize_fill
 from .performance import dec, stamp
@@ -24,6 +23,63 @@ def rounded(value,tick,rounding):
     if value is None or tick is None or value<=0 or tick<=0:
         raise ValueError("invalid tick or price")
     return (value/tick).to_integral_value(rounding=rounding)*tick
+
+
+def terminal_entry(fills,pos,intent,receipt,cid):
+    """Reconstruct a terminal entry, including multiple fills or cancelled remainder."""
+    if len(fills)<2 or any(stamp(f) is None for f in fills):
+        return None
+    rows=sorted(fills,key=stamp)
+    oid=str(receipt.get("id"))
+    q=dec(pos.get("size"))
+    avg=dec(pos.get("entry_price"))
+    wanted=dec(intent.get("size"))
+    ordered=dec(receipt.get("size"))
+    remainder=dec(receipt.get("unfilled_size"))
+    if (receipt.get("id") is None or receipt.get("client_order_id")!=cid
+            or receipt.get("reduce_only") is not False or q is None or not q
+            or avg is None or avg<=0 or wanted is None or wanted<=0
+            or ordered!=wanted or remainder is None or not 0<=remainder<ordered
+            or receipt.get("state") not in ("closed","cancelled","canceled")
+            or (receipt.get("state")=="closed" and remainder!=0)):
+        return None
+    pid=str(pos.get("product_id"))
+    side="buy" if q>0 else "sell"
+    sign=1 if q>0 else -1
+    if (receipt.get("side")!=side or intent.get("side")!=side
+            or str(receipt.get("product_id"))!=pid or str(intent.get("product_id"))!=pid
+            or ordered-remainder!=abs(q)
+            or any(dec(intent.get(k)) is None or dec(intent.get(k))<=0
+                   or dec(intent.get(k))!=dec(receipt.get("bracket_"+k+"_price"))
+                   for k in ("stop_loss","take_profit"))):
+        return None
+    i=len(rows)
+    while i and str(rows[i-1].get("order_id"))==oid:
+        i-=1
+    if i==0 or i==len(rows) or dec((rows[i-1].get("new_position") or {}).get("size"))!=0:
+        return None
+    if any(str(f.get("order_id"))==oid for f in rows[:i]):
+        return None
+    if len({stamp(f) for f in rows[i-1:]})!=len(rows[i-1:]):
+        return None
+    ids=[str(f.get("id")) for f in rows[i:]]
+    if any(f.get("id") is None for f in rows[i:]) or len(set(ids))!=len(ids):
+        return None
+    qty=dec(0);value=dec(0)
+    for f in rows[i:]:
+        size,price=dec(f.get("size")),dec(f.get("price"))
+        if (str(f.get("product_id"))!=pid or f.get("side")!=side
+                or size is None or size<=0 or price is None or price<=0):
+            return None
+        qty+=size
+        value+=size*price
+        if dec((f.get("new_position") or {}).get("size"))!=sign*qty:
+            return None
+    if qty!=abs(q) or value!=qty*avg:
+        return None
+    return {"entry_price":str(avg),"size":str(q),
+            "first_fill_time":math.ceil(stamp(rows[i]).timestamp()),
+            "last_fill_time":math.ceil(stamp(rows[-1]).timestamp())}
 
 
 class LRManager:
@@ -60,13 +116,13 @@ class LRManager:
                 if str(json.loads(detail).get("id"))!=oid:
                     continue
                 receipt=self.broker.order(cid)
-                line=entry_lineage(fills,pos,[(cid,json.loads(intent),receipt)])
+                line=terminal_entry(fills,pos,json.loads(intent),receipt,cid)
                 if line is None or (dec(line["size"])>0)!=(side=="buy"):
                     continue
                 b=bracket(side,line["entry_price"],stop)
                 candidates.append({**b,"side":side,"client_id":cid,"entry_order":oid,
                                    "position_created_at":pos["created_at"],
-                                   "fill_time":math.ceil(stamp(fills[-1]).timestamp())})
+                                   "fill_time":line["last_fill_time"],"timeout_start":line["first_fill_time"]})
             except (ValueError,TypeError,KeyError,ArithmeticError):
                 continue
         return candidates[0] if len(candidates)==1 else None
@@ -88,7 +144,7 @@ class LRManager:
         p=ctx["position"]
         d=1 if owner["side"]=="buy" else -1
         tick=product["tick_size"]
-        if now-owner["fill_time"]>=3600:
+        if now-owner["timeout_start"]>=3600:
             proposal={"symbol":"BTCUSD","action":"close","reason":"LR-V4-B 60-minute timeout"}
         elif p["bracket_state"]!="matching_legs_observed":
             return {"status":"bracket_unverified","owned":True,"attempted":False}
