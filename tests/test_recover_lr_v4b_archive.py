@@ -1,5 +1,6 @@
 import unittest
 import sqlite3
+from contextlib import closing
 import tempfile
 import json
 from pathlib import Path
@@ -31,10 +32,10 @@ class ArchiveTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             m=Path(tmp)/"market.sqlite"
             e=Path(tmp)/"events.sqlite"
-            with sqlite3.connect(m) as db:
+            with closing(sqlite3.connect(m)) as db, db:
                 db.execute("CREATE TABLE samples(symbol,series,stamp,payload)")
                 db.executemany("INSERT INTO samples VALUES(?,?,?,?)",[("BTCUSD","candle:1m",r["time"],json.dumps(r)) for r in candles])
-            with sqlite3.connect(e) as db:
+            with closing(sqlite3.connect(e)) as db, db:
                 db.execute("CREATE TABLE sessions(id,subscribed_ms,heartbeat_ms,ended_ms,status)")
                 db.execute("INSERT INTO sessions VALUES(1,0,7380000,NULL,'subscribed')")
                 db.execute("CREATE TABLE batches(id,session_id,received_ms)")
