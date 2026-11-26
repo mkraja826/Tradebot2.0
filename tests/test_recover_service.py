@@ -1,6 +1,7 @@
 import tempfile
 import threading
 import unittest
+from unittest.mock import patch
 from recover_trading.service import MarketService, credentials
 from test_recover_execution import Fake
 from test_recover_decision import report
@@ -19,6 +20,21 @@ def scan(path, *, symbols, include_context):
     return {"markets": {s: report(s) for s in symbols}}
 
 class ServiceTests(unittest.TestCase):
+    def test_lr_v4b_shadow_is_btc_only_and_not_ai_input(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for symbol in ("BTCUSD", "XAUTUSD"):
+                provider, broker, events = Provider(), Fake(), []
+                shadow = {"status":"observed","recent_signal":{"side":"buy"},"execution_effect":"none"}
+                with patch("recover_trading.service.inspect_lr_v4b", return_value=shadow) as reader:
+                    service = MarketService(symbol, directory, model="fixture", provider=provider,
+                                            broker=broker, scan=scan, output=events.append,
+                                            lr_v4b_events="/fixture/events.sqlite")
+                    service.run(threading.Event(), 1, once=True)
+                self.assertEqual(reader.call_count, int(symbol == "BTCUSD"))
+                self.assertEqual(events[0]["lr_v4b_shadow"], shadow if symbol == "BTCUSD" else None)
+                self.assertEqual(provider.calls, 1)
+                self.assertEqual(events[0]["execution_status"], "acknowledged")
+                self.assertEqual(sum(m == "POST" and p == "/v2/orders" for m,p,k in broker.calls), 1)
     def test_preview_no_execution(self):
         with tempfile.TemporaryDirectory() as directory:
             events = []
