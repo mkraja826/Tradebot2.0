@@ -5,6 +5,7 @@ It holds ownership across ambiguous broker outcomes. No historical signal
 is used to enter a position.
 """
 import json
+import sqlite3
 import time
 from contextlib import closing
 from .execution import account_context
@@ -32,6 +33,11 @@ class Controller:
         self.market_path=market_path
         self.db=entry_executor.journal.db
         Attribution(self.db)
+        with self.db:
+            self.db.execute('''CREATE TABLE IF NOT EXISTS lr_v4b_sizing (
+                signal_time INTEGER NOT NULL, burst_time INTEGER NOT NULL, side TEXT NOT NULL,
+                created INTEGER NOT NULL, status TEXT NOT NULL, detail TEXT,
+                PRIMARY KEY(signal_time,burst_time,side))''')
 
     def outstanding(self):
         return self.db.execute("""SELECT l.client_id,l.state,o.status FROM lr_v4b_entries l
@@ -93,11 +99,27 @@ class Controller:
         now=int(time.time())
         if not 0<=now-signal["signal_time"]<60:
             return {"status":"lr_signal_expired","ai_calls":0}
+        if shadow.get("status")!="observed" or signal.get("version")!="lr-v4b" or signal.get("symbol")!="BTCUSD":
+            return {"status":"lr_signal_unverified","ai_calls":0}
+        key=(signal["signal_time"],signal["burst_time"],signal["side"])
+        try:
+            with self.db:
+                self.db.execute("INSERT INTO lr_v4b_sizing VALUES(?,?,?,?,'requested',NULL)",(*key,now))
+        except sqlite3.IntegrityError:
+            return {"status":"lr_sizing_already_requested","ai_calls":0}
+        calls=0
         try:
             account=account_context(self.entry.broker,"BTCUSD")
-            sizing=self.provider._propose(self.model,{"symbol":"BTCUSD","signal":signal,
+            if not 0<=int(time.time())-signal["signal_time"]<60:
+                result={"status":"stale_signal","execution_effect":"none"}
+            else:
+                calls=1
+                sizing=self.provider._propose(self.model,{"symbol":"BTCUSD","signal":signal,
                      "demo_account":account},SIZING_SYSTEM)
-            result=submit(signal,sizing,self.entry,enabled=True)
-            return {"decision":{"status":"lr_v4b_entry","ai_calls":1},"execution":result}
+                result=submit(signal,sizing,self.entry,enabled=True)
         except Exception as exc:
-            return {"status":"lr_entry_error","error":type(exc).__name__,"ai_calls":1}
+            result={"status":"lr_entry_error","error":type(exc).__name__}
+        with self.db:
+            self.db.execute("UPDATE lr_v4b_sizing SET status=?,detail=? WHERE signal_time=? AND burst_time=? AND side=?",
+                            (result["status"],json.dumps({"ai_calls":calls,"status":result["status"],"client_id":result.get("client_id")}),*key))
+        return {"decision":{"status":"lr_v4b_entry","ai_calls":calls},"execution":result}
