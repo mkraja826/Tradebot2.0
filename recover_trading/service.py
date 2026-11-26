@@ -45,7 +45,7 @@ def emit(event):
 class MarketService:
     def __init__(self, symbol, directory, *, model="", provider=None, broker=None,
                  scan=scan_once, output=emit, manage_demo=False, learning_journal=None,
-                 management_model=None, research_context=False, lr_v4b_events=None, lr_v4b_demo=False):
+                 management_model=None, research_context=False, lr_v4b_events=None, lr_v4b_demo=False, lr_v4b_local=False):
         if symbol not in PREFIX:
             raise ValueError("Unsupported market")
         self.symbol = symbol
@@ -61,6 +61,9 @@ class MarketService:
         self.lr_v4b_demo=bool(lr_v4b_demo and symbol=="BTCUSD")
         if self.lr_v4b_demo and (not self.lr_v4b_events or broker is None or not manage_demo):
             raise ValueError("LR-V4-B requires demo entry, management and archive")
+        self.lr_v4b_local=bool(lr_v4b_local and symbol=="BTCUSD")
+        if self.lr_v4b_local and not self.lr_v4b_demo:
+            raise ValueError("local sizing requires LR-V4-B demo mode")
         self.lr_controller=None
         self.management_executor=None
         if broker is not None and (provider is None or not model):
@@ -79,7 +82,7 @@ class MarketService:
             self.management = ManagementShadow(self.orders.db)
             self.management_executor=ManagementExecutor(self.broker,self.orders)
             if self.lr_v4b_demo:
-                self.lr_controller=Controller(self.executor,self.management_executor,self.provider,self.model,self.directory / "market.sqlite")
+                self.lr_controller=Controller(self.executor,self.management_executor,self.provider,self.model,self.directory / "market.sqlite",local=self.lr_v4b_local)
 
     def close(self):
         if self.orders is not None:
@@ -217,6 +220,7 @@ class MarketService:
                  "research_context_enabled": self.research_context,
                  "lr_v4b_shadow": lr_v4b,
                  "lr_v4b_demo_enabled":self.lr_v4b_demo,
+                 "lr_v4b_local_sizing":self.lr_v4b_local,
                  "lr_v4b_owns_cycle":lr_owns_cycle,
                  "entry_model": self.model if self.executor else None,
                  "management_model": self.management_model if self.manage_demo else None,
@@ -257,10 +261,12 @@ def main():
     parser.add_argument("--research-context",action="store_true",help="Opt-in descriptive research evidence in existing AI requests")
     parser.add_argument("--lr-v4b-events", help="BTC-only LR-V4-B read-only shadow archive; does not change orders or AI inputs")
     parser.add_argument("--lr-v4b-demo",action="store_true",help="Explicit BTC-only experimental execution; requires demo management and archive")
+    parser.add_argument("--lr-v4b-local-sizing",action="store_true",help="Use local 20 percent sizing at fixed 20x for LR-V4-B BTC only")
     parser.add_argument("--management-model", default=os.environ.get("RECOVER_MANAGEMENT_MODEL") or DEFAULT_MANAGEMENT_MODEL,
                         help="Position-management model, shared by both demo workers when enabled")
     args = parser.parse_args()
     if args.research_context and not args.learning_journal:parser.error("--research-context requires --learning-journal")
+    if args.lr_v4b_local_sizing and not args.lr_v4b_demo:parser.error("--lr-v4b-local-sizing requires --lr-v4b-demo")
     if args.lr_v4b_demo and not (args.execute_demo and args.manage_demo and args.lr_v4b_events):parser.error("--lr-v4b-demo requires --execute-demo --manage-demo --lr-v4b-events")
     if args.manage_demo and not args.execute_demo:parser.error("--manage-demo requires --execute-demo")
     if not math.isfinite(args.interval) or args.interval <= 0:
@@ -288,7 +294,7 @@ def main():
                               broker=DeltaDemo(*accounts[s]) if args.execute_demo else None,
                               provider=Provider() if args.execute_demo else None,
                               output=output,manage_demo=args.manage_demo,learning_journal=args.learning_journal,
-                              management_model=args.management_model if args.manage_demo else None,research_context=args.research_context,lr_v4b_events=args.lr_v4b_events,lr_v4b_demo=args.lr_v4b_demo) for s in symbols]
+                              management_model=args.management_model if args.manage_demo else None,research_context=args.research_context,lr_v4b_events=args.lr_v4b_events,lr_v4b_demo=args.lr_v4b_demo,lr_v4b_local=args.lr_v4b_local_sizing) for s in symbols]
     failures = []
     def worker(service):
         try:
