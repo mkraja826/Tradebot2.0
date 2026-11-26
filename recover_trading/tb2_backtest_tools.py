@@ -241,8 +241,9 @@ def register_backtests(mcp, *, data_dir, learning_dir):
         """Read confirmed archived trade-price candles; bounded pagination, historical UTC epochs."""
         check_window(start,end);integer(limit,1,500);integer(offset,0,45000)
         if frame not in FRAMES:raise ValueError("unsupported frame")
+        p=root(symbol)
         try:
-            p=root(symbol);sig=signatures([p/"market.sqlite"])
+            sig=signatures([p/"market.sqlite"])
             bars,bad=load_bars(p,symbol,frame,start,end)
             if sig!=signatures([p/"market.sqlite"]):return response(status="snapshot_changed_retry")
             items=sorted(bars.items());page=items[offset:offset+limit]
