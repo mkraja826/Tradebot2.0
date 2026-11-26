@@ -25,11 +25,12 @@ Do not claim order execution."""
 
 
 class Controller:
-    def __init__(self,entry_executor,management_executor,provider,model,market_path):
+    def __init__(self,entry_executor,management_executor,provider,model,market_path,*,local=False):
         self.entry=entry_executor
         self.manager=LRManager(management_executor)
         self.provider=provider
         self.model=model
+        self.local=local
         self.market_path=market_path
         self.db=entry_executor.journal.db
         Attribution(self.db)
@@ -109,17 +110,20 @@ class Controller:
             return {"status":"lr_sizing_already_requested","ai_calls":0}
         calls=0
         try:
-            account=account_context(self.entry.broker,"BTCUSD")
-            if not 0<=int(time.time())-signal["signal_time"]<60:
-                result={"status":"stale_signal","execution_effect":"none"}
+            if self.local:
+                result=submit(signal,None,self.entry,enabled=True,local=True)
             else:
-                calls=1
-                sizing=self.provider._propose(self.model,{"symbol":"BTCUSD","signal":signal,
-                     "demo_account":account},SIZING_SYSTEM)
-                result=submit(signal,sizing,self.entry,enabled=True)
+                account=account_context(self.entry.broker,"BTCUSD")
+                if not 0<=int(time.time())-signal["signal_time"]<60:
+                    result={"status":"stale_signal","execution_effect":"none"}
+                else:
+                    calls=1
+                    sizing=self.provider._propose(self.model,{"symbol":"BTCUSD","signal":signal,
+                         "demo_account":account},SIZING_SYSTEM)
+                    result=submit(signal,sizing,self.entry,enabled=True)
         except Exception as exc:
             result={"status":"lr_entry_error","error":type(exc).__name__}
         with self.db:
             self.db.execute("UPDATE lr_v4b_sizing SET status=?,detail=? WHERE signal_time=? AND burst_time=? AND side=?",
-                            (result["status"],json.dumps({"ai_calls":calls,"status":result["status"],"client_id":result.get("client_id")}),*key))
+                            (result["status"],json.dumps({"ai_calls":calls,"status":result["status"],"client_id":result.get("client_id"),"sizing":result.get("sizing"),"reason":result.get("reason"),"error":result.get("error"),"method":"local_20pct" if self.local else "ai"}),*key))
         return {"decision":{"status":"lr_v4b_entry","ai_calls":calls},"execution":result}
