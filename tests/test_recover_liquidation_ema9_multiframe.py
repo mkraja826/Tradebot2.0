@@ -22,7 +22,9 @@ class MultiFrame(unittest.TestCase):
         out=analyze(r,m,{"15m":e,"1m":{i:(100,100,1) for i in m}})
         self.assertEqual(out["status"],"observed")
         self.assertEqual(len(out["frames"]),6)
-        self.assertEqual(out["frames"]["15m"]["groups"]["all_all"]["V8"]["costs"]["2"]["improvement_bps"],0)
+        expected = round((r["trades"][0]["adaptive"]["net"]["2"] - r["trades"][0]["fixed"]["net"]["2"]) * 10000, 6)
+        self.assertEqual(out["frames"]["15m"]["groups"]["all_all"]["V8"]["costs"]["2"]["improvement_bps"],expected)
+        self.assertLess(expected,0)
         self.assertEqual(out["frames"]["1h"]["eligible"],0)
         self.assertEqual(len(out["common_ids"]),1)
 
