@@ -26,6 +26,7 @@ from .market_quality import diagnostics
 from .department_feedback import attach
 from .research_context import prior as research_prior
 from .lr_v4b_archive import inspect as inspect_lr_v4b
+from .lr_v4b_controller import Controller
 from tradebot.market_data_v3 import MARKETS
 
 PREFIX = {"BTCUSD": "RECOVER_BTC", "XAUTUSD": "RECOVER_GOLD"}
@@ -44,7 +45,7 @@ def emit(event):
 class MarketService:
     def __init__(self, symbol, directory, *, model="", provider=None, broker=None,
                  scan=scan_once, output=emit, manage_demo=False, learning_journal=None,
-                 management_model=None, research_context=False, lr_v4b_events=None):
+                 management_model=None, research_context=False, lr_v4b_events=None, lr_v4b_demo=False):
         if symbol not in PREFIX:
             raise ValueError("Unsupported market")
         self.symbol = symbol
@@ -57,6 +58,10 @@ class MarketService:
         self.learning_journal=learning_journal
         self.research_context=research_context
         self.lr_v4b_events=Path(lr_v4b_events) if symbol == "BTCUSD" and lr_v4b_events else None
+        self.lr_v4b_demo=bool(lr_v4b_demo and symbol=="BTCUSD")
+        if self.lr_v4b_demo and (not self.lr_v4b_events or broker is None or not manage_demo):
+            raise ValueError("LR-V4-B requires demo entry, management and archive")
+        self.lr_controller=None
         self.management_executor=None
         if broker is not None and (provider is None or not model):
             raise ValueError("Execution requires configured AI")
@@ -73,6 +78,8 @@ class MarketService:
             self.repair = BracketRepair(self.broker,self.orders)
             self.management = ManagementShadow(self.orders.db)
             self.management_executor=ManagementExecutor(self.broker,self.orders)
+            if self.lr_v4b_demo:
+                self.lr_controller=Controller(self.executor,self.management_executor,self.provider,self.model,self.directory / "market.sqlite")
 
     def close(self):
         if self.orders is not None:
@@ -141,7 +148,18 @@ class MarketService:
                 planner={"status":"shadow_error","error":type(exc).__name__,"execution_effect":"none"}
         excursion=open_excursion_report(self.directory,self.symbol,lifecycle,int(time.time())) if self.lifecycle is not None else None
         management=None
-        if self.management is not None and report.get("status")!="scan_error":
+        lr_managed=None
+        lr_owns_cycle=False
+        if self.lr_controller is not None:
+            try:
+                self.lr_controller.release_flat(lifecycle)
+                lr_owns_cycle=bool(self.lr_controller.outstanding())
+                if lr_owns_cycle and report.get("status")!="scan_error":
+                    lr_managed=self.lr_controller.manage(report,lifecycle)
+            except Exception as exc:
+                lr_owns_cycle=True
+                lr_managed={"status":"lr_routing_error","error":type(exc).__name__,"attempted":False}
+        if not lr_owns_cycle and self.management is not None and report.get("status")!="scan_error":
             try:management=self.management.capture(report,lifecycle,self.management_model,lambda s:product_for(self.broker,s),excursion=excursion)
             except Exception as exc:management={"status":"capture_error","error":type(exc).__name__,"execution_effect":"none"}
         managed={"status":"execution_disabled" if not self.manage_demo else "awaiting_next_sample","enabled":self.manage_demo,"attempted":False}
@@ -159,15 +177,20 @@ class MarketService:
                 managed["management_ai_calls"]=1
                 managed["enabled"]=True
             except Exception as exc:managed={"status":"management_error","error":type(exc).__name__,"attempted":False}
+        if lr_owns_cycle:
+            managed={**(lr_managed or {"status":"lr_awaiting_observation","attempted":False}),"enabled":True,"strategy":"lr-v4b"}
         execution_started=time.monotonic()
         if report.get("status") == "scan_error":
             result = {"status": "scan_error", "reason": report.get("reason")}
         elif self.executor is None:
             result = {"status": "preview", "signals": report["signals"], "ai_calls": 0}
+        elif lr_owns_cycle:
+            result={"status":"lr_v4b_management_cycle","ai_calls":0}
         elif self.manage_demo and (managed.get("attempted") or lifecycle.get("positions") or "positions" not in lifecycle):
             result={"status":"position_management_cycle","ai_calls":0}
         else:
-            result = evaluate_and_execute(report, self.decisions, self.provider,
+            lr_entry=self.lr_controller.enter(lr_v4b,lifecycle) if self.lr_controller is not None else None
+            result = lr_entry if lr_entry is not None else evaluate_and_execute(report, self.decisions, self.provider,
                                           {self.symbol: self.model}, self.executor)
         # Full decision context and exchange receipts are stored in the journals.
         # Emit only operational metadata; never print account or credential contents.
@@ -193,6 +216,8 @@ class MarketService:
                  "management_execution": managed,
                  "research_context_enabled": self.research_context,
                  "lr_v4b_shadow": lr_v4b,
+                 "lr_v4b_demo_enabled":self.lr_v4b_demo,
+                 "lr_v4b_owns_cycle":lr_owns_cycle,
                  "entry_model": self.model if self.executor else None,
                  "management_model": self.management_model if self.manage_demo else None,
                  "management_reconciliation": management_reconciliation,
@@ -231,10 +256,12 @@ def main():
     parser.add_argument("--learning-journal", help="Opt-in read-only prior outcome evidence for AI context")
     parser.add_argument("--research-context",action="store_true",help="Opt-in descriptive research evidence in existing AI requests")
     parser.add_argument("--lr-v4b-events", help="BTC-only LR-V4-B read-only shadow archive; does not change orders or AI inputs")
+    parser.add_argument("--lr-v4b-demo",action="store_true",help="Explicit BTC-only experimental execution; requires demo management and archive")
     parser.add_argument("--management-model", default=os.environ.get("RECOVER_MANAGEMENT_MODEL") or DEFAULT_MANAGEMENT_MODEL,
                         help="Position-management model, shared by both demo workers when enabled")
     args = parser.parse_args()
     if args.research_context and not args.learning_journal:parser.error("--research-context requires --learning-journal")
+    if args.lr_v4b_demo and not (args.execute_demo and args.manage_demo and args.lr_v4b_events):parser.error("--lr-v4b-demo requires --execute-demo --manage-demo --lr-v4b-events")
     if args.manage_demo and not args.execute_demo:parser.error("--manage-demo requires --execute-demo")
     if not math.isfinite(args.interval) or args.interval <= 0:
         parser.error("Interval must be finite and positive")
@@ -261,7 +288,7 @@ def main():
                               broker=DeltaDemo(*accounts[s]) if args.execute_demo else None,
                               provider=Provider() if args.execute_demo else None,
                               output=output,manage_demo=args.manage_demo,learning_journal=args.learning_journal,
-                              management_model=args.management_model if args.manage_demo else None,research_context=args.research_context,lr_v4b_events=args.lr_v4b_events) for s in symbols]
+                              management_model=args.management_model if args.manage_demo else None,research_context=args.research_context,lr_v4b_events=args.lr_v4b_events,lr_v4b_demo=args.lr_v4b_demo) for s in symbols]
     failures = []
     def worker(service):
         try:
