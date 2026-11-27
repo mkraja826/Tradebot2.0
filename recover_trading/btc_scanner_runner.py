@@ -1,10 +1,43 @@
 """Original BTC scanner with deterministic execution on the designated demo wallet."""
 import hashlib
 import time
-from decimal import Decimal as D
+from decimal import Decimal as D, ROUND_CEILING, ROUND_FLOOR
 
 from .btc_scanner_runner_rules import entry_plan, trailing_stop
 from .entry_quotes import quote_evidence
+
+
+def gold_volatility_stop(db, cid, side, fill, current, frame, tick):
+    """Trail observed post-fill five-minute extremes, using three ATR14."""
+    fill, current, tick = (D(str(value)) for value in (fill, current, tick))
+    atr = D(str(frame["features"]["atr14"]))
+    long = side == "buy"
+    bar_extreme = D(str(frame["candle"]["high" if long else "low"]))
+    if side not in ("buy", "sell") or any(
+        not value.is_finite() or value <= 0 for value in (fill, current, tick, atr, bar_extreme)
+    ):
+        raise ValueError("invalid Gold trail input")
+    closed = int(frame["closed_at"])
+    with db:
+        db.execute("""CREATE TABLE IF NOT EXISTS gold_trail_state (
+            client_id TEXT PRIMARY KEY, observed_at INTEGER NOT NULL,
+            last_close INTEGER NOT NULL, extreme TEXT NOT NULL)""")
+        # A receipt can arrive after its fill. Ignore any candle that may
+        # contain prices from before we first confirmed the filled position.
+        db.execute("INSERT OR IGNORE INTO gold_trail_state VALUES (?, ?, 0, ?)",
+                   (cid, time.time_ns() // 1_000_000_000 + 1, str(fill)))
+        observed, last, saved = db.execute(
+            "SELECT observed_at, last_close, extreme FROM gold_trail_state WHERE client_id=?",
+            (cid,)).fetchone()
+        if closed - 300 < observed or closed < last:
+            return current
+        extreme = max(D(saved), bar_extreme) if long else min(D(saved), bar_extreme)
+        db.execute("UPDATE gold_trail_state SET last_close=?, extreme=? WHERE client_id=?",
+                   (closed, str(extreme), cid))
+    raw = extreme - 3 * atr if long else extreme + 3 * atr
+    rounding = ROUND_FLOOR if long else ROUND_CEILING
+    candidate = (raw / tick).to_integral_value(rounding=rounding) * tick
+    return max(current, candidate) if long else min(current, candidate)
 
 
 def cycle(broker, db, report, *, gold_id=None):
@@ -66,8 +99,12 @@ def cycle(broker, db, report, *, gold_id=None):
                 or D(str(leg["size"])) != abs(qty)):
             return "position_or_stop_unverified"
         current = D(str(leg["stop_price"]))
-        candidate = trailing_stop(side, pos["entry_price"], initial, current,
-                                  frame["candle"]["close"], features["ema9"], features["atr14"], product["tick_size"])
+        if gold_id is not None:
+            candidate = gold_volatility_stop(db, cid, side, pos["entry_price"], current,
+                                             frame, product["tick_size"])
+        else:
+            candidate = trailing_stop(side, pos["entry_price"], initial, current,
+                                      frame["candle"]["close"], features["ema9"], features["atr14"], product["tick_size"])
         if candidate == current:
             return "holding"
         ticker = broker.ticker(symbol)
