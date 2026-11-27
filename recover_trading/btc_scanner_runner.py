@@ -7,9 +7,13 @@ from .btc_scanner_runner_rules import entry_plan, trailing_stop
 from .entry_quotes import quote_evidence
 
 
-def cycle(broker, db, report):
-    symbol = "BTCUSD"
-    db.execute("""CREATE TABLE IF NOT EXISTS btc_runner_entries (
+def cycle(broker, db, report, *, gold_id=None):
+    symbol = "BTCUSD" if gold_id is None else "XAUTUSD"
+    account_id = "26679287" if gold_id is None else str(gold_id)
+    if gold_id is not None and (not account_id.isdigit() or int(account_id) <= 0 or int(account_id) == 26679287):
+        raise ValueError("Invalid Gold account")
+    table = "btc_runner_entries" if gold_id is None else "gold_runner_entries"
+    db.execute(f"""CREATE TABLE IF NOT EXISTS {table} (
         client_id TEXT PRIMARY KEY, side TEXT, stop TEXT, created INTEGER,
         state TEXT)""")
     if report.get("symbol") != symbol or report.get("status") == "scan_error":
@@ -20,10 +24,10 @@ def cycle(broker, db, report):
         return "awaiting_fresh_bar"
     features = frame["features"]
     wallet, = [w for w in broker.wallet()["result"] if w.get("asset_symbol") == "USD"]
-    if str(wallet.get("user_id")) != "26679287":
-        return "btc_wallet_mismatch"
+    if str(wallet.get("user_id")) != account_id:
+        return "btc_wallet_mismatch" if gold_id is None else "gold_wallet_mismatch"
     product = broker.product(symbol)
-    if (product["symbol"] != symbol or product["contract_unit_currency"] != "BTC"
+    if (product["symbol"] != symbol or product["contract_unit_currency"] != ("BTC" if gold_id is None else "XAUT")
             or product["settling_asset"]["symbol"] != "USD" or product["notional_type"] != "vanilla"):
         return "unsupported_contract"
     pid = product["id"]
@@ -35,7 +39,7 @@ def cycle(broker, db, report):
     if page.get("meta", {}).get("after"):
         return "order_snapshot_incomplete"
     orders = page["result"]
-    latest = db.execute("SELECT client_id,side,stop,created,state FROM btc_runner_entries WHERE state!='done' ORDER BY created DESC LIMIT 1").fetchone()
+    latest = db.execute(f"SELECT client_id,side,stop,created,state FROM {table} WHERE state!='done' ORDER BY created DESC LIMIT 1").fetchone()
     if latest:
         cid, side, initial, created, state = latest
         receipt = broker.order(cid)
@@ -47,7 +51,7 @@ def cycle(broker, db, report):
             if time.time()-created < 60:
                 return "awaiting_position_sync"
             with db:
-                db.execute("UPDATE btc_runner_entries SET state='done' WHERE client_id=?", (cid,))
+                db.execute(f"UPDATE {table} SET state='done' WHERE client_id=?", (cid,))
             return "flat_reconciled"
         if len(positions) != 1 or len(orders) != 1:
             return "inspect_position_protection"
@@ -87,9 +91,10 @@ def cycle(broker, db, report):
                       product["contract_value"], product["tick_size"], features["atr14"])
     if not plan:
         return "below_one_contract"
-    cid = hashlib.sha256(f"btc-runner:{closed}".encode()).hexdigest()[:32]
+    prefix = "btc-runner" if gold_id is None else "gold-runner"
+    cid = hashlib.sha256(f"{prefix}:{closed}".encode()).hexdigest()[:32]
     with db:
-        inserted = db.execute("INSERT OR IGNORE INTO btc_runner_entries(client_id,side,stop,created,state) VALUES(?,?,?,?,?)",
+        inserted = db.execute(f"INSERT OR IGNORE INTO {table}(client_id,side,stop,created,state) VALUES(?,?,?,?,?)",
                               (cid,plan["side"],str(plan["stop_loss"]),int(time.time()),"reserved")).rowcount
     if not inserted:
         return "bar_already_evaluated"
@@ -99,7 +104,7 @@ def cycle(broker, db, report):
             raise ValueError("unexpected leverage")
     except Exception:
         with db:
-            db.execute("UPDATE btc_runner_entries SET state='done' WHERE client_id=?", (cid,))
+            db.execute(f"UPDATE {table} SET state='done' WHERE client_id=?", (cid,))
         raise
     broker._request("POST", "/v2/orders", auth=True, payload={
         "product_id":pid, "client_order_id":cid, "order_type":"market_order",
