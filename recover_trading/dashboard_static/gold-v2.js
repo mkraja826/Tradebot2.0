@@ -24,11 +24,26 @@
     for(const row of rows){const r=element("tr");for(const v of row)r.append(element("td",v));body.append(r);}
     t.append(body);wrap.append(t);content.append(wrap);
   }
+  function hybrid(p){
+    if(!["observed","stale"].includes(p?.status))return;
+    const q=p.quote_comparison||{},w=p.window_counts||{};
+    table("Hybrid research — no actual fills",["Metric","Observation"],[
+      ["Worker",label(p.status)+" · "+num(p.age_seconds)+" s old"],
+      ["Reference quality",label(p.reference_status)],
+      ["Latest signal age (s)",typeof p.signal_observed_at==="number"?num(Math.max(0,Date.now()/1000-p.signal_observed_at)):"—"],
+      ["Hybrid status",label(p.hybrid_status)],["Observed quotes",num(p.quote_count)],
+      ["Sampled outcomes",num(w.sampled_outcomes)],["Insufficient coverage",num(w.insufficient_quote_coverage)],
+      ["Mark basis (bp)",num(q.mark_basis_bps)],["Demo spread (bp)",num(q.demo_spread_bps)]]);
+    table("Hybrid sampled comparisons",["Family","Side","Samples","Positive","Mean sampled net (bp)"],
+      (p.sampled_comparisons||[]).map(r=>[label(r.family),label(r.direction),num(r.samples),num(r.positive_samples),num(r.mean_sampled_net_bps)]));
+    content.append(element("p","Hypothetical sampled quote outcomes, not fills or account returns. Gaps may hide SL/TP crossings.","empty"));
+  }
   function render(p){
     content.replaceChildren();
     if(p?.symbol!=="XAUTUSD"||!["observed","stale"].includes(p.status)){
       state.textContent="No Gold V2 worker observation";
       content.append(element("p","The legacy service is independent. Start the separate shadow worker to collect evidence.","empty"));
+      hybrid(p?.hybrid);
       return;
     }
     state.textContent=(p.status==="stale"?"Stale · ":"Observed · ")+num(p.age_seconds)+" s old";
@@ -48,6 +63,7 @@
     table("Account and controller observation",["Field","State"],[["Position",label(p.account?.position_state)],["Bracket",label(p.account?.bracket_state)],["Controller",label(p.controller?.status)],["Entry execution",label(p.controller?.execution_status)],["Management",label(p.controller?.management_status)]]);
     const comparisons=v.combined_comparisons||[];
     table("Paired management research",["Family","Side","Policy","Cost (bp)","Pairs","Fixed net (bp)","Variant net (bp)","Difference (bp)"],comparisons.map(r=>[label(r.family),label(r.direction),label(r.policy),num(r.cost_bps),num(r.paired_samples),num(r.mean_fixed_net_bps_initial_notional),num(r.mean_variant_net_bps_initial_notional),num(r.mean_paired_difference_bps)]));
+    hybrid(p.hybrid);
     content.append(element("p","Showing "+comparisons.length+" of "+num(v.combined_comparisons_total)+" comparison groups. Normalized initial notional, hypothetical costs, not account returns.","empty"));
   }
   async function refresh(){
