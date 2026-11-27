@@ -5,6 +5,7 @@ import time
 from decimal import Decimal
 from .gold_v2_entry_adapter import positive
 from .gold_v2_reference import SOURCE
+from .gold_v2_hybrid import MARK_SOURCE
 from .entry_quotes import quote_evidence
 
 VERSION="gold-v2-hybrid-validation.1"
@@ -15,7 +16,9 @@ COST_BPS=15
 def encode(x):return json.dumps(x,sort_keys=True,allow_nan=False,separators=(",",":"))
 
 class HybridJournal:
-    def __init__(self,path,clock=time.time):
+    def __init__(self,path,clock=time.time,*,source=SOURCE):
+        if source not in (SOURCE,MARK_SOURCE):raise ValueError("unknown_study_source")
+        self.source=source
         self.clock=clock
         self.db=sqlite3.connect(path,timeout=10)
         self.db.executescript("""
@@ -27,13 +30,28 @@ class HybridJournal:
         CREATE TABLE IF NOT EXISTS hybrid_outcomes(
             boundary INTEGER PRIMARY KEY,resolved INTEGER NOT NULL,evidence TEXT NOT NULL);
         """)
+        try:
+            with self.db:
+                self.db.execute("BEGIN IMMEDIATE")
+                self.db.execute("CREATE TABLE IF NOT EXISTS hybrid_study (id INTEGER PRIMARY KEY CHECK(id=1),source TEXT NOT NULL)")
+                existing=self.db.execute("SELECT source FROM hybrid_study WHERE id=1").fetchone()
+                if existing is None:
+                    # All legacy unbound windows belong to the original traded-price cohort.
+                    populated=any(self.db.execute("SELECT 1 FROM "+table+" LIMIT 1").fetchone()
+                                  for table in ("hybrid_windows","hybrid_quotes","hybrid_outcomes"))
+                    if populated and source!=SOURCE:raise ValueError("unbound_legacy_study")
+                    self.db.execute("INSERT INTO hybrid_study VALUES(1,?)",(source,))
+                elif existing[0]!=source:raise ValueError("study_source_mismatch")
+        except BaseException:
+            self.db.close()
+            raise
     def close(self):self.db.close()
     def enroll(self,packet,*,as_of):
         clock_us=int(self.clock()*1000000)
         now=clock_us//1000000
         if type(as_of) is not int or not 0<=now-as_of<=120 or now//300!=as_of//300:
             raise ValueError("not_prospective")
-        if packet.get("symbol")!="XAUTUSD" or packet.get("signal_source")!=SOURCE or packet.get("execution_eligible") is not False:
+        if packet.get("symbol")!="XAUTUSD" or packet.get("signal_source")!=self.source or packet.get("execution_eligible") is not False:
             raise ValueError("wrong_study")
         if packet.get("status")=="hypotheses_observed":
             q=packet["quotes"]
@@ -116,7 +134,7 @@ class HybridJournal:
         comparisons=[{"family":k[0],"direction":k[1],"samples":v[0],
                       "positive_samples":v[1],"mean_sampled_net_bps":v[2]/v[0]}
                      for k,v in sorted(by_family.items())]
-        return {"version":VERSION,"execution_effect":"none","sampled_comparisons":comparisons,
+        return {"version":VERSION,"execution_effect":"none","sampled_comparisons":comparisons,"signal_source":self.source,
                 "window_counts":dict(self.db.execute("SELECT status,count(*) FROM hybrid_windows GROUP BY status")),
                 "quote_count":self.db.execute("SELECT count(*) FROM hybrid_quotes").fetchone()[0],
                 "outcome_count":self.db.execute("SELECT count(*) FROM hybrid_outcomes").fetchone()[0],
