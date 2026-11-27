@@ -124,3 +124,19 @@ ordering excluded and reported. All values are provisional hypotheses.
 Only validation.3 enrollments receive stop comparisons; prior scaling cohorts
 remain intact. Stops and resizing are separate experiments, not yet combined.
 No broker writes, no live margin/liquidation model, no tested profitability.
+
+## Intelligent take-profit (target.1, validation.4)
+Five paired fixed-quantity, fixed-stop research policies: fixed target, partial
+profit, trend extension, profit giveback exit, partial plus giveback. Partial
+closes half of initial quantity at half of target distance. Extension occurs
+once, by one entry ATR, before target hit, after 60% target-distance progress
+and two favorable closes with a minimum current body of 0.25 ATR. Giveback
+tracks favorable closes; after one ATR gain and 0.75 ATR giveback, it schedules
+remaining exit at the next opening. Existing bracket orders take precedence.
+Intrabar stop versus target order ambiguity is excluded. Partial target gaps
+use conservative target references. Same-window fixed benchmark and all
+variants use a flat scenario cost on initial notional (5/15/30 bps), not actual
+per-fill fees, spread or funding. The take-profit comparison is separate from
+the scaling and trailing-stop experiments. Parameters are uncalibrated and
+not recommendations. Only new validation.4 enrollment receives these outcomes.
+Older cohorts and prior evidence remain unchanged. No live order or deployment.
