@@ -6,8 +6,9 @@ Output is a research hypothesis, never an order. No legacy strategy imports.
 from dataclasses import dataclass
 from math import isfinite
 from statistics import median
+from .gold_v2_technical import features as advanced_features, candidates as advanced_candidates, historical_range_flag
 
-VERSION = "gold-v2-alpha.2"
+VERSION = "gold-v2-alpha.3"
 FRAMES = (300, 900, 3600)
 
 @dataclass(frozen=True)
@@ -37,6 +38,8 @@ def quality(bars, seconds, as_of):
         return "flat_or_invalid_baseline"
     if bars[-1].h-bars[-1].l > 8*baseline:
         return "extreme_range_unverified"
+    if historical_range_flag(bars):
+        return "historical_extreme_range_unverified"
     return "observed"
 
 def ema(values, n):
@@ -60,7 +63,7 @@ def features(bars):
     a = atr(bars)
     direction = 1 if e[0]>e[1]>e[2]>e[3] else -1 if e[0]<e[1]<e[2]<e[3] else 0
     return {"ema":e, "atr":a, "direction":direction,
-            "separation_atr":abs(e[1]-e[2])/a if a>0 else 0.0}
+            "separation_atr":abs(e[1]-e[2])/a if a>0 else 0.0, **advanced_features(bars)}
 
 def evaluate(frames, as_of):
     """Evaluate one point in time with no broker side effects."""
@@ -96,6 +99,7 @@ def evaluate(frames, as_of):
         signals.append(("liquidity_sweep",1))
     if last.h>high and last.c<high and last.c<last.o:
         signals.append(("liquidity_sweep",-1))
+    signals.extend(advanced_candidates(b,f[300],higher,mid,a))
     for family, side in signals:
         out["candidates"].append({"family":family,"direction":"LONG" if side==1 else "SHORT",
                                  "higher_timeframe_alignment":"aligned" if higher==side else "opposed" if higher==-side else "neutral",
