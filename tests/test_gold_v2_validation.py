@@ -74,3 +74,12 @@ class JournalTests(unittest.TestCase):
         self.now=NOW+300*(HORIZON+1)
         self.j.resolve(self.bars())
         self.assertEqual(self.j.summary()["observed_nonoverlapping_windows"],1)
+
+    def test_paired_sizing_summary(self):
+        self.j.enroll(report())
+        self.now=NOW+300*(HORIZON+1)
+        self.j.resolve(self.bars())
+        stats=self.j.summary()["sizing_comparisons"]
+        self.assertEqual(len(stats),9)
+        self.assertTrue(all(x["paired_samples"]==1 for x in stats))
+        self.assertTrue(all(x["mean_paired_difference_bps"]==0 for x in stats))
