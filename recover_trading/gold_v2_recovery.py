@@ -99,3 +99,44 @@ def persist_no_submission(episodes,seed,result,*,now):
         episodes.db.execute("INSERT INTO gold_v2_episode_observations VALUES (?,?,?,?)",
                             (cid,now,raw,raw))
     return result
+
+
+def synchronize_terminal_entries(orders,episodes,expected_account):
+    """Repair a crash between terminal episode commit and entry-journal update.
+
+    Replay persisted exchange evidence, not merely the terminal status label.
+    Never query or mutate exchange orders; never clear unrelated reservations.
+    """
+    from .gold_v2_episode import reconcile,client_id
+    repaired=0
+    unresolved=orders.db.execute("""SELECT client_id,symbol,intent,status FROM orders
+        WHERE status IN ('submitting','unknown') AND symbol=?""",(SYMBOL,)).fetchall()
+    for cid,symbol,raw,prior in unresolved:
+        row=episodes.db.execute("""SELECT e.seed,o.observed_at,o.evidence,o.result
+            FROM gold_v2_episodes e JOIN gold_v2_episode_observations o
+            ON e.client_id=o.client_id WHERE e.client_id=?
+            ORDER BY o.observed_at DESC LIMIT 1""",(cid,)).fetchone()
+        if row is None:continue
+        try:
+            seed,at,evidence,saved=json.loads(row[0]),row[1],json.loads(row[2]),json.loads(row[3])
+            if (saved.get("status") not in ("closed","terminal_no_fill")
+                or seed.get("account_id")!=str(expected_account) or seed.get("symbol")!=SYMBOL
+                or seed.get("client_id")!=cid or client_id(seed["signal_boundary"])!=cid):
+                continue
+            intent=json.loads(raw)
+            if (intent.get("product_id")!=seed["product_id"] or intent.get("side")!=seed["side"]
+                or d(intent["size"])!=d(seed["size"]) or intent.get("reduce_only") is not False
+                or d(intent["stop_loss"])!=d(seed["stop_loss"]) or d(intent["take_profit"])!=d(seed["take_profit"])):
+                continue
+            receipt=evidence["receipt"]
+            replay=reconcile(seed,receipt,evidence["fills"],evidence["reductions"],
+                evidence["snapshot"],now=at,complete=evidence["complete"])
+            if replay!=saved:continue
+            detail=json.dumps(receipt,allow_nan=False)
+        except (KeyError,TypeError,ValueError,ArithmeticError,AttributeError):
+            continue
+        with orders.db:
+            repaired+=orders.db.execute("""UPDATE orders SET status='acknowledged',detail=?
+                WHERE client_id=? AND symbol=? AND status=? AND intent=?""",
+                (detail,cid,SYMBOL,prior,raw)).rowcount
+    return repaired
