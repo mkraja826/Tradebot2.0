@@ -229,7 +229,7 @@ def reference_chart(symbol,frame,now,reference_dir):
         "gap_count":sum(b["time"]-a["time"]!=step for a,b in zip(candles,candles[1:])),
         "last_close_age_s":now-candles[-1]["time"]-step if candles else None}
 
-def handler(root,cache_dir=None,reference_dir=None):
+def handler(root,cache_dir=None,reference_dir=None,gold_v2_dir=None):
     class Handler(BaseHTTPRequestHandler):
         def send(self, status, content, mime):
             self.send_response(status)
@@ -248,6 +248,7 @@ def handler(root,cache_dir=None,reference_dir=None):
             path = urlsplit(self.path).path
             assets = {"/":("index.html","text/html; charset=utf-8"),
                       "/app.js":("app.js","text/javascript; charset=utf-8"),
+                      "/gold-v2.js":("gold-v2.js","text/javascript; charset=utf-8"),
                       "/market-chart.js":("market-chart.js","text/javascript; charset=utf-8"),
                       "/vendor/lightweight-charts.js":("vendor/lightweight-charts.js","text/javascript; charset=utf-8"),
                       "/vendor/LICENSE":("vendor/LICENSE","text/plain; charset=utf-8"),
@@ -279,6 +280,10 @@ def handler(root,cache_dir=None,reference_dir=None):
                 except ValueError:
                     return self.send(400,b"Invalid chart quote selection","text/plain")
                 return self.send(200,json.dumps(data,allow_nan=False).encode(),"application/json")
+            if path == "/api/gold-v2":
+                from .gold_v2_dashboard import read_status
+                data=read_status(gold_v2_dir if gold_v2_dir is not None else Path(root)/"gold-v2-shadow",int(time.time()))
+                return self.send(200,json.dumps(data,allow_nan=False).encode(),"application/json")
             if path == "/api/overview":
                 data={"generated":int(time.time()),"markets":[report(root,s) for s in MARKETS]}
                 return self.send(200,json.dumps(data,allow_nan=False).encode(),"application/json")
@@ -291,8 +296,9 @@ def main():
     p.add_argument("--port",type=int,default=8765)
     p.add_argument("--chart-cache-dir",default=None)
     p.add_argument("--reference-cache-dir",default=None)
+    p.add_argument("--gold-v2-dir",default=None,help="Read-only Gold V2 status directory")
     args=p.parse_args()
-    with ThreadingHTTPServer(("127.0.0.1",args.port),handler(args.data_dir,args.chart_cache_dir,args.reference_cache_dir)) as server:
+    with ThreadingHTTPServer(("127.0.0.1",args.port),handler(args.data_dir,args.chart_cache_dir,args.reference_cache_dir,args.gold_v2_dir)) as server:
         print(f"Local dashboard: http://127.0.0.1:{server.server_port}",flush=True)
         try:
             server.serve_forever()
