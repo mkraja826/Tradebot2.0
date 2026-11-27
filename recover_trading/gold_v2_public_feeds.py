@@ -141,7 +141,9 @@ class PublicFeeds:
                "macro_extra":(FRED+urlencode({"id":",".join(FRED_IDS),"cosd":from_date}),macro_extra)}
         def one(key):
             cached=self.cache.get(key)
-            if cached and 0<=start-cached["observed_at"]<TTL[key]:
+            # A transient error must not suppress slow feeds for six hours.
+            ttl=TTL[key] if cached and cached.get("status")=="observed" else min(TTL[key],60)
+            if cached and 0<=start-cached["observed_at"]<ttl:
                 return key,cached
             url,parser=tasks[key]
             try:
