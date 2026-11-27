@@ -6,6 +6,7 @@ from tradebot.market_data_v3 import collect, public_client
 from .gold_v2_engine import Bar, evaluate
 from .gold_v2_fundamentals import context, collect_external
 from .gold_v2_public_feeds import PublicFeeds, feature_packet
+from .gold_v2_score import score
 
 FRAME_MAP = {"5m": 300, "15m": 900, "1h": 3600}
 
@@ -39,6 +40,7 @@ def scan(client, as_of, *, collector=collect, external=None, public_feeds=None, 
         if int(cutoff)//300 != as_of//300:
             result["status"] = "candle_boundary_crossed"
             result["candidates"] = []
+    result["intelligence"] = score(result)
     return result
 
 def main():
