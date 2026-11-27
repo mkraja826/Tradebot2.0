@@ -229,7 +229,7 @@ def reference_chart(symbol,frame,now,reference_dir):
         "gap_count":sum(b["time"]-a["time"]!=step for a,b in zip(candles,candles[1:])),
         "last_close_age_s":now-candles[-1]["time"]-step if candles else None}
 
-def handler(root,cache_dir=None,reference_dir=None,gold_v2_dir=None):
+def handler(root,cache_dir=None,reference_dir=None,gold_v2_dir=None,hybrid_dir=None):
     class Handler(BaseHTTPRequestHandler):
         def send(self, status, content, mime):
             self.send_response(status)
@@ -281,8 +281,9 @@ def handler(root,cache_dir=None,reference_dir=None,gold_v2_dir=None):
                     return self.send(400,b"Invalid chart quote selection","text/plain")
                 return self.send(200,json.dumps(data,allow_nan=False).encode(),"application/json")
             if path == "/api/gold-v2":
-                from .gold_v2_dashboard import read_status
+                from .gold_v2_dashboard import read_status,read_hybrid_status
                 data=read_status(gold_v2_dir if gold_v2_dir is not None else Path(root)/"gold-v2-shadow",int(time.time()))
+                data["hybrid"]=read_hybrid_status(hybrid_dir if hybrid_dir is not None else Path(root)/"gold-v2-hybrid",int(time.time()))
                 return self.send(200,json.dumps(data,allow_nan=False).encode(),"application/json")
             if path == "/api/overview":
                 data={"generated":int(time.time()),"markets":[report(root,s) for s in MARKETS]}
@@ -297,8 +298,9 @@ def main():
     p.add_argument("--chart-cache-dir",default=None)
     p.add_argument("--reference-cache-dir",default=None)
     p.add_argument("--gold-v2-dir",default=None,help="Read-only Gold V2 status directory")
+    p.add_argument("--hybrid-dir",default=None,help="Read-only hybrid research status directory")
     args=p.parse_args()
-    with ThreadingHTTPServer(("127.0.0.1",args.port),handler(args.data_dir,args.chart_cache_dir,args.reference_cache_dir,args.gold_v2_dir)) as server:
+    with ThreadingHTTPServer(("127.0.0.1",args.port),handler(args.data_dir,args.chart_cache_dir,args.reference_cache_dir,args.gold_v2_dir,args.hybrid_dir)) as server:
         print(f"Local dashboard: http://127.0.0.1:{server.server_port}",flush=True)
         try:
             server.serve_forever()
