@@ -8,7 +8,7 @@ import json
 import re
 from pathlib import Path
 
-VERSION="gold-v2-cutover.1"
+VERSION="gold-v2-cutover.2"
 
 def assess(m):
     if not isinstance(m,dict):raise ValueError("manifest_object_required")
@@ -27,7 +27,7 @@ def assess(m):
     add("exclusive_gold_owner",m.get("exclusive_gold_owner_verified") is True)
     add("btc_unchanged",m.get("btc_config_preserved_verified") is True)
     # These are known engineering gaps in the candidate, not operator flags.
-    blockers=["execution_cli_not_implemented","early_bracket_closure_attribution_incomplete",
+    blockers=["execution_runtime_integration_unverified","early_bracket_closure_attribution_incomplete",
               "position_addition_atomic_coverage_unverified","exchange_integration_not_verified"]
     return {"version":VERSION,"mode":"offline_inventory","execution_effect":"none",
             "operator_reported_checks":checks,"unverified_checks":[k for k,v in checks.items() if v=="unverified"],
