@@ -2,12 +2,13 @@
 from .gold_v2_engine import quality,features,ema,FRAMES
 from .gold_v2_mark_aggregation import aggregate
 from .gold_v2_feed_diagnostics import anomalies
-from statistics import median
 
 VERSION="gold-v2-mark-model.1"
 def corroborate(primary,other,fine,*,seconds,as_of):
     strict=quality(primary,seconds,as_of)
     out={"strict_quality":strict,"status":strict,"corroborated":[],"unverified":[]}
+    if primary and any(x["close_timestamp"]==primary[-1].ts for x in anomalies(primary)):
+        return dict(out,status="current_true_range_unverified")
     if strict=="observed":return out
     # Only historical range flags qualify; never bypass invalid data or a current shock.
     if strict!="historical_extreme_range_unverified":return out
@@ -41,7 +42,8 @@ def evaluate_mark(primary,peer,fine,as_of):
             quality_map[str(sec)]=corroborate(b,peer.get(sec,[]),fine,seconds=sec,as_of=as_of)
         else:
             strict=quality(b,sec,as_of)
-            quality_map[str(sec)]={"strict_quality":strict,"status":strict}
+            current=bool(b and any(x["close_timestamp"]==b[-1].ts for x in anomalies(b)))
+            quality_map[str(sec)]={"strict_quality":strict,"status":"current_true_range_unverified" if current else strict}
     out["data_quality"]=quality_map
     if any(x["status"] not in ("observed","historical_volatility_corroborated") for x in quality_map.values()):
         return dict(out,status="data_unusable")
