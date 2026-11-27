@@ -290,3 +290,27 @@ in the runtime route. Entry/management settings are not selected by learned
 performance yet. Do not enable or replace the live service until these
 issues, exact deployed revision and full regression tests are addressed.
 No server installation, execution activation or exchange mutation performed.
+
+## Exchange reconciliation and recovery (recovery.1, controller.2)
+Read previously verified owned-position bracket IDs from the episode journal.
+For subsequent fills referencing those IDs, retrieve terminal order receipts
+using the documented authenticated GET /v2/orders/{order_id} on the demo host
+(https://docs.delta.exchange/). Require matching product, opposite side,
+reduce-only mark-price bracket type, prior observation before fill and exact
+filled quantity. Pass matched receipts into the existing fill-chain replay.
+No unknown order is adopted by inference. This cannot attribute a bracket
+that triggers before the first verified open-position observation.
+Interrupted reservations can become terminal_no_submission only if the
+intact local journal proves no order reservation or a preparation failure,
+the exchange explicitly returns order_not_found, a complete fill window has
+no post-anchor fills, a fresh snapshot is flat with no orders, and at least
+120 seconds have elapsed. A timeout or unknown submission remains unresolved;
+never resend blindly. This relies on exclusive runtime ownership and intact
+journals. The recovery observation records classification, not a full raw
+exchange evidence archive. Verified terminal/owned episode replay can resolve
+the corresponding local unknown/submitting order status.
+Management attempts still awaiting verification can prevent closure reconciliation;
+a crash between terminal episode persistence and order-journal update can
+require manual recovery. Same-timestamp fill ordering, large history windows,
+unobserved protective legs and automatic bracket repair remain incomplete.
+No mutation, deployment or CLI execution activation in this phase.
