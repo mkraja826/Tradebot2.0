@@ -1,4 +1,4 @@
-"""Run with sudo from a pinned checkout to activate the BTC demo runner."""
+"""Run with sudo from a pinned checkout to activate the Gold demo volatility trail."""
 import io
 import json
 import os
@@ -11,7 +11,7 @@ import tempfile
 import time
 
 UNIT = "recover-demo.service"
-PIN = "af41e86f1b4fc9ba8fc7d71f86ae4aeda7dfab0d"
+PIN = "dbe2e23523254778cc48b25e13d479ce43e80faf"
 DROP = Path("/etc/systemd/system/recover-demo.service.d")
 override = DROP / "zzzzzz-btc-scanner-runner.conf"
 
@@ -52,19 +52,24 @@ def main():
         if broker.active_orders_page(product)["result"]:
             raise ValueError("Gold orders are open")
     expected = input("Enter your GOLD demo subaccount numeric user ID: ").strip()
-    if not expected.isdigit() or int(expected) <= 0 or int(expected)==26679287:
+    if expected != "62702465":
         raise SystemExit("Invalid Gold subaccount ID")
     flat()
     original = override.read_text()
     lines = original.splitlines()
     cmd, = [x for x in lines if x.startswith("ExecStart=") and x != "ExecStart="]
-    if "--lr-v4b-demo" in cmd or "--btc-scanner-runner" not in cmd or "--gold-scanner-account" in cmd or cmd.endswith("\\"):
+    if "--lr-v4b-demo" in cmd or "--btc-scanner-runner" not in cmd or cmd.endswith("\\"):
         raise ValueError("Unexpected existing override")
+    gold_flags = [arg for arg in cmd.split() if arg.startswith("--gold-scanner-account")]
+    if gold_flags and gold_flags != [f"--gold-scanner-account={expected}"]:
+        raise ValueError("Unexpected Gold account configuration")
+    if not gold_flags:
+        cmd += f" --gold-scanner-account={expected}"
     stage = Path(tempfile.mkdtemp(prefix="btc-runner-", dir=old.parent))
     stage.chmod(0o755)
     with tarfile.open(fileobj=io.BytesIO(raw)) as archive:
         archive.extractall(stage, filter="data")
-    body = f"[Service]\nBindReadOnlyPaths={stage}/recover_trading:{old}/recover_trading\nExecStart=\n{cmd} --gold-scanner-account={expected}\n"
+    body = f"[Service]\nBindReadOnlyPaths={stage}/recover_trading:{old}/recover_trading\nExecStart=\n{cmd}\n"
     ctl("stop", UNIT)
     try:
         flat()
