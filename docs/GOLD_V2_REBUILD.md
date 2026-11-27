@@ -314,3 +314,29 @@ a crash between terminal episode persistence and order-journal update can
 require manual recovery. Same-timestamp fill ordering, large history windows,
 unobserved protective legs and automatic bracket repair remain incomplete.
 No mutation, deployment or CLI execution activation in this phase.
+
+## Advanced resizing (resize.1, management-adapter.3)
+The pure addition preview models one initial-quantity addition per favorable
+0.5 ATR increment, up to five additions and no additions after a reduction.
+It requires a current matched bracket and fresh quote, reports expected signed
+quantity, weighted average entry and unchanged protective triggers, and compares
+modeled stop P&L including assumed turnover costs with original stop risk.
+These are research quantities and assumptions, not approved capital allocations.
+The independent addition verifier checks reserved client identity, terminal
+receipt, chronological fills, signed quantity chain, weighted entry, unchanged
+target, non-loosened stop and full observed post-fill bracket quantity.
+It accepts canceled partial additions for evidence purposes, but the equal
+initial-quantity preview does not plan subsequent adds after a partial addition.
+Exact decimal comparisons may reject rounded exchange averages. Observed coverage
+before and after is NOT proof of uninterrupted protection during resizing.
+No add submission, bracket resize mutation or resized episode adoption is wired.
+The episode management adapter now proposes one reduce-only partial market
+exit when completed close and current mark are both at least halfway toward
+the original target. Existing giveback exit takes precedence. Integer half
+quantity is rounded down; size one is not reduced. Any previous verified
+reduction prevents another discretionary reduction. This reuses the existing
+controller and management executor contract; it is not a resting partial
+limit order or guaranteed fill at the halfway price. A reduction can leave
+bracket coverage unresolved if exchange-side resizing is not verified.
+No deployment, live tests, or actual exchange writes. Next: full regression
+testing, dashboard read integration, and exclusive Gold cutover preparation.
