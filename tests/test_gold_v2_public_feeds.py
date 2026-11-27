@@ -48,3 +48,12 @@ class FeedTests(unittest.TestCase):
                      "data":{"price_usd_oz":30,"price_as_of":NOW-10}}}
         self.assertEqual(feature_packet(x,NOW)["gold_silver_ratio"],100)
         self.assertIsNone(feature_packet(x,NOW+60)["gold_silver_ratio"])
+
+    def test_slow_failure_retry(self):
+        stamp=[NOW];calls=[]
+        def reader(url):
+            calls.append(url)
+            raise TimeoutError()
+        p=PublicFeeds(reader=reader,clock=lambda:stamp[0])
+        p.collect();stamp[0]+=61;p.collect()
+        self.assertEqual(len(calls),12)
