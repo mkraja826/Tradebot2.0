@@ -160,7 +160,7 @@ class EpisodeJournal:
             if old and now<=old[0]:
                 if now==old[0] and evidence==old[1]:return json.loads(old[2])
                 raise ValueError("nonmonotonic_or_conflicting_observation")
-            if old and json.loads(old[2])["status"] in ("closed","terminal_no_fill"):
+            if old and json.loads(old[2])["status"] in ("closed","terminal_no_fill","terminal_no_submission"):
                 raise ValueError("terminal_episode")
             result=reconcile(json.loads(row[0]),receipt,fills,reductions,snapshot,now=now,complete=complete)
             if result["status"]=="owned_open":
