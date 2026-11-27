@@ -183,3 +183,21 @@ The current report compares management variants only; learning entry weights,
 indicator ablation, risk-matched exposure and true prospective frozen-policy
 deployment remain pending.
     python3 -m recover_trading.gold_v2_learning --journal gold-v2.sqlite --cutoff EPOCH --as-of EPOCH
+
+## Demo entry adapter (entry-adapter.1)
+Gold V2 candidate preparation can map into the existing DemoExecutor proposal
+contract: XAUTUSD only, confirmed USD wallet/account identity, vanilla XAUT
+contract, integer quantity, tick-rounded SL/TP and fixed 20x leverage.
+Allocation fraction must be supplied explicitly; no live default is selected.
+Estimated margin uses current book and contract value, not exchange-approved
+margin or liquidation distance. Contradictory directions remain unresolved.
+A single deterministic decision ID per five-minute boundary prevents duplicate
+journal reservation. The submission bridge is disabled by default and requires
+the existing concrete DeltaDemo and DemoExecutor types. Preparation checks
+flat exposure and order snapshot completeness; existing unresolved journal
+entries prevent dispatch. Main-account exclusion still requires operator
+verification of the configured Gold demo account ID and distinct credentials.
+Single runtime ownership, lifecycle reconciliation, existing-position handoff,
+actual bracket protection and live management integration remain pending.
+No CLI or service calls the bridge. Combined simulation is not a live position
+manager. BTC, legacy Gold routing, execution files and server are unchanged.
