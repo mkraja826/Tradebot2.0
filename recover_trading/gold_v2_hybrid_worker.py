@@ -31,7 +31,7 @@ class Study:
     def __init__(self,journal,demo,ref,product,reference_product,*,clock=time.time):
         self.journal=journal;self.demo=demo;self.ref=ref
         self.product=product;self.reference_product=reference_product
-        self.clock=clock;self.last_boundary=None;self.future=None;self.reference=None
+        self.clock=clock;self.last_boundary=None;self.future=None;self.reference=None;self.last_signal={}
     def cycle(self,pool):
         now=self.clock();boundary=int(now)//300*300
         out={"version":VERSION,"symbol":"XAUTUSD","mode":"hybrid_research_only",
@@ -63,6 +63,10 @@ class Study:
                     out["enrollment"]=self.journal.enroll(result,as_of=stamp)
                 except Exception as exc:out["errors"]["hybrid_enrollment"]=type(exc).__name__
             else:out["errors"]["hybrid_enrollment"]="demo_quote_missing"
+        for k in ("reference_status","reference_quality","hybrid_status","quote_comparison","enrollment"):
+            if k in out:self.last_signal[k]=out[k]
+        if "reference_status" in out:self.last_signal["signal_observed_at"]=int(self.clock())
+        out["latest_signal"]=dict(self.last_signal)
         try:out["resolved"]=self.journal.resolve()
         except Exception as exc:out["errors"]["resolution"]=type(exc).__name__
         out["summary"]=self.journal.summary()
