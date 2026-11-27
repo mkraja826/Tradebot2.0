@@ -24,7 +24,7 @@ def scan(client, as_of, *, collector=collect, external=None, public_feeds=None, 
             frames[seconds] = [Bar(
                 b["time"]+seconds,b["open"],b["high"],b["low"],
                 b["close"],b["volume"]) for b in item["bars"]]
-    result = dict(evaluate(frames,as_of), feed_health=health)
+    result = dict(evaluate(frames,as_of), feed_health=health, signal_source="delta_demo_trade_candles")
     if external is not None or public_feeds is not None:
         refs, spot = external() if external is not None else ({},{})
         items = public_feeds.collect() if public_feeds is not None else {}
