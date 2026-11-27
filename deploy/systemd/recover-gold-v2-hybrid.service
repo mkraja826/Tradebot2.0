@@ -1,0 +1,26 @@
+[Unit]
+Description=Recover Trading Gold V2 hybrid public research (no execution)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=recovertrading
+Group=recovertrading
+WorkingDirectory=/opt/recover-gold-v2/current
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/usr/bin/python3 -m recover_trading.gold_v2_hybrid_worker --data-dir /var/lib/recover-trading/gold-v2-hybrid --interval 10
+Restart=on-failure
+RestartSec=15
+TimeoutStopSec=180
+StateDirectory=recover-trading/gold-v2-hybrid
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/recover-trading/gold-v2-hybrid
+
+[Install]
+WantedBy=multi-user.target
