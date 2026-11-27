@@ -125,8 +125,8 @@ def synchronize_terminal_entries(orders,episodes,expected_account):
                 continue
             intent=json.loads(raw)
             if (intent.get("product_id")!=seed["product_id"] or intent.get("side")!=seed["side"]
-                or d(intent["size"])!=d(seed["size"]) or intent.get("reduce_only") is not False
-                or d(intent["stop_loss"])!=d(seed["stop_loss"]) or d(intent["take_profit"])!=d(seed["take_profit"])):
+                or d(intent["size"])!=d(seed["size"]) or intent.get("leverage")!=20
+                or intent.get("reduce_only",False) is not False or d(intent["stop_loss"])!=d(seed["stop_loss"]) or d(intent["take_profit"])!=d(seed["take_profit"])):
                 continue
             receipt=evidence["receipt"]
             replay=reconcile(seed,receipt,evidence["fills"],evidence["reductions"],
