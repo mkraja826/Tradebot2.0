@@ -59,8 +59,12 @@ class ControllerTests(unittest.TestCase):
             return {"status":"acknowledged"}
         with patch("recover_trading.gold_v2_controller.verify_account",return_value="123"), \
              patch("recover_trading.gold_v2_controller.prepare",return_value=(decision,account)), \
-             patch.object(c.entry,"execute",side_effect=dispatch):
-            self.assertEqual(c.entry_cycle(report())["execution_status"],"acknowledged")
+             patch.object(c.entry,"execute",side_effect=dispatch), \
+             patch.object(c,"collect",side_effect=RuntimeError("fixture")) as collect:
+            response=c.entry_cycle(report())
+            self.assertEqual(response["execution_status"],"acknowledged")
+            self.assertEqual(response["post_entry_observation"],"observation_failed")
+            collect.assert_called_once()
             self.assertEqual(c.entry_cycle(report())["status"],"unresolved_episode_or_order")
     def test_failed_dispatch_retains_seed(self):
         c=self.controller(True)
