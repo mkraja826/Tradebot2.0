@@ -29,7 +29,8 @@ class HybridJournal:
         """)
     def close(self):self.db.close()
     def enroll(self,packet,*,as_of):
-        now=int(self.clock())
+        clock_us=int(self.clock()*1000000)
+        now=clock_us//1000000
         if type(as_of) is not int or not 0<=now-as_of<=120 or now//300!=as_of//300:
             raise ValueError("not_prospective")
         if packet.get("symbol")!="XAUTUSD" or packet.get("signal_source")!=SOURCE or packet.get("execution_eligible") is not False:
@@ -37,7 +38,7 @@ class HybridJournal:
         if packet.get("status")=="hypotheses_observed":
             q=packet["quotes"]
             for k in ("reference_quote_timestamp_us","demo_quote_timestamp_us"):
-                if type(q[k]) is not int or not 0<=now*1000000+999999-q[k]<=31000000:
+                if type(q[k]) is not int or not 0<=clock_us-q[k]<=30000000:
                     raise ValueError("stale_enrollment_quote")
         boundary=as_of//300*300
         status="enrolled" if packet.get("status")=="hypotheses_observed" and any(p.get("mark_geometry_compatible") is True for p in packet["hypotheses"]) else "not_enrolled"
@@ -55,6 +56,10 @@ class HybridJournal:
         if q["status"]!="fresh_book" or not q.get("mark_price"):return "unavailable"
         raw=encode(q)
         with self.db:
+            self.db.execute("CREATE TABLE IF NOT EXISTS hybrid_market (id INTEGER PRIMARY KEY CHECK(id=1),product_id INTEGER NOT NULL)")
+            self.db.execute("INSERT OR IGNORE INTO hybrid_market VALUES(1,?)",(pid,))
+            if self.db.execute("SELECT product_id FROM hybrid_market WHERE id=1").fetchone()[0]!=pid:
+                raise ValueError("product_changed")
             existing=self.db.execute("SELECT evidence FROM hybrid_quotes WHERE stamp=?",(q["timestamp_us"],)).fetchone()
             if existing:
                 # Quote age changes on repeated observations; compare only prices.
@@ -70,7 +75,8 @@ class HybridJournal:
             self.db.execute("BEGIN IMMEDIATE")
             for boundary,enrolled,raw in self.db.execute("SELECT boundary,enrolled,evidence FROM hybrid_windows WHERE status='enrolled' AND enrolled+?<=?",(HORIZON,now)).fetchall():
                 packet=json.loads(raw)
-                start=enrolled*1000000;end=(enrolled+HORIZON)*1000000
+                start=max(enrolled*1000000,packet["quotes"]["demo_quote_timestamp_us"]);end=start+HORIZON*1000000
+                if now*1000000<end:continue
                 rows=self.db.execute("SELECT stamp,observed,evidence FROM hybrid_quotes WHERE stamp>? AND stamp<=? AND observed<=? ORDER BY stamp",(start,end,end)).fetchall()
                 # No interpolation: sparse sampling cannot establish a stop/target path.
                 times=[start]+[r[0] for r in rows]+[end]
