@@ -16,7 +16,7 @@ from .gold_v2_episode import client_id, timestamp, d
 from .gold_v2_management_adapter import evaluate_episode
 from .position_preview import observe
 from .lifecycle import pages,normalize_fill
-from .gold_v2_recovery import known_brackets,protective_receipts,local_no_submission,verify_no_submission,persist_no_submission
+from .gold_v2_recovery import known_brackets,protective_receipts,local_no_submission,verify_no_submission,persist_no_submission,synchronize_terminal_entries
 
 VERSION="gold-v2-controller.2"
 SYMBOL="XAUTUSD"
@@ -76,6 +76,7 @@ class Controller:
     def entry_cycle(self,report):
         if not self.enabled:return status("disabled",execution_effect="none")
         account=verify_account(self.broker,self.expected)
+        synchronize_terminal_entries(self.orders,self.episodes,account)
         if outstanding(self.episodes) or self.orders.unresolved():
             return status("unresolved_episode_or_order")
         if self.pending_management():return status("unresolved_management")
@@ -86,6 +87,8 @@ class Controller:
         if result["status"]!="proposed":return status(result["status"])
         candidate,_=select(report);p=result["proposal"]
         boundary=int(report["as_of"])//300*300;cid=client_id(boundary)
+        if self.episodes.db.execute("SELECT 1 FROM gold_v2_episodes WHERE client_id=?",(cid,)).fetchone():
+            return status("entry_bar_already_reserved")
         seed={"symbol":SYMBOL,"client_id":cid,"signal_boundary":boundary,
               "account_id":account,"product_id":context["product"]["id"],"side":p["side"],
               "size":p["size"],"stop_loss":p["stop_loss"],"take_profit":p["take_profit"],
