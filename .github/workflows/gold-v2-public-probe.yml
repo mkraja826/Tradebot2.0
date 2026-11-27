@@ -1,0 +1,20 @@
+name: Gold V2 public connectivity probe
+on:
+  push:
+    branches: [recover/gold-v2-rebuild]
+    paths:
+      - '.github/workflows/gold-v2-public-probe.yml'
+      - 'recover_trading/gold_v2_public_probe.py'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m recover_trading.gold_v2_public_probe
