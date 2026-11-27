@@ -357,3 +357,15 @@ learning report visualization are not included in this increment.
 The worker still has no CLI execution activation. No server or dashboard
 deployment occurred. Browser smoke testing and full regression verification
 are outstanding.
+
+## Fast protective closure observation
+The controller now attempts a read-only reconciliation immediately after an
+acknowledged entry, rather than waiting until the next worker tick. Failure
+preserves the acknowledged dispatch status and reserved episode.
+If the first reconciliation finds unattributed fills, an independent diagnostic
+may identify a possible early protective closure using exact account, original
+trigger, reduce-only bracket type, full fill chain and flat/empty snapshot.
+It does not grant attribution, mark the episode terminal or authorize another
+entry. The documented order schema does not establish a reliable explicit
+parent/child link for every early fill. A verified link or previously recorded
+protective leg remains necessary. No change to demo activation or live services.
