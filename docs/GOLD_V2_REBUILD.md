@@ -107,3 +107,20 @@ funding, actual balance, contract rounding or executable fill model.
 Only validation.2 enrolled windows receive the new paired outcomes, preserving
 older policy cohorts. Summary includes pairwise means and sample counts; an
 unobserved outcome is not a paired sample. No broker or automatic deployment.
+
+## Intelligent stop-loss (stop.1, validation.3)
+Compare fixed, ATR trail, EMA9 trail, rolling three-bar structure trail and
+hybrid policies on identical fixed-size windows with unchanged take profit.
+Activation after favorable best close of 0.75 entry ATR; ATR uses Wilder
+updates seeded from signal ATR, EMA9 from signal evidence, structure uses
+three completed post-entry candles. The seed omits the intervening candle
+between signal and simulated entry, so the indicators are approximations.
+ATR distance 1.5 updated ATR, EMA buffer 0.25 ATR, structure buffer 0.1 ATR.
+Hybrid selects the tightest eligible level and considers estimated cost-adjusted
+entry after one ATR of favorable movement. Stops ratchet only toward or
+through entry; never widen, and no retroactive same-bar application. Gaps
+can realize worse prices; breakeven is not guaranteed. Ambiguous intrabar
+ordering excluded and reported. All values are provisional hypotheses.
+Only validation.3 enrollments receive stop comparisons; prior scaling cohorts
+remain intact. Stops and resizing are separate experiments, not yet combined.
+No broker writes, no live margin/liquidation model, no tested profitability.
