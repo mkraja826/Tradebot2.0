@@ -27,3 +27,19 @@ Extreme candle checks currently flag only the latest range; earlier anomalous ba
 6. Run full regression suite, verify BTC unchanged, and separately authorize demo deployment.
 
 No production account access. No running service changes in this branch.
+
+## Unified evidence fusion
+gold_v2_score.py annotates each candidate with two equally weighted evidence groups:
+- Technical: majority sign of 5m, 15m and 1h EMA alignment.
+- Macro: inverted broad dollar and real yield changes with provisional 0.2 percentage
+  point and 5 basis point bands, respectively.
+A group with missing data has unknown direction. Neutral is observed zero. Candidate
+support index is a sum of known group alignments from -2 to +2, accompanied by
+observed/expected group counts. It is NOT a calibrated probability, trade selector,
+or validated strategy. Compare scores only with coverage disclosed.
+CFTC positions, gold/silver ratio, gold basis, token prices, other macro series and
+economic release metadata are context only; no unvalidated or duplicate votes.
+Session labels are fixed UTC research windows, not official market hours.
+No evidence packet dated differently from the decision cutoff is scored.
+Next: durable point-in-time enrollment and non-overlapping validation, before
+calibration or execution routing.
