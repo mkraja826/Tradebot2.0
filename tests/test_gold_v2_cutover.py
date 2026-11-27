@@ -20,6 +20,6 @@ class CutoverTests(unittest.TestCase):
     def test_operator_flags_cannot_override_engineering(self):
         r=assess({"activation_ready":True,"exclusive_gold_owner_verified":True})
         self.assertFalse(r["activation_ready"])
-        self.assertIn("execution_cli_not_implemented",r["engineering_blockers"])
+        self.assertIn("execution_runtime_integration_unverified",r["engineering_blockers"])
     def test_invalid_manifest(self):
         with self.assertRaises(ValueError):assess([])
