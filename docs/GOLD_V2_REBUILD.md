@@ -340,3 +340,20 @@ limit order or guaranteed fill at the halfway price. A reduction can leave
 bracket coverage unresolved if exchange-side resizing is not verified.
 No deployment, live tests, or actual exchange writes. Next: full regression
 testing, dashboard read integration, and exclusive Gold cutover preparation.
+
+## Dashboard integration (worker.3, dashboard.1)
+Worker publishes bounded technical indicators, macro bias/dollar/real-yield
+context, candidate scores and up to 200 paired combined-management groups.
+Existing loopback dashboard exposes GET /api/gold-v2 via an allowlisted
+projection from gold_v2_status.json. --gold-v2-dir can select a separate
+status directory; default is <dashboard data-dir>/gold-v2-shadow.
+The live workspace displays an independent read-only panel only when XAUTUSD
+is selected. Polls every 15 seconds while visible, marks evidence older than
+180 seconds stale, uses textContent rather than injected HTML, and shows
+hypothetical bps separately from realized P&L. No balance, account identifier
+or raw receipt fields are projected. Existing chart, position panels and
+BTC route remain unchanged. SL/TP historical chart overlays and adaptive
+learning report visualization are not included in this increment.
+The worker still has no CLI execution activation. No server or dashboard
+deployment occurred. Browser smoke testing and full regression verification
+are outstanding.
