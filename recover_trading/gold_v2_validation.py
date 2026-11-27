@@ -41,6 +41,8 @@ class Journal:
     def enroll(self,report):
         if report.get("symbol")!="XAUTUSD":
             raise ValueError("wrong_symbol")
+        if report.get("execution_eligible") is False or report.get("signal_source") not in (None,"delta_demo_trade_candles"):
+            raise ValueError("reference_report_requires_separate_validation")
         signal=report.get("as_of")
         decision=report.get("decision_as_of",signal)
         now=self.clock()
