@@ -6,9 +6,10 @@ from collections import defaultdict, Counter
 from math import isfinite
 from .gold_v2_replay import outcome
 from .gold_v2_stops import compare as compare_stops
+from .gold_v2_targets import compare as compare_targets
 from .gold_v2_scaling import compare as compare_scaling, VERSION as SIZING_VERSION
 
-VERSION="gold-v2-validation.3"
+VERSION="gold-v2-validation.4"
 HORIZON=12
 COSTS=(5,15,30)
 STEP=300
@@ -104,12 +105,14 @@ class Journal:
                         scenarios={str(cost):outcome(c,future,as_of=row["entry_boundary"],
                                    horizon=HORIZON,cost_bps=cost) for cost in COSTS}
                         sample={"family":c["family"],"direction":c["direction"],"scenarios":scenarios}
-                        if row["policy_version"] in ("gold-v2-validation.2","gold-v2-validation.3"):
+                        if row["policy_version"] in ("gold-v2-validation.2","gold-v2-validation.3","gold-v2-validation.4"):
                             sample["sizing"]={str(cost):compare_scaling(c,future,as_of=row["entry_boundary"],horizon=HORIZON,cost_bps=cost) for cost in COSTS}
-                        if row["policy_version"]=="gold-v2-validation.3":
+                        if row["policy_version"] in ("gold-v2-validation.3","gold-v2-validation.4"):
                             ema=report.get("features",{}).get("300",{}).get("ema",[])
                             stop_candidate=dict(c,entry_ema9=ema[0] if ema else None)
                             sample["stops"]={str(cost):compare_stops(stop_candidate,future,as_of=row["entry_boundary"],horizon=HORIZON,cost_bps=cost) for cost in COSTS}
+                        if row["policy_version"]=="gold-v2-validation.4":
+                            sample["targets"]={str(cost):compare_targets(c,future,as_of=row["entry_boundary"],horizon=HORIZON,cost_bps=cost) for cost in COSTS}
                         samples.append(sample)
                     result={"status":"evaluated","candidates":samples}
                 self.db.execute("UPDATE gold_v2_windows SET status='resolved',outcome_json=?,resolved_at=? WHERE signal_boundary=? AND status='enrolled'",
@@ -125,6 +128,8 @@ class Journal:
         sizing_groups=defaultdict(list)
         stop_groups=defaultdict(list)
         stop_exclusions=Counter()
+        target_groups=defaultdict(list)
+        target_exclusions=Counter()
         observed_windows=0
         for row in rows:
             if row["status"]!="resolved": continue
@@ -153,6 +158,15 @@ class Journal:
                             continue
                         key=(evidence.get("version","unknown"),packet["version"],c["family"],c["direction"],cost,policy)
                         stop_groups[key].append((baseline["net_bps"],variant["net_bps"],len(variant["stop_changes"])))
+                for cost,packet in c.get("targets",{}).items():
+                    baseline=packet["results"]["fixed"]
+                    for policy,variant in packet["results"].items():
+                        if policy=="fixed":continue
+                        if baseline["status"]!="observed" or variant["status"]!="observed":
+                            target_exclusions[policy+":"+cost+":"+baseline["status"]+":"+variant["status"]]+=1
+                            continue
+                        key=(evidence.get("version","unknown"),packet["version"],c["family"],c["direction"],cost,policy)
+                        target_groups[key].append((baseline["net_bps"],variant["net_bps"],len(variant["exit_fills"]),len(variant["target_changes"])))
                 for cost,scenario in c["scenarios"].items():
                     if scenario["status"]!="observed":
                         exclusions[cost+":"+scenario["status"]]+=1
@@ -184,7 +198,17 @@ class Journal:
                 "mean_variant_net_bps":sum(x[1] for x in v)/len(v),
                 "mean_paired_difference_bps":sum(x[1]-x[0] for x in v)/len(v),
                 "mean_stop_changes":sum(x[2] for x in v)/len(v)})
+        target_stats=[]
+        for (engine,version,family,direction,cost,policy),v in target_groups.items():
+            target_stats.append({"engine_version":engine,"target_version":version,"family":family,"direction":direction,
+                "cost_bps":int(cost),"policy":policy,"paired_samples":len(v),
+                "mean_fixed_net_bps":sum(x[0] for x in v)/len(v),
+                "mean_variant_net_bps":sum(x[1] for x in v)/len(v),
+                "mean_paired_difference_bps":sum(x[1]-x[0] for x in v)/len(v),
+                "mean_exit_fills":sum(x[2] for x in v)/len(v),
+                "mean_target_changes":sum(x[3] for x in v)/len(v)})
         return {"version":VERSION,"execution_effect":"none","window_counts":dict(states),
+                "target_comparisons":target_stats,"target_exclusions":dict(target_exclusions),
                 "stop_comparisons":stop_stats,"stop_exclusions":dict(stop_exclusions),
                 "sizing_comparisons":sizing_stats,
                 "observed_nonoverlapping_windows":observed_windows,"target_windows":TARGET,
