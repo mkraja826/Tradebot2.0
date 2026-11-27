@@ -153,3 +153,26 @@ class EndToEndTests(unittest.TestCase):
         self.cycle()
         self.assertFalse(self.orders.unresolved())
         self.assertEqual(e.mutations,["entry"])
+
+
+    def test_target_extension_after_partial(self):
+        e=self.exchange
+        self.assertEqual(self.cycle()["post_entry_observation"],"owned_open")
+        e.tick(B+620,103.5)
+        bars=[Bar(B+600,102,104,101.5,103.5,1)]
+        self.assertEqual(self.cycle(bars)["management_status"],"verified")
+        self.assertEqual(e.qty,1)
+        # Tighten first; on a later momentum bar the stop is already at
+        # the highest eligible level and the target can extend separately.
+        e.tick(B+920,104.5)
+        bars.append(Bar(B+900,103.5,105,103,104.5,1))
+        self.assertEqual(self.cycle(bars)["management_status"],"verified")
+        e.tick(B+1220,105.5)
+        bars.append(Bar(B+1200,104.5,105.8,104,105.5,1))
+        # Force a flat EMA/large current ATR in this synthetic report so
+        # the existing tightened stop is not displaced by another candidate.
+        r=report(e.now);r["features"][300]["atr"]=10
+        x=self.controller.cycle(r,bars)
+        self.assertEqual(x["management_status"],"verified",x)
+        tp=next(l for l in e.legs if l["stop_order_type"]=="take_profit_order")
+        self.assertEqual(float(tp["stop_price"]),108)
