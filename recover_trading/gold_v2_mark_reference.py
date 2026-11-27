@@ -48,5 +48,15 @@ def probe():
     out["aggregation_audit"]={
         "production":audit_aggregation(lambda params:r.get("/v2/history/candles",params),now),
         "demo":audit_aggregation(lambda params:d._request("GET","/v2/history/candles",params=params)["result"],now)}
+    from .gold_v2_mark_model import evaluate_mark
+    from .gold_v2_mark_aggregation import collect as collect_exact
+    try:
+        primary,_=collect_mark(lambda params:r.get("/v2/history/candles",params),now)
+        peer,_=collect_mark(lambda params:d._request("GET","/v2/history/candles",params=params)["result"],now)
+        fine=collect_exact(lambda params:r.get("/v2/history/candles",params),"5m",300,now//900*900,750)
+        model=evaluate_mark(primary,peer,fine,now)
+        out["corroborated_model"]={k:model[k] for k in ("status","data_quality","candidates","execution_eligible")}
+    except Exception as exc:
+        out["corroborated_model"]={"status":"unavailable","reason":type(exc).__name__,"execution_eligible":False}
     return out
 if __name__=="__main__":print(json.dumps(probe(),indent=2,allow_nan=False))
