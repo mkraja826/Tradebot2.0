@@ -28,6 +28,8 @@ def positive(x):
 
 def select(report):
     if report.get("symbol")!=SYMBOL:raise ValueError("wrong_symbol")
+    if report.get("execution_eligible") is False or report.get("signal_source") not in (None,"delta_demo_trade_candles"):
+        return None,"reference_research_only"
     if report.get("status")!="observed":return None,"data_unavailable"
     rows=report.get("candidates",[])
     if not rows:return None,"no_candidate"
