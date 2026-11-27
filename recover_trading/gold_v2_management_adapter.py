@@ -12,7 +12,7 @@ from .management_shadow import VERSION as SHADOW_VERSION
 from .management_lifecycle import plan as lifecycle_plan
 from .gold_v2_entry_adapter import SYMBOL
 
-VERSION="gold-v2-management-adapter.2"
+VERSION="gold-v2-management-adapter.3"
 
 def dec(x):
     if isinstance(x,bool):raise ValueError("invalid_number")
@@ -124,6 +124,10 @@ def _evaluate(report,snapshot,product,entry,*,now,history,reconciled=None):
         # Full exit precedes bracket edits and reductions.
         if best_move>=1 and best_move-move>=Decimal(".75"):
             action.update(action="close",reason="Gold V2 close-based profit giveback")
+        elif (reconciled is not None and abs(q)>=2 and not owned.get("reduced",False)
+              and side*(owned["initial_target"]-fill)>0
+              and min(side*(close-fill),side*(mark-fill))>=side*(owned["initial_target"]-fill)/2):
+            action.update(action="reduce",contracts=abs(q)//2,reason="Gold V2 completed-bar partial profit booking")
         elif move<=Decimal("-.5") and abs(q)>=2 and not owned.get("reduced",False):
             action.update(action="reduce",contracts=abs(q)//2,reason="Gold V2 adverse close reduction")
         else:
