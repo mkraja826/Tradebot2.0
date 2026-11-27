@@ -12,6 +12,15 @@ from recover_trading.dashboard import handler, CHART_FRAMES
 
 def seed(root):
     now=int(time.time())
+    v2=Path(root)/"gold-v2-shadow";v2.mkdir()
+    (v2/"gold_v2_status.json").write_text(json.dumps({
+        "symbol":"XAUTUSD","timestamp":now,"status":"observing","mode":"shadow","execution_enabled":False,
+        "market":{"regime":"trend","feed_health":{"5m":"ready"}},
+        "technical":{"300":{"ema":[100,99,98,97],"atr":2,"rsi14":50}},
+        "intelligence":{"macro_bias":"mixed_or_flat","candidates":[{"family":"trend_pullback","direction":"LONG","support_index":1,"observed_groups":1,"expected_groups":2}]},
+        "validation":{"observed_nonoverlapping_windows":4,"target_windows":1000},
+        "account":{"position_state":"flat","user_id":"private-fixture"}
+    }))
     for index,symbol in enumerate(("BTCUSD","XAUTUSD")):
         d=Path(root)/symbol;d.mkdir()
         (d/"status.json").write_text(json.dumps({"timestamp":now,"status":"fixture","coverage":{"evaluable_rules":0}}))
@@ -56,6 +65,7 @@ def run(page,url,mobile=False):
             assert page.evaluate("""() => {const b=document.querySelector('#workspaceNav [data-page="performance"]');const r=b.getBoundingClientRect();return b.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))}"""),"Performance navigation covered on "+name
             assert page.evaluate("document.documentElement.scrollWidth <= innerWidth + 1"),"Horizontal document overflow on "+name
     route("live")
+    expect(page.locator("#goldV2Panel")).to_be_hidden()
     expect(page.locator("#chartLiveState")).to_contain_text("unavailable")
     expect(page.locator("#marketChart canvas").first).to_be_visible(timeout=20000)
     page.locator('[data-frame="15m"]').click()
@@ -83,6 +93,11 @@ def run(page,url,mobile=False):
     page.locator("#chartReset").click()
     page.locator('[data-symbol="XAUTUSD"]').click()
     expect(page.locator("#marketChartTitle")).to_have_text("XAUTUSD · 15m")
+    expect(page.locator("#goldV2Panel")).to_be_visible()
+    expect(page.locator("#goldV2Content")).to_contain_text("trend pullback")
+    expect(page.locator("#goldV2Content")).to_contain_text("Disabled")
+    assert "private-fixture" not in page.locator("#goldV2Panel").inner_text()
+    assert page.evaluate("document.documentElement.scrollWidth <= innerWidth + 1"),"Gold V2 panel horizontal overflow"
     expect(page.locator("#marketChart canvas").first).to_be_visible()
     expect(page.locator("#chartReference")).to_have_attribute("aria-pressed","true")
     expect(page.locator("#chartLevels")).to_be_disabled()
