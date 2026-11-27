@@ -97,7 +97,19 @@ class Controller:
         # reconcile/operator review is required, not blind retry.
         self.episodes.reserve(seed)
         receipt=self.entry.execute(result,account=context)
-        return status("entry_dispatch",execution_status=receipt.get("status"))
+        response=status("entry_dispatch",execution_status=receipt.get("status"))
+        # Observe immediately rather than wait for the next scheduled cycle.
+        # Observation only: never perform a management mutation in the entry cycle.
+        if receipt.get("status")=="acknowledged":
+            try:
+                _,entry_receipt,fills,reductions,snapshot,complete=self.collect(seed)
+                if entry_receipt is not None:
+                    state=self.episodes.record(cid,entry_receipt,fills,reductions,snapshot,now=int(self.clock()),complete=complete)
+                    response["post_entry_observation"]=state["status"]
+            except Exception as exc:
+                response["post_entry_observation"]="observation_failed"
+                response["observation_error"]=type(exc).__name__
+        return response
     def pending_management(self):
         return self.orders.db.execute("""SELECT 1 FROM management_attempts WHERE symbol=?
             AND status IN ('attempting','outcome_unverified','partial_result_unverified') LIMIT 1""",(SYMBOL,)).fetchone() is not None
