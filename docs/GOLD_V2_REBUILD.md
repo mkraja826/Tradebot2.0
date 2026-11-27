@@ -43,3 +43,28 @@ Session labels are fixed UTC research windows, not official market hours.
 No evidence packet dated differently from the decision cutoff is scored.
 Next: durable point-in-time enrollment and non-overlapping validation, before
 calibration or execution routing.
+
+## Prospective validation (validation.1)
+The SQLite journal records the first accepted observation per five-minute signal
+boundary, including the complete evidence packet and model versions. Enrollment
+requires a current observation, not retrospective history. Entry starts at the
+strictly next five-minute boundary after enrollment. Outcomes use 12 subsequent
+closed five-minute bars (one hour); all candidates in a window share that window.
+Later candidate windows overlapping any enrolled window are recorded but excluded.
+The non-overlapping window count is not a count of independent candidate trades,
+and serial market dependence may remain. Cost scenarios: 5, 15, 30 round-trip bps.
+Missing bars remain pending up to 24 hours after the horizon, then are excluded.
+Ambiguous intrabar stop/target order is excluded, with counts reported. Resolution
+is once-only; no retroactive revision or automatic weight adjustment.
+Summary stratifies by engine/scoring version, family, side, evidence index,
+coverage and cost. Target is 1,000 observed non-overlapping windows, not 1,000
+correlated signals. This takes at least 1,000 hours of eligible horizon coverage,
+and likely much longer. Results are hypothetical, not actual fees, funding,
+broker fills or proof of profitability. No scheduled worker has been installed.
+Run manually from an isolated checkout:
+    python3 -m recover_trading.gold_v2_validate_cli --journal gold-v2.sqlite --fundamentals --public-feeds
+    python3 -m recover_trading.gold_v2_validate_cli --journal gold-v2.sqlite --summary
+The first command reads public demo feeds; the second is offline. Each invocation
+is one cycle. No exchange order or live service modifications. Historical wick
+quality, archive retention, out-of-sample validation and learning evaluation
+remain pending; no claim of tested profitability.
