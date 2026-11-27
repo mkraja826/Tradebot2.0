@@ -150,3 +150,28 @@ class EpisodeTests(unittest.TestCase):
                 self.assertEqual(synchronize_terminal_entries(orders,ep,"123"),0)
                 self.assertEqual(orders.unresolved(),[cid])
             finally:orders.close();ep.close()
+
+
+    def test_early_exit_diagnostic_not_attribution(self):
+        from unittest.mock import Mock
+        from recover_trading.gold_v2_recovery import early_exit_diagnostic
+        seed,receipt,fills,reductions,snapshot=fixture(closed=True)
+        seed["account_id"]="123"
+        receipt["user_id"]=123
+        r=dict(reductions[0],user_id=123,bracket_order=True,stop_trigger_method="mark_price",
+               stop_order_type="stop_loss_order",stop_price=98)
+        broker=Mock();broker._request.return_value=r
+        result=early_exit_diagnostic(broker,seed,receipt,fills,snapshot,now=NOW,complete=True)
+        self.assertEqual(result["status"],"possible_early_protective_exit")
+        self.assertFalse(result["attribution_verified"])
+        self.assertEqual(reconcile(seed,receipt,fills,[],snapshot,now=NOW,complete=True)["status"],"unattributed_fill")
+        r["user_id"]=456
+        self.assertEqual(early_exit_diagnostic(broker,seed,receipt,fills,snapshot,now=NOW,complete=True)["status"],"protective_evidence_mismatch")
+
+    def test_early_exit_requires_complete_history(self):
+        from unittest.mock import Mock
+        from recover_trading.gold_v2_recovery import early_exit_diagnostic
+        seed,receipt,fills,reductions,snapshot=fixture(closed=True)
+        broker=Mock()
+        self.assertEqual(early_exit_diagnostic(broker,seed,receipt,fills,snapshot,now=NOW,complete=False)["status"],"incomplete_fills")
+        broker._request.assert_not_called()
