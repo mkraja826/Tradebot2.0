@@ -4,17 +4,28 @@ from .gold_v2_entry_adapter import positive,dec
 from .gold_v2_reference import SOURCE
 from .entry_quotes import quote_evidence
 
-VERSION="gold-v2-hybrid.1"
+VERSION="gold-v2-hybrid.2"
+MARK_SOURCE="corroborated_production_mark"
 
 def preview(reference,reference_ticker,demo_ticker,*,reference_pid,demo_pid,tick_size,now):
+    return _preview(reference,reference_ticker,demo_ticker,reference_pid=reference_pid,demo_pid=demo_pid,
+                    tick_size=tick_size,now=now,source=SOURCE,report_key="strict_reference_report")
+
+def preview_mark(reference,reference_ticker,demo_ticker,*,reference_pid,demo_pid,tick_size,now):
+    return _preview(reference,reference_ticker,demo_ticker,reference_pid=reference_pid,demo_pid=demo_pid,
+                    tick_size=tick_size,now=now,source=MARK_SOURCE,report_key="mark_report")
+
+def _preview(reference,reference_ticker,demo_ticker,*,reference_pid,demo_pid,tick_size,now,source,report_key):
     def out(s,**kw):return {"version":VERSION,"symbol":"XAUTUSD","status":s,
-        "signal_source":SOURCE,"execution_eligible":False,"execution_effect":"none",**kw}
+        "signal_source":source,"execution_eligible":False,"execution_effect":"none",**kw}
     try:
-        if reference.get("symbol")!="XAUTUSD" or reference.get("signal_source")!=SOURCE:
+        if reference.get("symbol")!="XAUTUSD" or reference.get("signal_source")!=source:
             return out("wrong_reference")
-        r=reference["strict_reference_report"]
-        if r.get("symbol")!="XAUTUSD" or r.get("signal_source")!=SOURCE or r.get("status")!="observed":
+        r=reference[report_key]
+        if r.get("symbol")!="XAUTUSD" or r.get("signal_source")!=source or r.get("status")!="observed":
             return out("reference_data_unusable")
+        if source==MARK_SOURCE and (r.get("version")!="gold-v2-mark-model.1" or r.get("execution_eligible") is not False):
+            return out("wrong_mark_model")
         stamp=r["as_of"]
         if type(stamp) is not int or stamp!=reference["as_of"] or not 0<=now-stamp<=120 or int(now)//300!=stamp//300:
             return out("stale_signal")
