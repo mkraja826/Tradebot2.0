@@ -57,15 +57,16 @@ def simulate(candidate,bars,*,as_of,horizon=12,cost_bps=15,policy="fixed"):
             left-=take
             if q-take<=1e-10:lots.pop(0)
             else:lots[0]=(q-take,p)
-        events.append({"action":action,"price":price,"units":amount-left,"bar_open":stamp})
+        events.append({"action":action,"price":price,"units":amount-left,"time_reference":stamp})
     def finish(price,reason,stamp):
         remove(qty(),price,"exit",stamp)
         return {"status":"observed","reason":reason,"policy":policy,
                 "gross_bps_initial_notional":gross*10000,
                 "net_bps_initial_notional":(gross-cost)*10000,
                 "cost_bps_initial_notional":cost*10000,
-                "peak_quantity_units":peak,"peak_marked_notional_multiple":peak_notional,
-                "adds":adds,"reduced":reduced,"events":events}
+                "peak_quantity_units":peak,"peak_bar_high_notional_upper_bound":peak_notional,
+                "adds":adds,"reduced":reduced,"events":events,
+                "event_time_semantics":"bar_boundary_reference_not_intrabar_fill_time"}
     for i,b in enumerate(future):
         stamp=b.ts-STEP
         # Existing bracket has precedence over a pending resize at the open.
