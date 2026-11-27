@@ -106,7 +106,17 @@ class HybridJournal:
                 count+=1
         return count
     def summary(self):
-        return {"version":VERSION,"execution_effect":"none",
+        by_family={}
+        for (raw,) in self.db.execute("SELECT evidence FROM hybrid_outcomes"):
+            result=json.loads(raw)
+            for p in result.get("results",[]):
+                key=(p["family"],p["direction"])
+                acc=by_family.setdefault(key,[0,0,0.0])
+                acc[0]+=1;acc[1]+=p["sampled_net_bps"]>0;acc[2]+=p["sampled_net_bps"]
+        comparisons=[{"family":k[0],"direction":k[1],"samples":v[0],
+                      "positive_samples":v[1],"mean_sampled_net_bps":v[2]/v[0]}
+                     for k,v in sorted(by_family.items())]
+        return {"version":VERSION,"execution_effect":"none","sampled_comparisons":comparisons,
                 "window_counts":dict(self.db.execute("SELECT status,count(*) FROM hybrid_windows GROUP BY status")),
                 "quote_count":self.db.execute("SELECT count(*) FROM hybrid_quotes").fetchone()[0],
                 "outcome_count":self.db.execute("SELECT count(*) FROM hybrid_outcomes").fetchone()[0],
