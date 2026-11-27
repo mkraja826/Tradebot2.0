@@ -61,3 +61,26 @@ def read_status(directory,now):
         return out
     except (OSError,ValueError,TypeError,OverflowError):
         return out
+
+
+def read_hybrid_status(directory,now):
+    out={"status":"unavailable","execution_effect":"none"}
+    try:
+        with (Path(directory)/"hybrid_status.json").open("rb") as f:
+            raw=f.read(MAX_BYTES+1)
+        if len(raw)>MAX_BYTES:return out
+        p=json.loads(raw);stamp=number(p.get("timestamp"))
+        if p.get("symbol")!="XAUTUSD" or p.get("mode")!="hybrid_research_only" or stamp is None or stamp>now:return out
+        s=obj(p.get("summary"));signal=obj(p.get("latest_signal"));q=obj(signal.get("quote_comparison"))
+        return dict(out,status="stale" if now-stamp>60 else "observed",age_seconds=now-stamp,
+                    quote_record=label(p.get("quote_record")),quote_count=number(s.get("quote_count")),
+                    outcome_count=number(s.get("outcome_count")),actual_fills=0,
+                    reference_status=label(signal.get("reference_status")),hybrid_status=label(signal.get("hybrid_status")),
+                    signal_observed_at=number(signal.get("signal_observed_at")),
+                    window_counts={k:number(obj(s.get("window_counts")).get(k)) for k in
+                        ("enrolled","not_enrolled","overlap_excluded","sampled_outcomes","insufficient_quote_coverage")},
+                    quote_comparison={k:number(q.get(k)) for k in ("mark_basis_bps","book_basis_bps","quote_skew_ms","demo_spread_bps","reference_spread_bps")},
+                    sampled_comparisons=[{**{k:label(r.get(k)) for k in ("family","direction")},
+                        **{k:number(r.get(k)) for k in ("samples","positive_samples","mean_sampled_net_bps")}}
+                        for r in rows(s.get("sampled_comparisons"),100)])
+    except (OSError,ValueError,TypeError,AttributeError,OverflowError):return out
