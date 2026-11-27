@@ -1,0 +1,28 @@
+# REVIEW TEMPLATE ONLY. Do not install until the Gold-only handoff and
+# exchange integration are verified. The command-line assertion is not
+# proof that the legacy writer is stopped. Do not enable automatically.
+[Unit]
+Description=Recover Trading Gold V2 isolated demo execution (review template)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=recovertrading
+Group=recovertrading
+WorkingDirectory=/opt/recover-gold-v2/current
+EnvironmentFile=/etc/recover-trading/gold-v2-demo.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+StateDirectory=recover-trading/gold-v2-execution recover-trading/gold-v2-locks
+StateDirectoryMode=0700
+ExecStartPre=/usr/bin/python3 -m recover_trading.gold_v2_runtime --preflight
+ExecStart=/usr/bin/python3 -m recover_trading.gold_v2_runtime --execute-demo --legacy-gold-stopped
+Restart=on-failure
+RestartSec=15
+TimeoutStopSec=180
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/recover-trading/gold-v2-execution /var/lib/recover-trading/gold-v2-locks
