@@ -68,3 +68,25 @@ The first command reads public demo feeds; the second is offline. Each invocatio
 is one cycle. No exchange order or live service modifications. Historical wick
 quality, archive retention, out-of-sample validation and learning evaluation
 remain pending; no claim of tested profitability.
+
+## Advanced technical entries (alpha.3)
+New pure-Python indicators: Wilder RSI14, ADX14, DI+/DI-, rolling 20-bar
+typical-price VWAP (not session VWAP or tick VWAP), relative volume against
+the preceding 20 bars' median, and confirmed two-bar fractal structure.
+All are computed on closed candles; zero-volume VWAP is unavailable.
+Four new symmetric entry families supplement the original three:
+- Volume-confirmed breakout: 5m ADX >=25, directional DI dominance,
+  15m/1h alignment, volume >=1.5x prior median, break >=0.15 ATR.
+- VWAP trend reclaim: 15m/1h alignment, crossing rolling VWAP with
+  relative volume >=1.
+- Range RSI reversal: ADX <20, RSI re-entry through 30 or 70, price
+  on the appropriate side of rolling VWAP.
+- Structure continuation: confirmed rising/falling swing pairs, 15m/1h
+  alignment, break of prior confirmed swing by >0.1 ATR.
+These are candidate hypotheses, not selected trades. Existing scoring and
+validation capture their family/version, with no change to broker routing.
+Historical range quality now flags anomalous prior true ranges using a
+rolling 40-bar median and an initial-history median. This is heuristic:
+it cannot distinguish genuine volatility from corrupted candles, and is not
+independent reference-price reconciliation. Thresholds and all strategy rules
+are uncalibrated. The original ATR stop/target hypotheses remain unchanged.
