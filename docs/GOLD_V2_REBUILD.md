@@ -140,3 +140,25 @@ per-fill fees, spread or funding. The take-profit comparison is separate from
 the scaling and trailing-stop experiments. Parameters are uncalibrated and
 not recommendations. Only new validation.4 enrollment receives these outcomes.
 Older cohorts and prior evidence remain unchanged. No live order or deployment.
+
+## Combined position management (combined.1, validation.5)
+Three paired policies: fixed, hybrid exits without resizing, hybrid exits with
+resizing. One normalized FIFO quantity ledger tracks additions, reductions,
+partial exits, realized P&L and per-fill fees. Existing stop, partial and
+final targets precede discretionary next-open actions. When a stop and a
+profit limit are both touched intrabar and sequence matters, exclude and
+report the sample. No retrospective fill or stop change. Hybrid trailing
+ratchets only and uses updated ATR, EMA9 seed if available, recent structure
+and estimated episode breakeven including realized P&L and fees. Target
+extension is once only; partial exit is once at half original target distance.
+Priority for next-open actions: full giveback exit, reduction, then addition.
+No additions after partial or reduction; at most five one-unit additions.
+New experimental rule: an addition is accepted only if modeled episode net
+P&L at the existing stop, including estimated entry/exit fees for the addition,
+is no worse than the initial modeled stop-risk budget. This is not an account
+risk limit or a guarantee: gaps, slippage, liquidation and funding are not
+modeled; normalized units are not percentages of capital. The initial EMA/ATR
+seed is approximate as in stop.1. Costs are proportional to individual fill
+notional, so the fixed comparison is specific to this simulator.
+Only validation.5 enrollments get combined comparisons; older cohorts remain
+unchanged. Results are hypothetical; no broker mutations or deployment.
