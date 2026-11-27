@@ -83,3 +83,14 @@ class JournalTests(unittest.TestCase):
         self.assertEqual(len(stats),9)
         self.assertTrue(all(x["paired_samples"]==1 for x in stats))
         self.assertTrue(all(x["mean_paired_difference_bps"]==0 for x in stats))
+
+    def test_paired_stop_summary(self):
+        x=report()
+        x["features"]={300:{"ema":[100,100,100,100]}}
+        self.j.enroll(x)
+        self.now=NOW+300*(HORIZON+1)
+        self.j.resolve(self.bars())
+        stats=self.j.summary()["stop_comparisons"]
+        self.assertEqual(len(stats),12)
+        self.assertTrue(all(x["paired_samples"]==1 for x in stats))
+        self.assertTrue(all(x["mean_paired_difference_bps"]==0 for x in stats))
