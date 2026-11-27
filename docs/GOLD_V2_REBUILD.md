@@ -90,3 +90,20 @@ rolling 40-bar median and an initial-history median. This is heuristic:
 it cannot distinguish genuine volatility from corrupted candles, and is not
 independent reference-price reconciliation. Thresholds and all strategy rules
 are uncalibrated. The original ATR stop/target hypotheses remain unchanged.
+
+## Position scaling (sizing.1, validation.2)
+Compare four policies on identical opportunity windows: fixed, add winners,
+reduce losers, and combined. Initial normalized quantity is one unit, with at
+most five one-unit additions and one half-position reduction. Add thresholds
+are favorable 0.5 ATR increments from original entry; reduction is triggered
+by a 0.5 ATR adverse close. Recheck direction at the next bar open. Existing
+bracket takes precedence; stop and target remain anchored to initial entry.
+These are uncalibrated research assumptions, not recommended allocations.
+Per-fill fees use half of the scenario round-trip bps times fill notional.
+All results are normalized to original notional; higher exposure is not
+risk-equivalent to fixed size. Peak quantity and a conservative bar-high
+notional upper bound are reported. No leverage, margin, liquidation,
+funding, actual balance, contract rounding or executable fill model.
+Only validation.2 enrolled windows receive the new paired outcomes, preserving
+older policy cohorts. Summary includes pairwise means and sample counts; an
+unobserved outcome is not a paired sample. No broker or automatic deployment.
