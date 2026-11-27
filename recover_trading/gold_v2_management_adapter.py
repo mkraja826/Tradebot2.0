@@ -12,7 +12,7 @@ from .management_shadow import VERSION as SHADOW_VERSION
 from .management_lifecycle import plan as lifecycle_plan
 from .gold_v2_entry_adapter import SYMBOL
 
-VERSION="gold-v2-management-adapter.1"
+VERSION="gold-v2-management-adapter.2"
 
 def dec(x):
     if isinstance(x,bool):raise ValueError("invalid_number")
@@ -68,6 +68,21 @@ def ownership(snapshot,entry,product,now):
         return None
 
 def evaluate(report,snapshot,product,entry,*,now,history):
+    return _evaluate(report,snapshot,product,entry,now=now,history=history)
+
+def evaluate_episode(report,snapshot,product,seed,receipt,fills,reductions,*,now,history,complete):
+    """Reconcile exact fill chain anew before producing a management proposal."""
+    from .gold_v2_episode import reconcile
+    state=reconcile(seed,receipt,fills,reductions,snapshot,now=now,complete=complete)
+    if state["status"]!="owned_open":
+        return {"version":VERSION,"symbol":SYMBOL,"status":state["status"],"execution_effect":"none"}
+    if product.get("symbol")!=SYMBOL or product.get("id")!=seed["product_id"]:
+        raise ValueError("wrong_product")
+    owned=dict(state,entry_price=positive(state["entry_price"]),initial_stop=positive(state["initial_stop"]),initial_target=positive(state["initial_target"]))
+    entry={"signal_boundary":seed["signal_boundary"],"signal_atr":seed["signal_atr"],"first_full_bar_close":state["first_full_bar_close"]}
+    return _evaluate(report,snapshot,product,entry,now=now,history=history,reconciled=owned)
+
+def _evaluate(report,snapshot,product,entry,*,now,history,reconciled=None):
     """Return at most one compatible proposal, with no execution authority.
 
     history is trusted completed 5m bars from the owned episode, oldest first.
@@ -77,7 +92,7 @@ def evaluate(report,snapshot,product,entry,*,now,history):
     if report.get("symbol")!=SYMBOL or snapshot.get("symbol")!=SYMBOL:
         raise ValueError("wrong_symbol")
     if type(now) is not int:raise ValueError("invalid_now")
-    owned=ownership(snapshot,entry,product,now)
+    owned=reconciled if reconciled is not None else ownership(snapshot,entry,product,now)
     if owned is None:return out("ownership_or_protection_unverified")
     if report.get("status")!="observed":return out("market_data_unavailable")
     at=report.get("as_of");decision=report.get("decision_as_of",at)
@@ -109,7 +124,7 @@ def evaluate(report,snapshot,product,entry,*,now,history):
         # Full exit precedes bracket edits and reductions.
         if best_move>=1 and best_move-move>=Decimal(".75"):
             action.update(action="close",reason="Gold V2 close-based profit giveback")
-        elif move<=Decimal("-.5") and abs(q)>=2:
+        elif move<=Decimal("-.5") and abs(q)>=2 and not owned.get("reduced",False):
             action.update(action="reduce",contracts=abs(q)//2,reason="Gold V2 adverse close reduction")
         else:
             levels=[]
@@ -118,7 +133,7 @@ def evaluate(report,snapshot,product,entry,*,now,history):
                 if len(history)>=3:
                     level=min(b.l for b in history[-3:]) if side==1 else max(b.h for b in history[-3:])
                     levels.append(dec(level)-side*Decimal(".1")*a)
-                if best_move>=1:
+                if best_move>=1 and not owned.get("reduced",False):
                     # Entry-only estimate, not actual episode net breakeven.
                     levels.append(fill*(1+side*Decimal(".0015")))
             rounding=ROUND_FLOOR if side==1 else ROUND_CEILING
@@ -144,6 +159,6 @@ def evaluate(report,snapshot,product,entry,*,now,history):
         validated=lifecycle_plan(context,action)
         return out("proposal_prepared",proposal=action,context=context,lifecycle_preview=validated,
                    entry_client_id=owned["client_id"],bar_boundary=boundary,
-                   unsupported=["position_addition","post_reduction_ownership","partial_limit_booking"])
+                   unsupported=["position_addition","partial_limit_booking"] + ([] if reconciled is not None else ["post_reduction_ownership"]))
     except (KeyError,TypeError,ValueError,ArithmeticError):
         return out("invalid_management_evidence")
