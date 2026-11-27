@@ -24,7 +24,7 @@ from .gold_v2_entry_adapter import prepare,positive
 from .position_preview import observe
 from .lifecycle import pages
 
-VERSION="gold-v2-worker.2"
+VERSION="gold-v2-worker.3"
 SYMBOL="XAUTUSD"
 
 def account_snapshot(broker,expected_account,*,clock=time.time):
@@ -109,6 +109,11 @@ class Worker:
             event["market"]={k:report.get(k) for k in ("version","status","as_of","decision_as_of","regime","data_quality","feed_health")}
             event["candidate_count"]=len(report.get("candidates",[]))
             event["candidates"]=[{"family":c["family"],"direction":c["direction"]} for c in report.get("candidates",[])]
+            features=report.get("features",{})
+            event["technical"]={str(sec):{k:row.get(k) for k in ("ema","atr","direction","rsi14","adx","rolling_vwap20","relative_volume20","structure")} for sec in (300,900,3600) if (row:=features.get(sec,features.get(str(sec)))) is not None}
+            intel=report.get("intelligence",{})
+            fundamental=report.get("fundamentals",{})
+            event["intelligence"]={"version":intel.get("version"),"technical_direction":intel.get("technical",{}).get("direction"),"macro_direction":intel.get("macro",{}).get("direction"),"macro_bias":fundamental.get("macro_bias_hypothesis"),"macro":{k:fundamental.get("macro",{}).get(k) for k in ("broad_dollar_5obs_pct","real_yield_5obs_bp")},"candidates":[{k:c.get(k) for k in ("family","direction","support_index","observed_groups","expected_groups")} for c in intel.get("candidates",[])]}
             event["enrollment"]=self.journal.enroll(report)
         except Exception as exc:
             event["errors"]["scan_or_enrollment"]=type(exc).__name__
@@ -126,6 +131,8 @@ class Worker:
         try:
             summary=self.journal.summary()
             event["validation"]={k:summary[k] for k in ("window_counts","observed_nonoverlapping_windows","target_windows","target_reached")}
+            event["validation"]["combined_comparisons"]=summary.get("combined_comparisons",[])[:200]
+            event["validation"]["combined_comparisons_total"]=len(summary.get("combined_comparisons",[]))
         except Exception as exc:event["errors"]["validation"]=type(exc).__name__
         if self.broker is not None:
             try:
