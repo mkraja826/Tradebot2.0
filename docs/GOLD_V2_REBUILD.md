@@ -369,3 +369,20 @@ It does not grant attribution, mark the episode terminal or authorize another
 entry. The documented order schema does not establish a reliable explicit
 parent/child link for every early fill. A verified link or previously recorded
 protective leg remains necessary. No change to demo activation or live services.
+
+## Production reference research
+The live public comparison at commit 237477c found 19/42/45 demo
+true-range anomalies versus 0/2/0 production anomalies on 5m/15m/1h,
+with only one timestamp-matched anomalous bar. Counts overlap across
+timeframes. Production data also has quality issues; do not silently
+replace a demo OHLC value or infer its fill price from a reference.
+The standalone `python -m recover_trading.gold_v2_reference --once`
+collects exact completed production XAUTUSD candles with no credentials,
+retains strict engine quality status, and exposes separate descriptive
+close-only EMA diagnostics even if range quality is rejected. Reference
+reports carry explicit provenance and execution_eligible=false; the
+existing demo entry adapter and validation journal refuse them. This is
+not yet a production-signal/demo-execution hybrid. A separate prospective
+study, quote basis and mark/stop geometry, management price provenance,
+and actual demo execution compatibility must be verified before routing.
+No changes to the running workers.
