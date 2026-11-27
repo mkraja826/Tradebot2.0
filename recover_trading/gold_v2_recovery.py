@@ -140,3 +140,41 @@ def synchronize_terminal_entries(orders,episodes,expected_account):
                 WHERE client_id=? AND symbol=? AND status=? AND intent=?""",
                 (detail,cid,SYMBOL,prior,raw)).rowcount
     return repaired
+
+
+def early_exit_diagnostic(broker,seed,entry,fills,snapshot,*,now,complete):
+    """Classify a possible early protective exit without granting ownership.
+
+    Exact price/size/account/type matches are circumstantial, not parent
+    linkage. Never feed the candidate receipt into authorized reductions.
+    """
+    from .gold_v2_episode import reconcile
+    def out(s,**kw):return {"status":s,"execution_effect":"none","attribution_verified":False,**kw}
+    if complete is not True:return out("incomplete_fills")
+    try:
+        v=observe(snapshot,SYMBOL,now)
+        if v["position_state"]!="flat" or v["bracket_state"]!="no_orders_observed":
+            return out("not_flat")
+        if str(entry.get("user_id"))!=str(seed["account_id"]):return out("entry_account_unverified")
+        if entry.get("client_order_id")!=seed["client_id"] or entry.get("id") is None:
+            return out("entry_identity_unverified")
+        if d(entry["bracket_stop_loss_price"])!=d(seed["stop_loss"]) or d(entry["bracket_take_profit_price"])!=d(seed["take_profit"]):
+            return out("entry_bracket_mismatch")
+        ids={str(f["order_id"]) for f in fills if timestamp(f["created_at"])>=seed["flat_observed_at"]}
+        ids.discard(str(entry["id"]))
+        if len(ids)!=1:return out("ambiguous_exit_orders")
+        oid=ids.pop()
+        if not oid.isdigit() or int(oid)<=0:return out("invalid_exit_id")
+        r=broker._request("GET","/v2/orders/"+quote(oid,safe=""),auth=True)
+        kind=r.get("stop_order_type")
+        key={"stop_loss_order":"stop_loss","take_profit_order":"take_profit"}.get(kind)
+        if (key is None or str(r.get("id"))!=oid or str(r.get("user_id"))!=str(seed["account_id"])
+            or r.get("bracket_order") is not True or r.get("stop_trigger_method")!="mark_price"
+            or d(r["stop_price"])!=d(seed[key])):
+            return out("protective_evidence_mismatch")
+        replay=reconcile(seed,entry,fills,[r],snapshot,now=now,complete=complete)
+        if replay["status"]!="closed":return out("fill_chain_unverified")
+        return out("possible_early_protective_exit",protective_kind=kind,
+                   required_evidence="verified_parent_child_link_or_previously_observed_leg")
+    except (KeyError,ValueError,TypeError,ArithmeticError,AttributeError,BrokerError):
+        return out("diagnostic_unavailable")
