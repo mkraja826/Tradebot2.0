@@ -201,3 +201,21 @@ Single runtime ownership, lifecycle reconciliation, existing-position handoff,
 actual bracket protection and live management integration remain pending.
 No CLI or service calls the bridge. Combined simulation is not a live position
 manager. BTC, legacy Gold routing, execution files and server are unchanged.
+
+## Gold V2 position-management adapter (management-adapter.1)
+Pure proposal adapter accepts a current XAUTUSD position, matching reduce-only
+mark-price bracket legs, trusted original V2 journal/receipt evidence, and
+contiguous completed episode candles. Verifies original fully filled quantity,
+entry price, product, deterministic client ID and supplied position lineage.
+The caller still must verify lineage and first full post-fill bar against
+trusted exchange fills; this adapter does not retrieve that evidence itself.
+It produces at most one existing management-lifecycle-compatible proposal:
+maintain, close on close-based giveback, reduce half on adverse movement,
+tighten stop, or extend target. Stop edits take priority over target edits
+and only one bracket leg changes. The cost-adjusted entry is an approximation.
+No live submission, journal staging, reconciliation worker or service route.
+The current adapter deliberately cannot adopt legacy positions or continue
+after a partial reduction, and cannot execute additions or partial limit exits.
+Existing ManagementExecutor supports reduce-only and single-leg amendments,
+not verified add-and-rebracket execution. These features require further
+ownership and fill-state integration. No runtime changes or BTC changes.
