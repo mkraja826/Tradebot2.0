@@ -105,3 +105,13 @@ class JournalTests(unittest.TestCase):
         for x in stats:
             expected=-50 if x["policy"] in ("partial","partial_and_giveback") else 0
             self.assertAlmostEqual(x["mean_paired_difference_bps"],expected)
+
+    def test_paired_combined_summary(self):
+        self.j.enroll(report())
+        self.now=NOW+300*(HORIZON+1)
+        self.j.resolve(self.bars())
+        stats=self.j.summary()["combined_comparisons"]
+        self.assertEqual(len(stats),6)
+        self.assertTrue(all(x["paired_samples"]==1 for x in stats))
+        for x in stats:
+            self.assertAlmostEqual(x["mean_paired_difference_bps"],-50+0.0025*x["cost_bps"])
