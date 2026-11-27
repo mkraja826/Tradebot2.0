@@ -1,6 +1,7 @@
 """Continuous Gold V2 observation worker, isolated from execution and legacy status.
 
-No order submission, amendments, cancellation, AI calls or legacy journal writes.
+CLI stays shadow-only. Optional injected controller is for integration testing;
+no CLI activation, no AI calls or legacy journal writes by default.
 """
 import argparse
 import fcntl
@@ -23,7 +24,7 @@ from .gold_v2_entry_adapter import prepare,positive
 from .position_preview import observe
 from .lifecycle import pages
 
-VERSION="gold-v2-worker.1"
+VERSION="gold-v2-worker.2"
 SYMBOL="XAUTUSD"
 
 def account_snapshot(broker,expected_account,*,clock=time.time):
@@ -58,7 +59,7 @@ def account_snapshot(broker,expected_account,*,clock=time.time):
 
 class Worker:
     def __init__(self,directory,client,*,broker=None,expected_account=None,allocation_fraction=None,
-                 external=None,public_feeds=None,clock=time.time,scanner=scan,collector=collect):
+                 external=None,public_feeds=None,clock=time.time,scanner=scan,collector=collect,controller=None):
         self.root=Path(directory)
         self.root.mkdir(parents=True,exist_ok=True)
         if (broker is None)!=(expected_account is None):
@@ -69,6 +70,9 @@ class Worker:
         self.client=client;self.broker=broker;self.expected_account=expected_account
         self.allocation=allocation_fraction;self.external=external;self.public_feeds=public_feeds
         self.clock=clock;self.scanner=scanner;self.collector=collector
+        self.controller=controller
+        if controller is not None and (broker is None or controller.broker is not broker or str(expected_account)!=controller.expected):
+            raise ValueError("controller_account_mismatch")
         self.lock=None;self.journal=None
     def open(self):
         if self.lock is not None:raise RuntimeError("already_open")
@@ -97,6 +101,7 @@ class Worker:
         event={"version":VERSION,"symbol":SYMBOL,"mode":"shadow","execution_effect":"none",
                "execution_enabled":False,"ai_calls":0,"errors":{}}
         report=None
+        bars=[]
         try:
             report=self.scanner(self.client,int(self.clock()),external=self.external,
                                 public_feeds=self.public_feeds,clock=self.clock)
@@ -133,6 +138,20 @@ class Worker:
                     # No quantities, balances, account IDs or receipts in public status.
                     event["entry_preview"]={"status":proposal["status"]}
             except Exception as exc:event["errors"]["account_read"]=type(exc).__name__
+        if self.controller is not None:
+            try:
+                result=self.controller.cycle(report if report is not None else {"symbol":SYMBOL,"status":"scan_error"},bars)
+                event["controller"]={k:result.get(k) for k in ("status","execution_status","management_status","attempted")}
+                event["execution_enabled"]=self.controller.enabled
+                event["mode"]="demo_controller" if self.controller.enabled else "shadow"
+                if self.controller.enabled:event["execution_effect"]="demo_dispatch_possible_not_fill_confirmation"
+            except Exception as exc:
+                event["errors"]["controller"]=type(exc).__name__
+                # A failure after dispatch cannot be described as no execution.
+                if self.controller.enabled:
+                    event["execution_enabled"]=True
+                    event["mode"]="demo_controller"
+                    event["execution_effect"]="unknown_requires_reconciliation"
         event["status"]="degraded" if event["errors"] else "observing"
         event["timestamp"]=int(self.clock())
         event["cycle_ms"]=round((time.monotonic()-started)*1000)
