@@ -111,3 +111,42 @@ class EpisodeTests(unittest.TestCase):
         self.assertEqual(x["proposal"]["action"],"reduce")
         self.assertEqual(x["proposal"]["contracts"],2)
         self.assertIn("partial profit",x["proposal"]["reason"])
+
+
+    def test_terminal_entry_journal_recovery(self):
+        from recover_trading.engine import Journal
+        from recover_trading.execution import BracketIntent
+        from recover_trading.gold_v2_recovery import synchronize_terminal_entries
+        seed,receipt,fills,reductions,snapshot=fixture(closed=True)
+        seed["account_id"]="123"
+        with TemporaryDirectory() as temp:
+            ep=EpisodeJournal(Path(temp)/"episodes.sqlite")
+            orders=Journal(Path(temp)/"orders.sqlite")
+            try:
+                cid=ep.reserve(seed)
+                orders.begin(cid,"XAUTUSD",BracketIntent(42,"buy",4,20,20,100,98,106))
+                orders.finish(cid,"unknown",{"error":"timeout"})
+                ep.record(cid,receipt,fills,reductions,snapshot,now=NOW,complete=True)
+                self.assertEqual(synchronize_terminal_entries(orders,ep,"456"),0)
+                self.assertEqual(orders.unresolved(),[cid])
+                self.assertEqual(synchronize_terminal_entries(orders,ep,"123"),1)
+                self.assertEqual(orders.unresolved(),[])
+                self.assertEqual(synchronize_terminal_entries(orders,ep,"123"),0)
+            finally:orders.close();ep.close()
+
+    def test_terminal_recovery_rejects_wrong_intent(self):
+        from recover_trading.engine import Journal
+        from recover_trading.execution import BracketIntent
+        from recover_trading.gold_v2_recovery import synchronize_terminal_entries
+        seed,receipt,fills,reductions,snapshot=fixture(closed=True)
+        seed["account_id"]="123"
+        with TemporaryDirectory() as temp:
+            ep=EpisodeJournal(Path(temp)/"episodes.sqlite")
+            orders=Journal(Path(temp)/"orders.sqlite")
+            try:
+                cid=ep.reserve(seed)
+                orders.begin(cid,"XAUTUSD",BracketIntent(42,"buy",5,20,20,100,98,106))
+                ep.record(cid,receipt,fills,reductions,snapshot,now=NOW,complete=True)
+                self.assertEqual(synchronize_terminal_entries(orders,ep,"123"),0)
+                self.assertEqual(orders.unresolved(),[cid])
+            finally:orders.close();ep.close()
