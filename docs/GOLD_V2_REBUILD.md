@@ -241,3 +241,24 @@ is wired yet. The caller must establish complete fill pagination, authentic
 authorized reduction receipts and flat anchor; these are not guaranteed by
 the pure adapter. Position additions, partial limit placement and automatic
 bracket repair remain separate pending work. No deployment or exchange writes.
+
+## Continuous shadow worker (worker.1)
+A standalone Linux worker connects market scans, optional cached public feeds,
+prospective enrollment, outcome resolution and compact status publication.
+Resolution continues independently when the current scan fails. A local
+flock prevents two workers sharing the same data directory. SQLite persists
+observations across restarts; status is atomically replaced in a dedicated
+gold_v2_status.json sidecar. It does not overwrite legacy status.json,
+market history, order journals or dashboard files.
+Optional authenticated demo reads verify the configured Gold wallet ID and
+distinct BTC/Gold credentials. They report position/bracket state and optional
+entry-plan availability, not wallet balances, account IDs or raw receipts.
+The worker has no execute flag, no order mutation path and no AI calls.
+Example from an isolated checkout (not an instruction to replace the service):
+    python3 -m recover_trading.gold_v2_worker --data-dir ./data/gold-v2-shadow --once --fundamentals --public-feeds
+Omit --once for recurring observation; default interval 60 seconds. No service
+installation is performed. Existing dashboard does not yet consume this
+sidecar. Trusted episode evidence acquisition, management staging, single
+execution ownership, account-bound entry reservation, additions, partial exits
+and legacy routing replacement remain pending. Test execution and live feed
+availability require verification before deployment.
