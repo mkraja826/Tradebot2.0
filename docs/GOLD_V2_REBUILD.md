@@ -386,3 +386,20 @@ not yet a production-signal/demo-execution hybrid. A separate prospective
 study, quote basis and mark/stop geometry, management price provenance,
 and actual demo execution compatibility must be verified before routing.
 No changes to the running workers.
+
+## Hybrid price compatibility research (hybrid.1)
+The pure preview translates reference ATR / reference candle close to a
+fractional volatility measure, then multiplies by the current demo-side
+bid/ask entry reference. It records mark and book basis in bps, both
+spreads and quote timestamps. Quotes must be individually no older than
+30 seconds and paired within five seconds; these are provisional evidence
+matching tolerances, not a calibrated profitability policy. It preserves
+the reference signal provenance, emits hypothetical tick-rounded SL/TP
+levels and checks mark geometry. No basis acceptance threshold is
+calibrated, and a large basis is explicitly reported, not silently
+treated as equivalent prices. No executable proposal, sizing, account
+read or order is produced. This module is not yet integrated into the
+worker, management adapter or a persistent prospective hybrid journal.
+Reference range anomalies remain unresolved. Next: separate prospective
+hybrid validation with observed demo execution-price evidence and a live
+quote-pair compatibility probe.
