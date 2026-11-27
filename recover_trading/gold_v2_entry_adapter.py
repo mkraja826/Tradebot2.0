@@ -6,6 +6,7 @@ into a service or CLI until position ownership and management are verified.
 from decimal import Decimal, ROUND_FLOOR, ROUND_CEILING
 from hashlib import sha256
 from math import isfinite
+import time
 from .broker import DeltaDemo
 from .entry_quotes import quote_evidence
 from .execution import DemoExecutor
@@ -93,7 +94,7 @@ def plan(report,product,wallet,quote,*,allocation_fraction,now):
             "allocation_fraction_requested":float(fraction),
             "margin_estimate_usd":float(margin),"account_margin_verified":False}
 
-def prepare(broker,report,*,expected_gold_account,allocation_fraction,now):
+def prepare(broker,report,*,expected_gold_account,allocation_fraction,clock=time.time):
     """Read-only broker checks. Expected account must be operator-verified Gold demo ID."""
     expected=str(expected_gold_account)
     if not expected.isdigit() or int(expected)<=0 or int(expected)==26679287:
@@ -115,11 +116,13 @@ def prepare(broker,report,*,expected_gold_account,allocation_fraction,now):
         return {"status":"incomplete_orders","execution_effect":"none"},None
     if any(dec(p["size"])!=0 for p in positions) or page["result"]:
         return {"status":"existing_exposure","execution_effect":"none"},None
-    quote=quote_evidence(broker.ticker(SYMBOL),SYMBOL,pid,int(now*1000000))
+    ticker=broker.ticker(SYMBOL)
+    now=clock()
+    quote=quote_evidence(ticker,SYMBOL,pid,int(now*1000000))
     result=plan(report,product,wallet,quote,allocation_fraction=allocation_fraction,now=now)
     return result,{"product":{"id":pid,"symbol":SYMBOL},"decision_quote":quote}
 
-def submit_prepared(executor,report,*,expected_gold_account,allocation_fraction,now,enabled=False):
+def submit_prepared(executor,report,*,expected_gold_account,allocation_fraction,clock=time.time,enabled=False):
     """Integration bridge only. Not called by any runtime in this increment."""
     if enabled is not True:return {"status":"disabled","execution_effect":"none"}
     if type(executor) is not DemoExecutor or type(executor.broker) is not DeltaDemo:
@@ -128,6 +131,6 @@ def submit_prepared(executor,report,*,expected_gold_account,allocation_fraction,
         return {"status":"unresolved_order","execution_effect":"none"}
     # Recheck immediately before dispatch; caller must ensure single Gold owner.
     result,account=prepare(executor.broker,report,expected_gold_account=expected_gold_account,
-                           allocation_fraction=allocation_fraction,now=now)
+                           allocation_fraction=allocation_fraction,clock=clock)
     if result["status"]!="proposed":return result
     return {"decision":result,"execution":executor.execute(result,account=account)}
