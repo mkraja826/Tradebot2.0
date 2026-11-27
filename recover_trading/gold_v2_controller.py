@@ -16,7 +16,7 @@ from .gold_v2_episode import client_id, timestamp, d
 from .gold_v2_management_adapter import evaluate_episode
 from .position_preview import observe
 from .lifecycle import pages,normalize_fill
-from .gold_v2_recovery import known_brackets,protective_receipts,local_no_submission,verify_no_submission,persist_no_submission,synchronize_terminal_entries
+from .gold_v2_recovery import known_brackets,protective_receipts,local_no_submission,verify_no_submission,persist_no_submission,synchronize_terminal_entries,early_exit_diagnostic
 
 VERSION="gold-v2-controller.2"
 SYMBOL="XAUTUSD"
@@ -106,6 +106,8 @@ class Controller:
                 if entry_receipt is not None:
                     state=self.episodes.record(cid,entry_receipt,fills,reductions,snapshot,now=int(self.clock()),complete=complete)
                     response["post_entry_observation"]=state["status"]
+                    if state["status"]=="unattributed_fill":
+                        response["early_exit_diagnostic"]=early_exit_diagnostic(self.broker,seed,entry_receipt,fills,snapshot,now=int(self.clock()),complete=complete)
             except Exception as exc:
                 response["post_entry_observation"]="observation_failed"
                 response["observation_error"]=type(exc).__name__
@@ -163,6 +165,8 @@ class Controller:
             with self.orders.db:
                 self.orders.db.execute("UPDATE orders SET status='acknowledged',detail=? WHERE client_id=? AND symbol=? AND status IN ('submitting','unknown')",
                     (json.dumps(receipt,allow_nan=False),seed["client_id"],SYMBOL))
+        if state["status"]=="unattributed_fill":
+            return status(state["status"],early_exit_diagnostic=early_exit_diagnostic(self.broker,seed,receipt,fills,snapshot,now=now,complete=complete))
         if state["status"]!="owned_open":return status(state["status"])
         first=state["first_full_bar_close"]
         bars=[b for b in history if b.ts>=first]
