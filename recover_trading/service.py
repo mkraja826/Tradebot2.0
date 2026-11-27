@@ -45,10 +45,14 @@ def emit(event):
 class MarketService:
     def __init__(self, symbol, directory, *, model="", provider=None, broker=None,
                  scan=scan_once, output=emit, manage_demo=False, learning_journal=None,
-                 management_model=None, research_context=False, lr_v4b_events=None, lr_v4b_demo=False, lr_v4b_local=False, btc_runner=False):
+                 management_model=None, research_context=False, lr_v4b_events=None, lr_v4b_demo=False, lr_v4b_local=False, btc_runner=False, gold_runner_id=None):
         if symbol not in PREFIX:
             raise ValueError("Unsupported market")
         self.btc_runner = btc_runner and symbol == 'BTCUSD'
+        self.gold_runner_id = gold_runner_id if symbol == "XAUTUSD" else None
+        self.local_runner = self.btc_runner or self.gold_runner_id is not None
+        if self.gold_runner_id is not None and (broker is None or not str(self.gold_runner_id).isdigit() or int(self.gold_runner_id) <= 0 or int(self.gold_runner_id) == 26679287):
+            raise ValueError("Invalid Gold demo runner account")
         if self.btc_runner and (broker is None or lr_v4b_demo):
             raise ValueError('BTC runner requires demo execution and exclusive entry routing')
         self.symbol = symbol
@@ -69,7 +73,7 @@ class MarketService:
             raise ValueError("local sizing requires LR-V4-B demo mode")
         self.lr_controller=None
         self.management_executor=None
-        if broker is not None and not self.btc_runner and (provider is None or not model):
+        if broker is not None and not self.local_runner and (provider is None or not model):
             raise ValueError("Execution requires configured AI")
         self.decisions = self.orders = self.executor = self.lifecycle = self.repair = self.management = None
 
@@ -115,7 +119,7 @@ class MarketService:
         if self.manage_demo and self.management_executor is not None:
             try:management_reconciliation=self.management_executor.reconcile_pending(self.symbol)
             except Exception as exc:management_reconciliation={"status":"reconciliation_error","error":type(exc).__name__,"execution_effect":"none"}
-        repair = self.repair.cycle(self.symbol,lifecycle) if self.repair is not None and not self.btc_runner else None
+        repair = self.repair.cycle(self.symbol,lifecycle) if self.repair is not None and not self.local_runner else None
         lifecycle_ms=round((time.monotonic()-started)*1000)
         scan_started=time.monotonic()
         report = self.scan(self.directory / "market.sqlite", symbols=(self.symbol,),
@@ -165,7 +169,7 @@ class MarketService:
             except Exception as exc:
                 lr_owns_cycle=True
                 lr_managed={"status":"lr_routing_error","error":type(exc).__name__,"attempted":False}
-        if not self.btc_runner and not lr_owns_cycle and self.management is not None and report.get("status")!="scan_error":
+        if not self.local_runner and not lr_owns_cycle and self.management is not None and report.get("status")!="scan_error":
             try:management=self.management.capture(report,lifecycle,self.management_model,lambda s:product_for(self.broker,s),excursion=excursion)
             except Exception as exc:management={"status":"capture_error","error":type(exc).__name__,"execution_effect":"none"}
         managed={"status":"execution_disabled" if not self.manage_demo else "awaiting_next_sample","enabled":self.manage_demo,"attempted":False}
@@ -190,9 +194,9 @@ class MarketService:
             result = {"status": "scan_error", "reason": report.get("reason")}
         elif self.executor is None:
             result = {"status": "preview", "signals": report["signals"], "ai_calls": 0}
-        elif self.btc_runner:
+        elif self.local_runner:
             from .btc_scanner_runner import cycle as runner_cycle
-            result = {"status": runner_cycle(self.broker, self.orders.db, report), "ai_calls": 0}
+            result = {"status": runner_cycle(self.broker, self.orders.db, report, gold_id=self.gold_runner_id), "ai_calls": 0}
         elif lr_owns_cycle:
             result={"status":"lr_v4b_management_cycle","ai_calls":0}
         elif self.manage_demo and (managed.get("attempted") or lifecycle.get("positions") or "positions" not in lifecycle):
@@ -225,7 +229,7 @@ class MarketService:
                  "management_execution": managed,
                  "research_context_enabled": self.research_context,
                  "lr_v4b_shadow": lr_v4b,
-                 "btc_runner_enabled":self.btc_runner,
+                 "btc_runner_enabled":self.btc_runner, "gold_runner_enabled":self.gold_runner_id is not None,
                  "lr_v4b_demo_enabled":self.lr_v4b_demo,
                  "lr_v4b_local_sizing":self.lr_v4b_local,
                  "lr_v4b_owns_cycle":lr_owns_cycle,
@@ -272,7 +276,10 @@ def main():
     parser.add_argument("--management-model", default=os.environ.get("RECOVER_MANAGEMENT_MODEL") or DEFAULT_MANAGEMENT_MODEL,
                         help="Position-management model, shared by both demo workers when enabled")
     parser.add_argument("--btc-scanner-runner", action="store_true", help="Use deterministic BTC demo entry and trailing stop")
+    parser.add_argument("--gold-scanner-account", type=int, help="Enable local XAUTUSD trading on this Gold demo subaccount")
     args = parser.parse_args()
+    if args.gold_scanner_account is not None and not args.execute_demo:
+        parser.error("Gold runner requires --execute-demo")
     if args.btc_scanner_runner and (not args.execute_demo or args.lr_v4b_demo):
         parser.error("BTC runner requires --execute-demo and exclusive BTC routing")
     if args.research_context and not args.learning_journal:parser.error("--research-context requires --learning-journal")
@@ -285,7 +292,7 @@ def main():
     models = configured_models()
     accounts = {}
     if args.execute_demo:
-        ai_symbols = [s for s in symbols if not (args.btc_scanner_runner and s == "BTCUSD")]
+        ai_symbols = [s for s in symbols if not ((args.btc_scanner_runner and s == "BTCUSD") or (args.gold_scanner_account is not None and s == "XAUTUSD"))]
         if ai_symbols and (not os.environ.get("TB_API_KEY") or any(not models[s] for s in ai_symbols)):
             parser.error("Configure TB_API_KEY and selected market models")
         try:
@@ -303,9 +310,9 @@ def main():
             emit(event)
     services = [MarketService(s, args.data_dir, model=models[s],
                               broker=DeltaDemo(*accounts[s]) if args.execute_demo else None,
-                              provider=Provider() if args.execute_demo and not (args.btc_scanner_runner and s == "BTCUSD") else None,
+                              provider=Provider() if args.execute_demo and not ((args.btc_scanner_runner and s == "BTCUSD") or (args.gold_scanner_account is not None and s == "XAUTUSD")) else None,
                               output=output,manage_demo=args.manage_demo,learning_journal=args.learning_journal,
-                              management_model=args.management_model if args.manage_demo else None,research_context=args.research_context,lr_v4b_events=args.lr_v4b_events,lr_v4b_demo=args.lr_v4b_demo,lr_v4b_local=args.lr_v4b_local_sizing,btc_runner=args.btc_scanner_runner) for s in symbols]
+                              management_model=args.management_model if args.manage_demo else None,research_context=args.research_context,lr_v4b_events=args.lr_v4b_events,lr_v4b_demo=args.lr_v4b_demo,lr_v4b_local=args.lr_v4b_local_sizing,btc_runner=args.btc_scanner_runner,gold_runner_id=args.gold_scanner_account) for s in symbols]
     failures = []
     def worker(service):
         try:
