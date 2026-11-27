@@ -44,7 +44,7 @@ Its activation_ready is deliberately false in this increment.
 
 ## Stage C — future authorized execution replacement (not available yet)
 
-Prerequisites: finish execution CLI and exclusive account ownership,
+Prerequisites: verify the newly written execution CLI and exclusive account ownership,
 early protective closure attribution, ambiguous submission recovery,
 complete position management and exchange integration verification.
 Position additions cannot be dispatched until continuous bracket coverage
@@ -55,7 +55,7 @@ Gold-only unit and stop only the verified legacy Gold writer at the agreed
 flat handoff. Re-observe account identity, flat state, orders and outstanding
 journals after stopping it. Keep old journals read-only, start the new owner
 with the approved allocation and verify its status. Do not alter BTC.
-No commands for execution activation are included in this revision.
+A separate review-only unit template now exists at deploy/systemd/recover-gold-v2-demo.service.example. Do not install or activate it yet.
 
 ## Rollback
 
@@ -67,3 +67,19 @@ after verified flat state, no residual orders, no unresolved mutations and
 exclusive ownership. Restore the exact previous Gold-only unit/commit and
 configuration, preserving the newest journals and fills (never overwrite
 post-cutover evidence with an old backup). BTC must remain unchanged.
+
+## Dedicated runtime (runtime.1)
+The separate Gold V2 runtime uses an explicit preflight or demo-execution mode,
+requires operator-supplied distinct Gold/BTC/main account IDs and Gold capital
+allocation, and reads both configured demo wallet identities (no BTC writes).
+The main account ID is operator-supplied, not verified by a main-account login.
+It binds fresh dedicated SQLite journals to the verified account and refuses
+unbound nonempty journals. A per-account local flock excludes cooperating V2
+processes only; it cannot exclude legacy services or another VM. A new runtime
+cannot adopt an unowned position. Restart can recover one reserved V2 episode.
+Preflight may initialize local journals and lock files; it never submits orders.
+The execution template is not installed or enabled, and the original
+shadow CLI still cannot dispatch. The execution runtime has no verified live
+exchange integration, early protective closure attribution remains incomplete,
+and position additions remain preview/verification only. The readiness checker
+therefore still returns activation_ready=false. No server deployment occurred.
