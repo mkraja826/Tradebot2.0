@@ -99,3 +99,15 @@ class EpisodeTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     j.record(cid,*a[1:],now=NOW+1,complete=True)
             finally:j.close()
+
+    def test_partial_profit_proposal(self):
+        seed,receipt,fills,reductions,snapshot=fixture()
+        snapshot["positions"][0]["mark_price"]=103.5
+        report={"symbol":"XAUTUSD","status":"observed","as_of":B+900,"decision_as_of":NOW-1,
+                "features":{300:{"atr":1,"ema":[101,101,101,101]}}}
+        bars=[Bar(B+600,101,102.5,100.5,102,1),Bar(B+900,102,104,101.5,103.5,1)]
+        x=evaluate_episode(report,snapshot,{"symbol":"XAUTUSD","id":42,"tick_size":"0.1"},
+                           seed,receipt,fills,reductions,now=NOW,history=bars,complete=True)
+        self.assertEqual(x["proposal"]["action"],"reduce")
+        self.assertEqual(x["proposal"]["contracts"],2)
+        self.assertIn("partial profit",x["proposal"]["reason"])
