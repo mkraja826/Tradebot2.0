@@ -6,7 +6,7 @@ execution ownership, operator-verified demo account and dedicated journals.
 import json
 import time
 from hashlib import sha256
-from .broker import DeltaDemo,DEMO_API
+from .broker import DeltaDemo,DEMO_API,BrokerError
 from .execution import DemoExecutor
 from .management_executor import ManagementExecutor
 from .management_shadow import ManagementShadow
@@ -16,10 +16,11 @@ from .gold_v2_episode import client_id, timestamp, d
 from .gold_v2_management_adapter import evaluate_episode
 from .position_preview import observe
 from .lifecycle import pages,normalize_fill
+from .gold_v2_recovery import known_brackets,protective_receipts,local_no_submission,verify_no_submission,persist_no_submission
 
-VERSION="gold-v2-controller.1"
+VERSION="gold-v2-controller.2"
 SYMBOL="XAUTUSD"
-TERMINAL=("closed","terminal_no_fill")
+TERMINAL=("closed","terminal_no_fill","terminal_no_submission")
 
 def status(name,**kwargs):
     return {"version":VERSION,"symbol":SYMBOL,"status":name,**kwargs}
@@ -103,20 +104,32 @@ class Controller:
         pid=seed["product_id"];product=self.broker.product(SYMBOL)
         if product.get("symbol")!=SYMBOL or product.get("id")!=pid:
             raise ValueError("episode_product_mismatch")
-        receipt=self.broker.order(seed["client_id"])
+        try:
+            receipt=self.broker.order(seed["client_id"])
+        except BrokerError as exc:
+            if exc.exchange_code!="order_not_found":raise
+            raw,complete=pages(self.broker.fills_page,pid)
+            fills=[normalize_fill(f)[1] for f in raw]
+            snapshot=self.manager.reader.observe(SYMBOL,pid)
+            now=int(self.clock())
+            recovered=verify_no_submission(seed,fills,snapshot,now=now,complete=complete,
+                local_reason=local_no_submission(self.orders,seed),error=exc)
+            if recovered is not None:
+                persist_no_submission(self.episodes,seed,recovered,now=now)
+            return product,None,[],[],snapshot,complete
         raw,complete=pages(self.broker.fills_page,pid)
         fills=[normalize_fill(f)[1] for f in raw]
-        # Only attributable management reductions; bracket-triggered closures
-        # require independently verified protective-order receipts, not guesses.
+        # Include only attributable management reductions and previously verified bracket legs.
         reductions=[]
         for (detail,) in self.orders.db.execute("""SELECT a.detail FROM management_attempts a
             JOIN management_shadow s ON s.id=a.proposal_id
             WHERE a.symbol=? AND a.action IN ('reduce','close') AND a.status='verified'
-            AND s.model=? AND a.created>=?""",(SYMBOL,VERSION,int(seed["flat_observed_at"]))):
+            AND s.model IN (?,?) AND a.created>=?""",(SYMBOL,"gold-v2-controller.1",VERSION,int(seed["flat_observed_at"]))):
             item=json.loads(detail)
             r=self.broker.order(item["client_id"])
             if r.get("client_order_id")!=item["client_id"]:raise ValueError("reduction_identity_mismatch")
             reductions.append(r)
+        reductions.extend(protective_receipts(self.broker,seed,fills,receipt,reductions,known_brackets(self.episodes,seed)))
         snapshot=self.manager.reader.observe(SYMBOL,pid)
         return product,receipt,fills,reductions,snapshot,complete
     def manage_cycle(self,report,history,seed):
@@ -126,8 +139,15 @@ class Controller:
         self.manager.reconcile_pending(SYMBOL)
         if self.pending_management():return status("unresolved_management")
         product,receipt,fills,reductions,snapshot,complete=self.collect(seed)
+        if receipt is None:
+            return status("entry_receipt_missing_recovery_checked")
         now=int(self.clock())
         state=self.episodes.record(seed["client_id"],receipt,fills,reductions,snapshot,now=now,complete=complete)
+        if state["status"] in ("owned_open","closed","terminal_no_fill"):
+            # Reconcile only the exact reserved client ID after verified episode replay.
+            with self.orders.db:
+                self.orders.db.execute("UPDATE orders SET status='acknowledged',detail=? WHERE client_id=? AND symbol=? AND status IN ('submitting','unknown')",
+                    (json.dumps(receipt,allow_nan=False),seed["client_id"],SYMBOL))
         if state["status"]!="owned_open":return status(state["status"])
         first=state["first_full_bar_close"]
         bars=[b for b in history if b.ts>=first]
