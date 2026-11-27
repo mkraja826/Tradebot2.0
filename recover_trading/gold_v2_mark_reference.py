@@ -43,5 +43,10 @@ def probe():
     now=int(time.time());r=ReferenceClient();d=public_client()
     p=research(lambda params:r.get("/v2/history/candles",params),now,source="production_mark")
     q=research(lambda params:d._request("GET","/v2/history/candles",params=params)["result"],now,source="demo_mark")
-    return {k:{a:b for a,b in v.items() if a!="report"} for k,v in (("production",p),("demo",q))}
+    from .gold_v2_mark_aggregation import probe as audit_aggregation
+    out={k:{a:b for a,b in v.items() if a!="report"} for k,v in (("production",p),("demo",q))}
+    out["aggregation_audit"]={
+        "production":audit_aggregation(lambda params:r.get("/v2/history/candles",params),now),
+        "demo":audit_aggregation(lambda params:d._request("GET","/v2/history/candles",params=params)["result"],now)}
+    return out
 if __name__=="__main__":print(json.dumps(probe(),indent=2,allow_nan=False))
