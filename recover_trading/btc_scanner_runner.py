@@ -4,6 +4,7 @@ import time
 from decimal import Decimal as D, ROUND_CEILING, ROUND_FLOOR
 
 from .btc_scanner_runner_rules import entry_plan
+from .broker import BrokerError
 from .entry_quotes import quote_evidence
 
 
@@ -41,6 +42,58 @@ def volatility_stop(db, cid, side, fill, current, frame, tick, *, gold):
     return max(current, candidate) if long else min(current, candidate)
 
 
+def reconcile_missing_btc_entry(broker, db, pid, cid, created):
+    """Resolve an old reservation only when history and current exposure agree."""
+    end = time.time_ns() // 1000
+    if end - created * 1_000_000 < 300_000_000:
+        return "awaiting_entry_sync"
+    order_ids = set()
+    matched = None
+    for path in ("/v2/orders/history", "/v2/fills"):
+        params = dict(product_ids=str(pid), start_time=(created - 60) * 1_000_000,
+                      end_time=end, page_size=100)
+        cursors = set()
+        while True:
+            page = broker._request("GET", path, params=params, auth=True, envelope=True)
+            if not isinstance(page.get("result"), list) or not isinstance(page.get("meta"), dict):
+                return "entry_history_incomplete"
+            for row in page["result"]:
+                if str(row.get("product_id")) != str(pid):
+                    return "entry_history_incomplete"
+                if path == "/v2/orders/history":
+                    if row.get("id") is None or row.get("state") not in ("closed", "cancelled"):
+                        return "entry_history_incomplete"
+                    order_ids.add(str(row["id"]))
+                    if row.get("client_order_id") == cid:
+                        matched = row
+                elif str(row.get("order_id")) not in order_ids:
+                    return "entry_fill_unreconciled"
+            cursor = page["meta"].get("after")
+            if not cursor:
+                break
+            if cursor in cursors:
+                return "entry_history_incomplete"
+            cursors.add(cursor)
+            params["after"] = cursor
+    positions = broker.positions(pid)
+    if isinstance(positions, dict):
+        positions = [positions]
+    active = broker.active_orders_page(pid)
+    if any(D(str(p["size"])) != 0 for p in positions) or active["result"] or active["meta"].get("after"):
+        return "inspect_position_protection"
+    with db:
+        db.execute("""CREATE TABLE IF NOT EXISTS btc_reservation_reconciliation
+                      (client_id TEXT PRIMARY KEY, checked_us INTEGER, outcome TEXT, order_id TEXT)""")
+        changed = db.execute("""UPDATE btc_runner_entries SET state='done'
+                                WHERE client_id=? AND state='reserved' AND created=?""",
+                             (cid, created)).rowcount
+        if changed:
+            db.execute("INSERT INTO btc_reservation_reconciliation VALUES (?,?,?,?)",
+                       (cid, end, matched["state"] if matched else "absent_from_history",
+                        str(matched["id"]) if matched else None))
+    return "flat_reconciled"
+
+
 def cycle(broker, db, report, *, gold_id=None):
     symbol = "BTCUSD" if gold_id is None else "XAUTUSD"
     account_id = "26679287" if gold_id is None else str(gold_id)
@@ -76,7 +129,13 @@ def cycle(broker, db, report, *, gold_id=None):
     latest = db.execute(f"SELECT client_id,side,stop,created,state FROM {table} WHERE state!='done' ORDER BY created DESC LIMIT 1").fetchone()
     if latest:
         cid, side, initial, created, state = latest
-        receipt = broker.order(cid)
+        try:
+            receipt = broker.order(cid)
+        except BrokerError as exc:
+            if (gold_id is not None or state != "reserved" or positions or orders
+                    or exc.exchange_code != "order_not_found" or exc.http_status not in (400, 404)):
+                raise
+            return reconcile_missing_btc_entry(broker, db, pid, cid, created)
         if receipt.get("client_order_id") != cid or receipt.get("product_id") != pid:
             return "entry_receipt_unverified"
         if receipt.get("state") not in ("closed", "cancelled"):
