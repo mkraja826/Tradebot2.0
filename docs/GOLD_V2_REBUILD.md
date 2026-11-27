@@ -162,3 +162,24 @@ seed is approximate as in stop.1. Costs are proportional to individual fill
 notional, so the fixed comparison is specific to this simulator.
 Only validation.5 enrollments get combined comparisons; older cohorts remain
 unchanged. Results are hypothetical; no broker mutations or deployment.
+
+## Adaptive learning (learning.1)
+Read-only chronological report over validation.5 combined-management outcomes.
+Explicit UTC epoch cutoff and as-of are required. Training uses only windows
+resolved strictly before cutoff; evaluation uses later signal windows resolved
+by as-of. Windows straddling the cutoff are excluded. Cohorts separate engine,
+scoring and combined versions, strategy family, direction and regime.
+All policies must have observed outcomes at 15 and 30 bps on the same window
+for a matched comparison. Report exclusions; complete-case selection may bias
+the sample. Training selects one policy using at least 30 paired observations,
+positive mean return and improvement over fixed at both cost assumptions.
+Only that policy is evaluated on the later set, with at least 20 paired windows.
+These minimums are provisional, not statistical guarantees. Output reports
+mean, median paired difference, positive rate, worst observed return and
+additive normalized-notional drawdown, not actual account equity or liquidation.
+No parameter updates, automatic promotion or broker writes. Repeatedly moving
+the cutoff can contaminate holdout evidence; freeze it before a future study.
+The current report compares management variants only; learning entry weights,
+indicator ablation, risk-matched exposure and true prospective frozen-policy
+deployment remain pending.
+    python3 -m recover_trading.gold_v2_learning --journal gold-v2.sqlite --cutoff EPOCH --as-of EPOCH
