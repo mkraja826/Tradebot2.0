@@ -77,3 +77,20 @@ class ControllerTests(unittest.TestCase):
              patch.object(c.entry,"execute") as submit:
             with self.assertRaises(ValueError):c.entry_cycle(report())
             submit.assert_not_called()
+
+
+    def test_terminal_bar_not_reused(self):
+        from recover_trading.gold_v2_episode import client_id
+        from recover_trading.gold_v2_recovery import persist_no_submission
+        c=self.controller(True)
+        cid=client_id(3600000)
+        seed={"symbol":"XAUTUSD","client_id":cid,"signal_boundary":3600000,"flat_verified":True}
+        self.episodes.reserve(seed)
+        persist_no_submission(self.episodes,seed,{"status":"terminal_no_submission"},now=NOW)
+        decision={"status":"proposed","proposal":{"side":"buy","size":4,"stop_loss":98,"take_profit":106}}
+        account={"product":{"id":42,"symbol":"XAUTUSD"}}
+        with patch("recover_trading.gold_v2_controller.verify_account",return_value="123"), \
+             patch("recover_trading.gold_v2_controller.prepare",return_value=(decision,account)), \
+             patch.object(c.entry,"execute") as submit:
+            self.assertEqual(c.entry_cycle(report())["status"],"entry_bar_already_reserved")
+            submit.assert_not_called()
