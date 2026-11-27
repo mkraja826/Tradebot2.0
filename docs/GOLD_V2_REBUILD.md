@@ -219,3 +219,25 @@ after a partial reduction, and cannot execute additions or partial limit exits.
 Existing ManagementExecutor supports reduce-only and single-leg amendments,
 not verified add-and-rebracket execution. These features require further
 ownership and fill-state integration. No runtime changes or BTC changes.
+
+## Position lifecycle (lifecycle.1, management-adapter.2)
+Append-only SQLite episode observations preserve a reserved flat-account entry
+anchor, terminal entry receipt and full post-anchor fill evidence. Deterministic
+client ID, product, side, fill IDs, strict timestamps, cumulative signed
+quantity, weighted entry price, authorized terminal reduce-only receipts and
+current position/bracket coverage must agree. Canceled partial entry fills
+and subsequent verified reductions can retain ownership. Closure requires
+flat position and complete empty order observation. Unattributed fills,
+ambiguous timestamps, missing coverage and stale observations are not treated
+as verified. Journal rejects conflicting reservations, backward observations
+and reopening terminal episodes; detects stop loosening between verified
+observations. The new management evaluate_episode path reconciles the supplied
+evidence and supports continued proposals after reduction, with no second
+adverse reduction and no entry-only breakeven approximation after reduction.
+Exact weighted price matching is conservative and may reject exchange-rounded
+averages. No trusted exchange evidence collector, account binding, atomic
+pre-submit reservation, management proposal staging or service integration
+is wired yet. The caller must establish complete fill pagination, authentic
+authorized reduction receipts and flat anchor; these are not guaranteed by
+the pure adapter. Position additions, partial limit placement and automatic
+bracket repair remain separate pending work. No deployment or exchange writes.
