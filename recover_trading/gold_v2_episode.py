@@ -68,7 +68,7 @@ def reconcile(seed,receipt,fills,reductions,snapshot,*,now,complete):
                 or r.get("reduce_only") is not True or r.get("state") not in ("closed","cancelled","canceled")):
                 return out("reduction_receipt_unverified")
             q,left=d(r["size"]),d(r["unfilled_size"])
-            if not 0<=left<=q or (r["state"]=="closed" and left!=0):return out("reduction_receipt_unverified")
+            if q<=0 or q!=int(q) or not 0<=left<=q or (r["state"]=="closed" and left!=0):return out("reduction_receipt_unverified")
             allowed[rid]=q-left;totals[rid]=Decimal(0)
         rows=[];seen=set()
         for f in fills:
@@ -94,6 +94,8 @@ def reconcile(seed,receipt,fills,reductions,snapshot,*,now,complete):
             if d(f["new_position"]["size"])!=quantity:return out("fill_chain_mismatch")
         if filled!=entry_qty or totals!=allowed:return out("fill_quantity_unverified")
         v=observe(snapshot,SYMBOL,now)
+        if rows and (type(v.get("observed")) is not int or v["observed"]<rows[-1][0]):
+            return out("snapshot_precedes_fill")
         if v["position_state"] not in ("flat","long","short") or d(v["size"])!=quantity:
             return out("position_mismatch")
         if quantity==0:
@@ -161,5 +163,16 @@ class EpisodeJournal:
             if old and json.loads(old[2])["status"] in ("closed","terminal_no_fill"):
                 raise ValueError("terminal_episode")
             result=reconcile(json.loads(row[0]),receipt,fills,reductions,snapshot,now=now,complete=complete)
+            if result["status"]=="owned_open":
+                prior=self.db.execute("SELECT result FROM gold_v2_episode_observations WHERE client_id=? ORDER BY observed_at DESC",(cid,)).fetchall()
+                for (raw,) in prior:
+                    previous=json.loads(raw)
+                    if previous["status"]!="owned_open":continue
+                    current_stop=next(d(l["trigger"]) for l in result["view"]["legs"] if l["type"]=="stop_loss_order")
+                    prior_stop=next(d(l["trigger"]) for l in previous["view"]["legs"] if l["type"]=="stop_loss_order")
+                    sign=1 if result["size"]>0 else -1
+                    if sign*(current_stop-prior_stop)<0:
+                        result={"version":VERSION,"symbol":SYMBOL,"status":"stop_loosened_since_verified_observation","execution_effect":"none"}
+                    break
             self.db.execute("INSERT INTO gold_v2_episode_observations VALUES (?,?,?,?)",(cid,now,evidence,encode(result)))
         return result
