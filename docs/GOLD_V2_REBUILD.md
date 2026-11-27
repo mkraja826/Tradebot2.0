@@ -262,3 +262,31 @@ sidecar. Trusted episode evidence acquisition, management staging, single
 execution ownership, account-bound entry reservation, additions, partial exits
 and legacy routing replacement remain pending. Test execution and live feed
 availability require verification before deployment.
+
+## Autonomous execution connection (controller.1, worker.2)
+The optional injected controller calls the existing DeltaDemo/DemoExecutor
+and ManagementExecutor. Disabled unless explicitly enabled by a caller.
+The command-line worker still has no execution activation flag. Before entry
+dispatch it verifies the configured Gold account, checks unresolved episodes,
+orders and management attempts, then durably reserves an account-bound episode
+seed. A crash between reservation and order submission requires reconciliation;
+the controller never blindly resubmits. An acknowledged order is not proof of
+a fill. For owned episodes it collects entry receipt, paginated normalized
+fills, verified deterministic management reduction receipts and fresh position/
+bracket snapshots. It journals reconciliation, evaluates a single management
+proposal, stages it in the existing management_shadow schema and delegates
+to the existing single-leg/reduce-only management executor. Proposal IDs and
+five-minute buckets are deterministic; no legacy proposal is overwritten.
+The worker reports controller status only, with no account IDs or raw receipts.
+IMPORTANT unresolved requirements: exchange-triggered protective-order
+closure receipts are not yet attributed by this collector. Such a closure may
+leave an episode unresolved. A pre-submission reservation without an exchange
+receipt also requires explicit recovery. The existing complete-page requirement
+can reject large fill histories; the worker's 400-bar history can be insufficient
+for long-held episodes. Account-specific ownership across legacy and new
+processes is not yet enforced by the worker directory lock. Position additions,
+partial limit profit-taking and automatic bracket repair remain unsupported
+in the runtime route. Entry/management settings are not selected by learned
+performance yet. Do not enable or replace the live service until these
+issues, exact deployed revision and full regression tests are addressed.
+No server installation, execution activation or exchange mutation performed.
