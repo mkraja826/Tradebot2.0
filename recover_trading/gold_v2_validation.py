@@ -5,8 +5,9 @@ import time
 from collections import defaultdict, Counter
 from math import isfinite
 from .gold_v2_replay import outcome
+from .gold_v2_scaling import compare as compare_scaling, VERSION as SIZING_VERSION
 
-VERSION="gold-v2-validation.1"
+VERSION="gold-v2-validation.2"
 HORIZON=12
 COSTS=(5,15,30)
 STEP=300
@@ -101,7 +102,10 @@ class Journal:
                     for c in report["candidates"]:
                         scenarios={str(cost):outcome(c,future,as_of=row["entry_boundary"],
                                    horizon=HORIZON,cost_bps=cost) for cost in COSTS}
-                        samples.append({"family":c["family"],"direction":c["direction"],"scenarios":scenarios})
+                        sample={"family":c["family"],"direction":c["direction"],"scenarios":scenarios}
+                        if row["policy_version"]=="gold-v2-validation.2":
+                            sample["sizing"]={str(cost):compare_scaling(c,future,as_of=row["entry_boundary"],horizon=HORIZON,cost_bps=cost) for cost in COSTS}
+                        samples.append(sample)
                     result={"status":"evaluated","candidates":samples}
                 self.db.execute("UPDATE gold_v2_windows SET status='resolved',outcome_json=?,resolved_at=? WHERE signal_boundary=? AND status='enrolled'",
                                 (encode(result),now,row["signal_boundary"]))
@@ -113,6 +117,7 @@ class Journal:
         states=Counter(r["status"] for r in rows)
         groups=defaultdict(list)
         exclusions=Counter()
+        sizing_groups=defaultdict(list)
         observed_windows=0
         for row in rows:
             if row["status"]!="resolved": continue
@@ -125,6 +130,13 @@ class Journal:
             any_valid=False
             for c in result["candidates"]:
                 s=scored.get((c["family"],c["direction"]),{})
+                for cost,packet in c.get("sizing",{}).items():
+                    baseline=packet["results"]["fixed"]
+                    if baseline["status"]!="observed": continue
+                    for policy,variant in packet["results"].items():
+                        if policy=="fixed" or variant["status"]!="observed": continue
+                        key=(evidence.get("version","unknown"),packet["version"],c["family"],c["direction"],cost,policy)
+                        sizing_groups[key].append((baseline["net_bps_initial_notional"],variant["net_bps_initial_notional"],variant["peak_quantity_units"]))
                 for cost,scenario in c["scenarios"].items():
                     if scenario["status"]!="observed":
                         exclusions[cost+":"+scenario["status"]]+=1
@@ -140,7 +152,16 @@ class Journal:
                           "support_index":index,"observed_groups":coverage,"cost_bps":int(cost),
                           "samples":len(v),"mean_net_bps":sum(v)/len(v),
                           "positive_rate":sum(x>0 for x in v)/len(v)})
+        sizing_stats=[]
+        for (engine,version,family,direction,cost,policy),v in sizing_groups.items():
+            sizing_stats.append({"engine_version":engine,"sizing_version":version,"family":family,"direction":direction,
+                "cost_bps":int(cost),"policy":policy,"paired_samples":len(v),
+                "mean_fixed_net_bps_initial_notional":sum(x[0] for x in v)/len(v),
+                "mean_variant_net_bps_initial_notional":sum(x[1] for x in v)/len(v),
+                "mean_paired_difference_bps":sum(x[1]-x[0] for x in v)/len(v),
+                "max_peak_quantity_units":max(x[2] for x in v)})
         return {"version":VERSION,"execution_effect":"none","window_counts":dict(states),
+                "sizing_comparisons":sizing_stats,
                 "observed_nonoverlapping_windows":observed_windows,"target_windows":TARGET,
                 "target_reached":observed_windows>=TARGET,"exclusions":dict(exclusions),
                 "groups":stats,"note":"hypothetical outcomes, correlated same-window candidates; no automatic promotion"}
