@@ -4,8 +4,9 @@ const status = document.getElementById("status");
 const button = document.getElementById("register");
 const tokenField = document.getElementById("token");
 async function post(action, body, token) {
+    if (!["options", "complete"].includes(action)) throw new Error("Invalid enrollment action");
     const response = await fetch("/admin/enroll/" + action, {
-        method: "POST", credentials: "omit", cache: "no-store", redirect: "error",
+        method: "POST", credentials: "same-origin", cache: "no-store", redirect: "error",
         headers: {"Content-Type":"application/json", "Authorization":"Bearer " + token},
         body: JSON.stringify(body)
     });
