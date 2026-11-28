@@ -1,0 +1,2 @@
+# Candidate test dependency; not a production lockfile.
+webauthn==2.5.2
