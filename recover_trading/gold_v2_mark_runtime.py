@@ -22,12 +22,15 @@ VERSION="gold-v2-mark-runtime.1"
 DATA_ROOT=Path("/var/lib/recover-trading/gold-v2-mark-execution")
 
 class Loop:
-    def __init__(self,controller,demo,reference,root,*,clock=time.time):
+    def __init__(self,controller,demo,reference,root,*,clock=time.time,entry_qa=False):
+        self.entry_qa=entry_qa
         self.controller=controller;self.demo=demo;self.reference=reference
         self.root=Path(root);self.clock=clock;self.last_entry_boundary=None
 
     def cycle(self):
         now=int(self.clock());boundary=now//300*300
+        snapshots=[]
+        entry_scan=False
         event={"version":VERSION,"symbol":"XAUTUSD","mode":"demo_mark_execution",
                "execution_enabled":self.controller.enabled,"signal_source":MARK_SOURCE,
                "execution_effect":"demo_dispatch_possible_not_fill_confirmation" if self.controller.enabled else "none",
@@ -46,7 +49,9 @@ class Loop:
             elif boundary==self.last_entry_boundary:
                 result={"status":"entry_boundary_already_observed"}
             else:
-                reference=observe_mark(self.demo,self.reference,now)
+                entry_scan=True
+                capture = {"capture": lambda bars, report: snapshots.append((bars, report))} if self.entry_qa else {}
+                reference=observe_mark(self.demo,self.reference,now,**capture)
                 report=reference["mark_report"]
                 if report["status"]!="observed" or not report.get("candidates"):
                     result={"status":report["status"] if report["status"]!="observed" else "no_candidate"}
@@ -67,6 +72,12 @@ class Loop:
             event["errors"]["cycle"]=type(exc).__name__
             if self.controller.enabled:event["execution_effect"]="unknown_requires_reconciliation"
         event["timestamp"]=int(self.clock())
+        if self.entry_qa and entry_scan:
+            try:
+                from .gold_v2_entry_qa import record
+                record(self.root, boundary, now, event, snapshots[0] if snapshots else None)
+            except Exception as exc:
+                event["errors"]["entry_qa"]=type(exc).__name__
         tmp=self.root/"mark_execution_status.tmp"
         tmp.write_text(json.dumps(event,allow_nan=False),encoding="utf-8")
         tmp.replace(self.root/"mark_execution_status.json")
@@ -84,6 +95,7 @@ def main():
     mode.add_argument("--preflight",action="store_true")
     mode.add_argument("--execute-demo",action="store_true")
     p.add_argument("--legacy-gold-stopped",action="store_true")
+    p.add_argument("--entry-qa",action="store_true",help="Journal entry conditions after each scan")
     p.add_argument("--interval",type=float,default=15)
     args=p.parse_args()
     if not math.isfinite(args.interval) or not 10<=args.interval<=60:p.error("interval must be 10 to 60 seconds")
@@ -105,7 +117,7 @@ def main():
                                       allocation_fraction=allocation,enabled=True)
             stop=threading.Event()
             for sig in (signal.SIGINT,signal.SIGTERM):signal.signal(sig,lambda *_:stop.set())
-            Loop(controller,public_client(),ReferenceClient(),DATA_ROOT).run(stop,args.interval)
+            Loop(controller,public_client(),ReferenceClient(),DATA_ROOT,entry_qa=args.entry_qa).run(stop,args.interval)
             return 0
     except Exception as exc:
         print(json.dumps({"version":VERSION,"status":"runtime_stopped","error":type(exc).__name__,

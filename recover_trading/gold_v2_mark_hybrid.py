@@ -5,7 +5,7 @@ from .gold_v2_mark_model import evaluate_mark
 from .gold_v2_hybrid import MARK_SOURCE
 from concurrent.futures import ThreadPoolExecutor
 
-def observe_mark(demo,reference,stamp):
+def observe_mark(demo,reference,stamp,*,capture=None):
     def ref_reader(params):return reference.get("/v2/history/candles",params)
     def demo_reader(params):return demo._request("GET","/v2/history/candles",params=params)["result"]
     with ThreadPoolExecutor(max_workers=3) as pool:
@@ -16,6 +16,8 @@ def observe_mark(demo,reference,stamp):
         peer,peer_health=b.result()
         fine=c.result()
     report=evaluate_mark(primary,peer,fine,stamp)
+    if capture is not None:
+        capture(primary, report)
     return {"symbol":"XAUTUSD","signal_source":MARK_SOURCE,"as_of":stamp,
             "execution_eligible":False,"mark_report":report,
             "feed_health":health,"peer_feed_health":peer_health}
