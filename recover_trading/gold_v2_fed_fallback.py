@@ -19,14 +19,14 @@ def url(key):
 def parse(raw,key,now):
     rel,_,ident,max_age=SERIES[key]
     today=datetime.fromtimestamp(now,timezone.utc).date()
-    rows=list(csv.reader(io.StringIO(raw)))
+    rows=[[cell.strip() for cell in row] for row in csv.reader(io.StringIO(raw.lstrip("\ufeff")))]
     headers=[(i,r) for i,r in enumerate(rows) if r and r[0]=="Time Period"]
     if len(headers)!=1:raise ValueError("missing_header")
     i,header=headers[0]
     if header.count(ident)!=1:raise ValueError("wrong_series")
     col=header.index(ident)
     # Check the full published identifier, not just the human-readable label.
-    ids=[r for r in rows[:i] if r and r[0]=="Unique Identifier"]
+    ids=[r for r in rows[:i] if r and r[0].rstrip(":").strip()=="Unique Identifier"]
     if len(ids)!=1 or len(ids[0])<=col or ids[0][col]!=rel+"/"+rel+"/"+ident:raise ValueError("wrong_identifier")
     values={}
     for row in rows[i+1:]:
@@ -65,7 +65,7 @@ def parse_preview(raw,key,now):
     headers=[i for i in range(len(p)-2) if p[i:i+3]==["Unique ID","Time Period","Value"]]
     if len(headers)!=1:raise ValueError("missing_preview_header")
     i=headers[0]
-    if full not in p[:i] or "Percent Per Year" not in p[:i]:
+    if full not in p[:i] or not any(unit in p[:i] for unit in ("Percent Per Year","Percent:_Per_Year","Percent: Per Year")):
         raise ValueError("wrong_preview_metadata")
     out=io.StringIO();w=csv.writer(out)
     w.writerow(["Unique Identifier",full]);w.writerow(["Time Period",ident])
