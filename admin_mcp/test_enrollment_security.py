@@ -13,7 +13,7 @@ class EnrollmentSecurity(unittest.TestCase):
         sessions.initialize(self.db)
         binding.initialize(self.db)
         self.policy = {"rp_id":"tradingbot.micirql.com","origin":"https://tradingbot.micirql.com","operators":["alice","bob"],"provisioning_admins":["admin"]}
-        self.token = sessions.issue(self.db,"admin",self.policy)
+        self.token = sessions.issue(self.db,"admin",self.policy,"alice")
         self.challenge = self.options(self.token)
     def tearDown(self):
         self.db.close()
@@ -23,17 +23,20 @@ class EnrollmentSecurity(unittest.TestCase):
         return atomic.complete(self.db,self.policy,token or self.token,operator,challenge or self.challenge,"{}")
     def test_unauthorized_admin(self):
         with self.assertRaises(PermissionError):
-            sessions.issue(self.db,"unknown",self.policy)
+            sessions.issue(self.db,"unknown",self.policy,"alice")
+    def test_operator_bound_options(self):
+        with self.assertRaises(PermissionError):
+            binding.options(self.db,self.policy,self.token,"bob")
     def test_expired_token(self):
         with self.db:
             self.db.execute("UPDATE provisioning_sessions SET expires=0")
         with self.assertRaises(PermissionError):
             self.finish()
     def test_wrong_operator(self):
-        with self.assertRaises(ValueError):
+        with self.assertRaises(PermissionError):
             self.finish(operator="bob")
     def test_cross_session(self):
-        other = sessions.issue(self.db,"admin",self.policy)
+        other = sessions.issue(self.db,"admin",self.policy,"alice")
         self.options(other)
         with self.assertRaises(ValueError):
             self.finish(token=other)
