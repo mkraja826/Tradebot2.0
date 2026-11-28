@@ -10,8 +10,14 @@ class AdminV2Tests(unittest.TestCase):
     def test_registration(self):
         report = admin.admin_capabilities()
         self.assertIn("gold_v2_qa_report", report["tools"])
-        self.assertEqual(report["tool_count"], 23)
+        self.assertEqual(report["tool_count"], 24)
         self.assertFalse(report["remote_execution"])
+
+    def test_missing_entry_snapshot(self):
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        with TemporaryDirectory() as tmp, patch.object(admin, "SNAPSHOTS", Path(tmp)):
+            self.assertEqual(admin.gold_v2_entry_journal()["status"], "snapshot_unavailable")
 
     def test_journal_failure(self):
         with patch.object(admin, "SERVICES", ("test.service",)), patch.object(admin, "command", return_value={"exit_code":1,"stdout":"","stderr":"Permission denied"}):
