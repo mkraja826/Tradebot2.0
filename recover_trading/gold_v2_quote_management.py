@@ -5,9 +5,11 @@ from .gold_v2_entry_adapter import positive
 VERSION="gold-v2-quote-management.1"
 POLICIES=("fixed","adaptive_exit","adaptive_scaling")
 COSTS=(5,15,30)
+# Supplemental offline-only estimate; compare() deliberately retains original costs.
+HISTORICAL_DEMO_COST=D("2.13")
 
 def simulate(plan,samples,*,policy,cost_bps):
-    if policy not in POLICIES or cost_bps not in COSTS:raise ValueError("unknown_policy")
+    if policy not in POLICIES or cost_bps not in (*COSTS,HISTORICAL_DEMO_COST):raise ValueError("unknown_policy")
     side=D({"LONG":1,"SHORT":-1}[plan["direction"]])
     entry=positive(plan["demo_book_entry_reference"]);a=positive(plan["translated_atr"])
     stop=positive(plan["hypothetical_stop"]);target=positive(plan["hypothetical_target"])
