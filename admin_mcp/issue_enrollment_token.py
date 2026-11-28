@@ -20,6 +20,7 @@ def main():
     parser.add_argument("--policy", required=True)
     parser.add_argument("--database", required=True)
     parser.add_argument("--principal", required=True)
+    parser.add_argument("--operator", required=True)
     args = parser.parse_args()
     policy_path = Path(args.policy)
     db_path = Path(args.database)
@@ -45,7 +46,7 @@ def main():
     with closing(sqlite3.connect(db_path.resolve().as_uri()+"?mode=rw", uri=True)) as db:
         initialize(db)
         initialize_binding(db)
-        token = issue(db, args.principal, policy)
+        token = issue(db, args.principal, policy, args.operator)
     print("Private enrollment token (expires in five minutes):")
     print(token)
 
