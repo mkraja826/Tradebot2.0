@@ -85,14 +85,19 @@ class Controller:
         result,context=prepare(self.broker,report,expected_gold_account=account,
                               allocation_fraction=self.allocation,clock=self.clock)
         if result["status"]!="proposed":return status(result["status"])
-        candidate,_=select(report);p=result["proposal"]
+        candidate,_=select(report)
+        return self._dispatch_prepared(report,result,context,account,anchor,candidate["atr"])
+    def _dispatch_prepared(self,report,result,context,account,anchor,signal_atr,*,provenance=None):
+        """Shared internal dispatch, after source-specific preparation and ownership checks."""
+        p=result["proposal"]
         boundary=int(report["as_of"])//300*300;cid=client_id(boundary)
         if self.episodes.db.execute("SELECT 1 FROM gold_v2_episodes WHERE client_id=?",(cid,)).fetchone():
             return status("entry_bar_already_reserved")
         seed={"symbol":SYMBOL,"client_id":cid,"signal_boundary":boundary,
               "account_id":account,"product_id":context["product"]["id"],"side":p["side"],
               "size":p["size"],"stop_loss":p["stop_loss"],"take_profit":p["take_profit"],
-              "signal_atr":candidate["atr"],"flat_verified":True,"flat_observed_at":anchor}
+              "signal_atr":signal_atr,"flat_verified":True,"flat_observed_at":anchor}
+        if provenance is not None:seed["signal_provenance"]=provenance
         # Durable seed BEFORE any order submission. If the process dies here,
         # reconcile/operator review is required, not blind retry.
         self.episodes.reserve(seed)
