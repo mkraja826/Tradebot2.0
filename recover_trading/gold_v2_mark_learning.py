@@ -1,5 +1,5 @@
 """Chronological mark-hybrid research report. No strategy mutations."""
-import argparse,json,sqlite3
+import argparse,json,sqlite3,os,tempfile
 from collections import defaultdict,Counter
 from math import isfinite
 from pathlib import Path
@@ -112,6 +112,17 @@ def read_report(path,*,cutoff,as_of):
 def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument("--journal",required=True);p.add_argument("--cutoff",type=int,required=True);p.add_argument("--as-of",type=int,required=True)
+    p.add_argument("--publish-dir",help="Atomically publish a read-only dashboard snapshot")
     args=p.parse_args()
-    print(json.dumps(read_report(args.journal,cutoff=args.cutoff,as_of=args.as_of),allow_nan=False))
+    result=read_report(args.journal,cutoff=args.cutoff,as_of=args.as_of)
+    raw=json.dumps(result,allow_nan=False)
+    if args.publish_dir:
+        root=Path(args.publish_dir)
+        fd,tmp=tempfile.mkstemp(prefix="mark_learning_",dir=root)
+        try:
+            with os.fdopen(fd,"w",encoding="utf-8") as stream:stream.write(raw)
+            os.replace(tmp,root/"mark_learning_status.json")
+        finally:
+            if os.path.exists(tmp):os.unlink(tmp)
+    print(raw)
 if __name__=="__main__":main()
