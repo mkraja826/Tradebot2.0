@@ -22,11 +22,8 @@ VERSION="gold-v2-hybrid-worker.1"
 def reference_read(ref,stamp):
     return stamp,observe_reference(stamp,client=ref)
 
-def mark_read(demo,ref,stamp,collector):
-    packet=observe_mark(demo,ref,stamp)
-    try:packet['macro_context']=collector.collect(packet['mark_report'])
-    except Exception:packet['macro_context']=None
-    return stamp,packet
+def mark_read(demo,ref,stamp):
+    return stamp,observe_mark(demo,ref,stamp)
 
 def product_info(demo,ref):
     p=demo._request("GET","/v2/products/XAUTUSD")["result"]
@@ -44,10 +41,20 @@ class Study:
         self.journal=journal;self.demo=demo;self.ref=ref
         self.product=product;self.reference_product=reference_product
         self.clock=clock;self.last_boundary=None;self.future=None;self.reference=None;self.last_signal={}
-    def cycle(self,pool):
+        self.macro_future=None;self.macro_snapshot=None;self.macro_started=None
+    def cycle(self,pool,macro_pool=None):
         now=self.clock();boundary=int(now)//300*300
         out={"version":VERSION,"symbol":"XAUTUSD","mode":"hybrid_research_only",
              "execution_effect":"none","signal_source":self.source,"errors":{}}
+        if self.source==MARK_SOURCE and macro_pool is not None:
+            if self.macro_future is not None and self.macro_future.done():
+                try:self.macro_snapshot=self.macro_future.result()
+                except Exception as exc:
+                    self.macro_snapshot=None;out["errors"]["macro_refresh"]=type(exc).__name__
+                self.macro_future=None
+            if self.macro_future is None and (self.macro_started is None or now-self.macro_started>=60):
+                self.macro_started=now
+                self.macro_future=macro_pool.submit(self.context_collector.refresh)
         if self.future is not None and self.future.done():
             try:self.reference=self.future.result()
             except Exception as exc:
@@ -56,7 +63,7 @@ class Study:
             self.future=None
         if self.future is None and self.last_boundary!=boundary:
             self.last_boundary=boundary
-            self.future=(pool.submit(mark_read,self.demo,self.ref,int(now),self.context_collector) if self.source==MARK_SOURCE else pool.submit(reference_read,self.ref,int(now)))
+            self.future=(pool.submit(mark_read,self.demo,self.ref,int(now)) if self.source==MARK_SOURCE else pool.submit(reference_read,self.ref,int(now)))
         # Demo quote collection is independent of reference history and ticker availability.
         dt=None
         try:
@@ -75,7 +82,10 @@ class Study:
                     result=(preview_mark if self.source==MARK_SOURCE else preview)(packet,rt,dt,reference_pid=self.reference_product["id"],
                         demo_pid=self.product["id"],tick_size=self.product["tick_size"],now=self.clock())
                     if self.source==MARK_SOURCE:
-                        result=annotate(result,packet.get("macro_context"),now=self.clock())
+                        try:evidence=self.context_collector.project(report,self.macro_snapshot)
+                        except Exception as exc:
+                            evidence=None;out["errors"]["macro_projection"]=type(exc).__name__
+                        result=annotate(result,evidence,now=self.clock())
                         ann=result["macro_annotation"]
                         out["macro_context"]={"status":ann["status"],"candidate_groups":ann["candidate_groups"],
                             "bias":ann.get("evidence",{}).get("fundamentals",{}).get("macro_bias_hypothesis"),
@@ -110,10 +120,10 @@ def run(root,stop,interval,*,source=SOURCE):
             demo=public_client();ref=ReferenceClient()
             product,rp=product_info(demo,ref)
             study=Study(journal,demo,ref,product,rp,source=source)
-            with ThreadPoolExecutor(max_workers=1) as pool:
+            with ThreadPoolExecutor(max_workers=1) as pool, ThreadPoolExecutor(max_workers=1) as macro_pool:
                 while not stop.is_set():
                     started=time.monotonic()
-                    event=study.cycle(pool)
+                    event=study.cycle(pool,macro_pool)
                     publish(root,event)
                     stop.wait(max(0,interval-(time.monotonic()-started)))
         finally:journal.close()
