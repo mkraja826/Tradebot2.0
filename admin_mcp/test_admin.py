@@ -23,7 +23,7 @@ class AdminTests(unittest.TestCase):
         s=Fake()
         admin.register(s)
         self.assertEqual(len(s.names),24)
-        self.assertEqual(len(set(s.names)),20)
+        self.assertEqual(len(set(s.names)),24)
 
     def test_paths(self):
         self.assertEqual(admin.source_path("recover_trading/engine.py"),"recover_trading/engine.py")
