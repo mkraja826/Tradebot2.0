@@ -16,7 +16,7 @@ def complete(db, policy, token, operator, challenge, response_json):
     db.execute("BEGIN IMMEDIATE")
     try:
         now = int(time.time())
-        row = db.execute("SELECT principal FROM provisioning_sessions WHERE digest=? AND expires>?", (key, now)).fetchone()
+        row = db.execute("SELECT principal FROM provisioning_sessions WHERE digest=? AND expires>? AND operator=?", (key, now, operator)).fetchone()
         if not row or row[0] not in policy.get("provisioning_admins", ()):
             raise PermissionError("invalid session")
         row = db.execute("SELECT 1 FROM bound_enrollment WHERE session_digest=? AND challenge=? AND operator=? AND expires>?", (key, challenge, operator, now)).fetchone()
