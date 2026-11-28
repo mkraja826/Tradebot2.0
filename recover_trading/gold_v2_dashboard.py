@@ -84,3 +84,50 @@ def read_hybrid_status(directory,now):
                         **{k:number(r.get(k)) for k in ("samples","positive_samples","mean_sampled_net_bps")}}
                         for r in rows(s.get("sampled_comparisons"),100)])
     except (OSError,ValueError,TypeError,AttributeError,OverflowError):return out
+
+
+def read_mark_status(directory,now):
+    """Separate mark cohort; never mistake a traded-price report for mark research."""
+    out={"status":"unavailable","execution_effect":"none"}
+    try:
+        with (Path(directory)/"hybrid_status.json").open("rb") as f:
+            raw=f.read(MAX_BYTES+1)
+        if len(raw)>MAX_BYTES:return out
+        p=json.loads(raw)
+        if p.get("signal_source")!="corroborated_production_mark":return out
+        s=obj(p.get("summary"))
+        if s.get("signal_source")!="corroborated_production_mark":return out
+        base=read_hybrid_status(directory,now)
+        if base["status"]=="unavailable":return out
+        signal=obj(p.get("latest_signal"));macro=obj(signal.get("macro_context"))
+        base.update(signal_source="corroborated_production_mark",
+            reference_quality={k:label(obj(obj(signal.get("reference_quality")).get(k)).get("status")) for k in ("300","900","3600")},
+            macro={"status":label(macro.get("status")),"bias":label(macro.get("bias")),
+                   "candidates":[{**{k:label(r.get(k)) for k in ("family","direction","macro_group")},
+                                  **{k:number(r.get(k)) for k in ("support_index","observed_groups")}}
+                                 for r in rows(macro.get("candidate_groups"),32)]},
+            macro_strata=[{**{k:label(r.get(k)) for k in ("family","direction","model_version","macro_group")},
+                           **{k:number(r.get(k)) for k in ("samples","positive_samples","mean_sampled_net_bps")}}
+                          for r in rows(s.get("macro_strata"),200)],
+            management_pairs=[{**{k:label(r.get(k)) for k in ("family","direction","model_version","management_version","policy")},
+                               **{k:number(r.get(k)) for k in ("cost_bps","paired_samples","mean_fixed_net_bps","mean_variant_net_bps","mean_paired_difference_bps")}}
+                              for r in rows(s.get("management_pairs"),200)])
+        return base
+    except (OSError,ValueError,TypeError,AttributeError,OverflowError):return out
+
+def read_mark_learning(directory,now):
+    out={"status":"unavailable","execution_effect":"none","automatic_promotion":False}
+    try:
+        with (Path(directory)/"mark_learning_status.json").open("rb") as f:
+            raw=f.read(MAX_BYTES+1)
+        if len(raw)>MAX_BYTES:return out
+        p=json.loads(raw)
+        if p.get("version")!="gold-v2-mark-learning.1" or p.get("signal_source")!="corroborated_production_mark" or p.get("automatic_promotion") is not False:return out
+        stamp=number(p.get("as_of"));cutoff=number(p.get("cutoff"))
+        if stamp is None or cutoff is None or not 0<cutoff<stamp<=now:return out
+        return dict(out,status="stale" if now-stamp>86400 else "observed",as_of=stamp,cutoff=cutoff,
+                    proposals=[{**{k:label(r.get(k)) for k in ("model_version","family","direction","macro_group","selected_on_training","status")},
+                                **{k:number(r.get(k)) for k in ("train_samples","holdout_samples")},
+                                "holdout_net_bps_30":number(obj(obj(r.get("holdout_selected_only")).get("30")).get("mean_net_bps"))}
+                               for r in rows(p.get("proposals"),200)])
+    except (OSError,ValueError,TypeError,AttributeError,OverflowError):return out
