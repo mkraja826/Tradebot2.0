@@ -165,7 +165,9 @@ def run_tests():
 
 def deploy_version(commit_sha: str):
     """Request deployment of an exact tested commit, subject to local review."""
-    return stage("deploy_version",{"commit_sha":ref(commit_sha)})
+    receipt = stage("deploy_version", {"commit_sha": ref(commit_sha)})
+    receipt["approval_url"] = "https://tradingbot.micirql.com/admin/approvals?request=" + receipt["request_id"]
+    return receipt
 
 def install_dependency(package: str, version: str):
     """Request a pinned dependency; never install directly from tool input."""
