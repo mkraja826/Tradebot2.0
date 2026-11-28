@@ -24,7 +24,7 @@ def _preview(reference,reference_ticker,demo_ticker,*,reference_pid,demo_pid,tic
         r=reference[report_key]
         if r.get("symbol")!="XAUTUSD" or r.get("signal_source")!=source or r.get("status")!="observed":
             return out("reference_data_unusable")
-        if source==MARK_SOURCE and (r.get("version")!="gold-v2-mark-model.1" or r.get("execution_eligible") is not False):
+        if source==MARK_SOURCE and (r.get("version") not in ("gold-v2-mark-model.1","gold-v2-mark-model.2") or r.get("execution_eligible") is not False):
             return out("wrong_mark_model")
         stamp=r["as_of"]
         if type(stamp) is not int or stamp!=reference["as_of"] or not 0<=now-stamp<=120 or int(now)//300!=stamp//300:
@@ -50,7 +50,7 @@ def _preview(reference,reference_ticker,demo_ticker,*,reference_pid,demo_pid,tic
         candidates=r.get("candidates",[])
         if not candidates:return out("no_candidate",quotes=diagnostics)
         sides={c["direction"] for c in candidates}
-        if len(sides)!=1 or r.get("conflicting_directions"):return out("conflicting_candidates",quotes=diagnostics)
+        if (len(sides)!=1 or r.get("conflicting_directions")) and source!=MARK_SOURCE:return out("conflicting_candidates",quotes=diagnostics)
         if not sides<={"LONG","SHORT"}:return out("invalid_direction",quotes=diagnostics)
         tick=positive(tick_size);plans=[]
         for c in candidates:
@@ -69,7 +69,8 @@ def _preview(reference,reference_ticker,demo_ticker,*,reference_pid,demo_pid,tic
                           "reference_atr_fraction":str(normalized),"translated_atr":str(distance),
                           "hypothetical_stop":str(sl),"hypothetical_target":str(tp),
                           "mark_geometry_compatible":geometry})
-        return out("hypotheses_observed",quotes=diagnostics,hypotheses=plans,
+        return out("hypotheses_observed",quotes=diagnostics,hypotheses=plans,model_version=r.get("version"),
+                   conflicting_directions=len(sides)>1,
                    mapping="fractional_reference_atr_times_demo_book_price",
                    basis_acceptance_threshold="not_calibrated",fill_price="not_observed")
     except (KeyError,ValueError,TypeError,ArithmeticError,AttributeError):
