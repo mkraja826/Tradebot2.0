@@ -418,3 +418,15 @@ optimized trading filter. Dollar data is a broad daily dollar index,
 not live DXY. Weekly CFTC observations are contextual only. No paid AI,
 execution or deployment changes. Slow macro collection can cause signal
 expiry; measure this before any continuous deployment.
+
+## Mark hybrid learning (mark-learning.1)
+Run `python -m recover_trading.gold_v2_mark_learning --journal PATH --cutoff EPOCH --as-of EPOCH`.
+Use a prospectively fixed training cutoff. Only resolved, nonoverlapping
+mark-hybrid windows with matching entry and management versions and
+complete paired 15/30 bp outcomes qualify. Training observations must
+resolve before cutoff; holdout windows must begin at or after cutoff.
+Minimum group sizes are provisional 30 training and 20 holdout windows.
+The all-sample and macro strata overlap; rankings are descriptive,
+selected policies are training-only, and positive holdout observations
+do not imply statistical significance or permission to deploy.
+No automatic promotion, no real fills, no account-equity estimates.
