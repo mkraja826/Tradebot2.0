@@ -7,6 +7,7 @@ from .gold_v2_entry_adapter import positive
 from .gold_v2_reference import SOURCE
 from .gold_v2_hybrid import MARK_SOURCE
 from .entry_quotes import quote_evidence
+from .gold_v2_quote_management import compare as compare_management, VERSION as MANAGEMENT_VERSION, POLICIES
 
 VERSION="gold-v2-hybrid-validation.1"
 HORIZON=3600
@@ -58,6 +59,8 @@ class HybridJournal:
             for k in ("reference_quote_timestamp_us","demo_quote_timestamp_us"):
                 if type(q[k]) is not int or not 0<=clock_us-q[k]<=30000000:
                     raise ValueError("stale_enrollment_quote")
+        if self.source==MARK_SOURCE and packet.get("status")=="hypotheses_observed" and all("translated_atr" in p for p in packet["hypotheses"]):
+            packet=dict(packet,management_version=MANAGEMENT_VERSION)
         boundary=as_of//300*300
         status="enrolled" if packet.get("status")=="hypotheses_observed" and any(p.get("mark_geometry_compatible") is True for p in packet["hypotheses"]) else "not_enrolled"
         with self.db:
@@ -113,8 +116,12 @@ class HybridJournal:
                             if sign*(mark-tp)>=0:reason="sampled_target";break
                         px=positive(exitq["best_bid"] if sign==1 else exitq["best_ask"])
                         net=sign*(px-entry)/entry*10000-Decimal(COST_BPS)
-                        results.append({"family":p["family"],"direction":direction,"exit_reason":reason,
-                            "sampled_net_bps":float(net),"hypothetical_entry":str(entry),"sampled_exit_quote":str(px)})
+                        item={"family":p["family"],"direction":direction,"exit_reason":reason,
+                            "sampled_net_bps":float(net),"hypothetical_entry":str(entry),"sampled_exit_quote":str(px)}
+                        if packet.get("management_version")==MANAGEMENT_VERSION:
+                            try:item["management"]=compare_management(p,[(t,json.loads(q)) for t,_,q in rows])
+                            except (ValueError,KeyError,ArithmeticError,TypeError):item["management"]={"status":"invalid_evidence"}
+                        results.append(item)
                 status="sampled_outcomes" if results else "insufficient_quote_coverage"
                 result={"version":VERSION,"status":status,"max_gap_seconds":maxgap,"quote_count":len(rows),
                     "cost_bps_assumed":COST_BPS,"results":results,"fill_verified":False,
@@ -124,7 +131,7 @@ class HybridJournal:
                 count+=1
         return count
     def summary(self):
-        by_family={};by_macro={}
+        by_family={};by_macro={};paired={}
         for raw,window in self.db.execute("SELECT o.evidence,w.evidence FROM hybrid_outcomes o JOIN hybrid_windows w ON o.boundary=w.boundary"):
             result=json.loads(raw)
             evidence=json.loads(window)
@@ -137,12 +144,25 @@ class HybridJournal:
                 acc[0]+=1;acc[1]+=p["sampled_net_bps"]>0;acc[2]+=p["sampled_net_bps"]
                 macro=by_macro.setdefault((*key,groups.get(key[:2],"unknown")),[0,0,0.0])
                 macro[0]+=1;macro[1]+=p["sampled_net_bps"]>0;macro[2]+=p["sampled_net_bps"]
+                management=p.get("management",{})
+                if management.get("version")==MANAGEMENT_VERSION:
+                    for cost,variants in management["results"].items():
+                        if set(variants)!=set(POLICIES):continue
+                        fixed=variants["fixed"]["net_bps_initial_notional"]
+                        for policy in POLICIES[1:]:
+                            variant=variants[policy]["net_bps_initial_notional"]
+                            a=paired.setdefault((*key,MANAGEMENT_VERSION,cost,policy),[0,0.0,0.0,0])
+                            a[0]+=1;a[1]+=fixed;a[2]+=variant;a[3]+=variant>fixed
         comparisons=[{"family":k[0],"direction":k[1],"samples":v[0],
                       "positive_samples":v[1],"mean_sampled_net_bps":v[2]/v[0],"model_version":k[2]}
                      for k,v in sorted(by_family.items())]
         strata=[{"family":k[0],"direction":k[1],"macro_group":k[3],"model_version":k[2],"samples":v[0],
                  "positive_samples":v[1],"mean_sampled_net_bps":v[2]/v[0]} for k,v in sorted(by_macro.items())]
-        return {"version":VERSION,"execution_effect":"none","macro_strata":strata,"sampled_comparisons":comparisons,"signal_source":self.source,
+        pairs=[{"family":k[0],"direction":k[1],"model_version":k[2],"management_version":k[3],
+                "cost_bps":int(k[4]),"policy":k[5],"paired_samples":a[0],
+                "mean_fixed_net_bps":a[1]/a[0],"mean_variant_net_bps":a[2]/a[0],
+                "mean_paired_difference_bps":(a[2]-a[1])/a[0],"improved_samples":a[3]} for k,a in sorted(paired.items())]
+        return {"version":VERSION,"execution_effect":"none","management_pairs":pairs,"macro_strata":strata,"sampled_comparisons":comparisons,"signal_source":self.source,
                 "window_counts":dict(self.db.execute("SELECT status,count(*) FROM hybrid_windows GROUP BY status")),
                 "quote_count":self.db.execute("SELECT count(*) FROM hybrid_quotes").fetchone()[0],
                 "outcome_count":self.db.execute("SELECT count(*) FROM hybrid_outcomes").fetchone()[0],
