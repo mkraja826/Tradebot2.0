@@ -1,0 +1,26 @@
+# Staging only. Requires administrator-owned installation and configuration directory.
+[Unit]
+Description=Refresh Recover enrollment Cloudflare public signing keys
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/opt/recover-approval/.venv/bin/python -I /opt/recover-approval/admin_mcp/enrollment_key_refresh.py
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+ReadWritePaths=/etc/recover-approval
+TimeoutStartSec=45
