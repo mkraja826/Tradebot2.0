@@ -18,7 +18,7 @@ def options(db, policy, token, operator):
     db.execute("BEGIN IMMEDIATE")
     try:
         now = int(time.time())
-        row = db.execute("SELECT principal,expires FROM provisioning_sessions WHERE digest=? AND expires>?", (key,now)).fetchone()
+        row = db.execute("SELECT principal,expires FROM provisioning_sessions WHERE digest=? AND expires>? AND operator=?", (key,now,operator)).fetchone()
         if not row or row[0] not in policy.get("provisioning_admins", ()):
             raise PermissionError("invalid session")
         challenge = secrets.token_bytes(32)
