@@ -403,3 +403,18 @@ worker, management adapter or a persistent prospective hybrid journal.
 Reference range anomalies remain unresolved. Next: separate prospective
 hybrid validation with observed demo execution-price evidence and a live
 quote-pair compatibility probe.
+
+## Mark hybrid macro context (mark-context.1)
+The mark research worker now collects published dollar and real-yield
+features, public CFTC positioning, token references and other available
+context in its independent signal collection task. At quote enrollment
+it freezes the available evidence and tags each hypothesis aligned,
+opposed, neutral or unknown. Missing or expired macro evidence does not
+change a technical hypothesis. The separate hybrid journal summarizes
+sampled outcomes by family, direction and macro stratum using the
+original enrollment evidence, not subsequent publications.
+These comparisons are observational, not causal evidence or an
+optimized trading filter. Dollar data is a broad daily dollar index,
+not live DXY. Weekly CFTC observations are contextual only. No paid AI,
+execution or deployment changes. Slow macro collection can cause signal
+expiry; measure this before any continuous deployment.
