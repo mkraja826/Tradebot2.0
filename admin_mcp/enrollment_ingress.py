@@ -7,7 +7,7 @@ import jwt
 def protect(app, issuer, audience, jwks, allowed_subjects):
     if not issuer.startswith("https://") or not issuer.endswith(".cloudflareaccess.com") or not audience or not allowed_subjects:
         raise ValueError("incomplete Access policy")
-    keys = jwt.PyJWKSet.from_dict(jwks)
+    key_provider = jwks if callable(jwks) else lambda: jwt.PyJWKSet.from_dict(jwks)
     subjects = frozenset(allowed_subjects)
     def wrapped(env, start):
         try:
@@ -19,6 +19,7 @@ def protect(app, issuer, audience, jwks, allowed_subjects):
             header = jwt.get_unverified_header(token)
             if header.get("alg") != "RS256":
                 raise ValueError("invalid algorithm")
+            keys = key_provider()
             matches = [key for key in keys.keys if key.key_id == header.get("kid") and key.algorithm_name == "RS256"]
             if len(matches)!=1:
                 raise ValueError("unknown signing key")
