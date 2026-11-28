@@ -1,0 +1,9 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Recover Trading — Operator enrollment</title></head>
+<body><main><h1>Operator passkey enrollment</h1><p>Use a temporary token issued by your VM administrator.</p>
+<form id="enrollment" autocomplete="off">
+<label>Operator <input id="operator" required maxlength="128"></label>
+<label>Provisioning token <input id="token" type="password" required pattern="[0-9a-f]{64}" maxlength="64" autocomplete="off"></label>
+<button id="register" type="submit">Register passkey</button>
+</form><p id="status" role="status" aria-live="polite"></p></main>
+<script type="module" src="/admin/enroll/page.js"></script></body></html>
