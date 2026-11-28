@@ -5,6 +5,7 @@ from tradebot.gold_macro_v3 import features as published_macro
 from tradebot.news_context_v3 import parse as parse_news, URLS
 from recover_trading.macro_feed import collect_context, fetch
 from tradebot.gold_reference_v3 import collect as collect_spot
+from .gold_v2_fed_fallback import apply_fallback
 
 def number(v):
     return type(v) in (int,float) and isfinite(v)
@@ -37,7 +38,7 @@ def context(refs, spot, *, as_of, delta_close=None, delta_closed_at=None):
     if not number(as_of):
         raise ValueError("invalid_cutoff")
     # Reuse validated publication feature extraction, not legacy signal rules.
-    macro=published_macro(refs,observed_at=as_of)
+    macro,official_sources=apply_fallback(published_macro(refs,observed_at=as_of),refs,as_of)
     dollar=macro["broad_dollar_5obs_pct"]
     real=macro["real_yield_5obs_bp"]
     # Initial descriptive bands, not learned weights or entry requirements.
@@ -73,7 +74,7 @@ def context(refs, spot, *, as_of, delta_close=None, delta_closed_at=None):
             "macro_bias_hypothesis":bias,"votes":votes,
             "sources":{k:{"observed_at":refs[k]["observed_at"],
                         "source":refs[k].get("source")}
-                       for k in ("broad_dollar","yields") if fresh(refs.get(k),as_of,22200)},
+                       for k in ("broad_dollar","yields") if fresh(refs.get(k),as_of,22200)} | official_sources,
             "spot_reference":reference,
             "events":{k:recent_event(refs.get(k),k,as_of)
                       for k in ("fomc_release","cpi_release","nfp_release")},
