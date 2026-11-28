@@ -63,13 +63,15 @@ def read_status(directory,now):
         return out
 
 
-def read_hybrid_status(directory,now):
+def read_hybrid_status(directory,now,*,packet=None):
     out={"status":"unavailable","execution_effect":"none"}
     try:
-        with (Path(directory)/"hybrid_status.json").open("rb") as f:
-            raw=f.read(MAX_BYTES+1)
-        if len(raw)>MAX_BYTES:return out
-        p=json.loads(raw);stamp=number(p.get("timestamp"))
+        if packet is None:
+            with (Path(directory)/"hybrid_status.json").open("rb") as f:
+                raw=f.read(MAX_BYTES+1)
+            if len(raw)>MAX_BYTES:return out
+            packet=json.loads(raw)
+        p=packet;stamp=number(p.get("timestamp"))
         if p.get("symbol")!="XAUTUSD" or p.get("mode")!="hybrid_research_only" or stamp is None or stamp>now:return out
         s=obj(p.get("summary"));signal=obj(p.get("latest_signal"));q=obj(signal.get("quote_comparison"))
         return dict(out,status="stale" if now-stamp>60 else "observed",age_seconds=now-stamp,
@@ -97,7 +99,7 @@ def read_mark_status(directory,now):
         if p.get("signal_source")!="corroborated_production_mark":return out
         s=obj(p.get("summary"))
         if s.get("signal_source")!="corroborated_production_mark":return out
-        base=read_hybrid_status(directory,now)
+        base=read_hybrid_status(directory,now,packet=p)
         if base["status"]=="unavailable":return out
         signal=obj(p.get("latest_signal"));macro=obj(signal.get("macro_context"))
         base.update(signal_source="corroborated_production_mark",
