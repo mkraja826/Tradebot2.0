@@ -23,3 +23,10 @@ def finish(db, request_id, status, now):
         changed=db.execute("UPDATE executions SET status=?,finished=? WHERE request_id=? AND status='reserved' AND started<=?",(status,now,request_id,now)).rowcount
         if changed!=1:
             raise ValueError("reservation unavailable")
+
+def recover_interrupted(db, now):
+    """Only after exclusive executor ownership and confirmed absence of active workers."""
+    if type(now) is not int:
+        raise ValueError("invalid recovery time")
+    with db:
+        return db.execute("UPDATE executions SET status='unknown',finished=? WHERE status='reserved' AND started<=?",(now,now)).rowcount
