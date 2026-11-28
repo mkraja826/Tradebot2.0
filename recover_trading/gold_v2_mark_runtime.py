@@ -6,6 +6,7 @@ cooperative; operator must establish exclusive ownership before execution.
 import argparse,json,math,os,signal,threading,time,traceback
 from pathlib import Path
 from contextlib import ExitStack
+from .gold_v2_entry_hours import entry_pause_reason
 from .broker import DeltaDemo
 from .engine import Journal
 from .gold_v2_episode import EpisodeJournal
@@ -47,6 +48,9 @@ class Loop:
                                  "5m",300,boundary,750)
                 except Exception as exc:event["errors"]["demo_history"]=type(exc).__name__
                 result=self.controller.cycle({},bars,demo_as_of=now)
+            elif (pause := entry_pause_reason(now)) is not None:
+                result = {"status": "entry_scanning_paused", "pause_reason": pause}
+                event["execution_effect"] = "none"
             elif boundary==self.last_entry_boundary:
                 result={"status":"entry_boundary_already_observed"}
             else:
@@ -72,6 +76,8 @@ class Loop:
                     if result["status"] in ("entry_dispatch","entry_bar_already_reserved","conflicting_candidates",
                                             "conflicting_bracket_parameters","incompatible_bracket"):
                         self.last_entry_boundary=boundary
+            if result.get("pause_reason"):
+                event["pause_reason"] = result["pause_reason"]
             event["controller"]={k:result.get(k) for k in ("status","execution_status","management_status","attempted","post_entry_observation")}
         except Exception as exc:
             event["errors"]["cycle"]=type(exc).__name__
