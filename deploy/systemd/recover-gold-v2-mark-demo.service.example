@@ -1,0 +1,28 @@
+# REVIEW ONLY: do not install before an exclusive Gold demo handoff.
+# The legacy Gold worker shares a service with BTC on the current VM.
+# Never treat the CLI assertion as proof of ownership.
+[Unit]
+Description=Recover Trading Gold V2 isolated mark demo execution (review template)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=recovertrading
+Group=recovertrading
+WorkingDirectory=/opt/recover-gold-v2-execution/current
+EnvironmentFile=/etc/recover-trading/gold-v2-demo.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+StateDirectory=recover-trading/gold-v2-mark-execution recover-trading/gold-v2-locks
+StateDirectoryMode=0700
+ExecStartPre=/usr/bin/python3 -m recover_trading.gold_v2_mark_runtime --preflight
+ExecStart=/usr/bin/python3 -m recover_trading.gold_v2_mark_runtime --execute-demo --legacy-gold-stopped
+Restart=on-failure
+RestartSec=15
+TimeoutStopSec=180
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/recover-trading/gold-v2-mark-execution /var/lib/recover-trading/gold-v2-locks
