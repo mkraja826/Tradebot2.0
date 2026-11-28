@@ -9,6 +9,7 @@ from pathlib import Path
 from contextlib import closing
 from enrollment_session_binding import options
 from enrollment_atomic import complete
+from enrollment_rate_limit import EnrollmentLimiter
 
 HOST = "tradingbot.micirql.com"
 ORIGIN = "https://" + HOST
@@ -22,6 +23,7 @@ ASSETS = {
 def application(connect, policy):
     if policy.get("origin") != ORIGIN or policy.get("rp_id") != HOST:
         raise ValueError("invalid host policy")
+    limiter = EnrollmentLimiter()
     def app(env, start):
         def send(status, payload, mime="application/json"):
             if mime == "application/json":
@@ -41,6 +43,8 @@ def application(connect, policy):
             return send("404 Not Found", {})
         if method != "POST" or env.get("HTTP_ORIGIN") != ORIGIN:
             return send("403 Forbidden", {})
+        if not limiter.allow():
+            return send("429 Too Many Requests", {})
         match = re.fullmatch(r"Bearer ([0-9a-f]{64})", env.get("HTTP_AUTHORIZATION", ""))
         if not match:
             return send("403 Forbidden", {})
