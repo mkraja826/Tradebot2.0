@@ -3,6 +3,7 @@ The proxy must sanitize forwarding headers and redact authorization headers.
 """
 import base64
 import json
+import logging
 import re
 import sqlite3
 from pathlib import Path
@@ -11,6 +12,7 @@ from enrollment_session_binding import options
 from enrollment_atomic import complete
 from enrollment_rate_limit import EnrollmentLimiter
 
+AUDIT = logging.getLogger("recover.enrollment.audit")
 HOST = "tradingbot.micirql.com"
 ORIGIN = "https://" + HOST
 BASE = "/admin/enroll"
@@ -28,6 +30,9 @@ def application(connect, policy):
         def send(status, payload, mime="application/json"):
             if mime == "application/json":
                 payload = json.dumps(payload).encode()
+            action = {BASE+"/options":"options", BASE+"/complete":"complete"}.get(env.get("PATH_INFO"), "other")
+            if action != "other":
+                AUDIT.info("enrollment action=%s status=%s", action, status.split()[0])
             start(status, [("Content-Type", mime), ("Cache-Control", "no-store"),
                 ("Referrer-Policy", "no-referrer"), ("X-Content-Type-Options", "nosniff"),
                 ("Content-Security-Policy", "default-src 'none'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'")])
