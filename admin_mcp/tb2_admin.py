@@ -13,7 +13,7 @@ import time
 import uuid
 from pathlib import Path
 
-VERSION = "tb2-admin-v1"
+VERSION = "tb2-admin-v2-dev"
 SOURCE = Path(os.environ.get("TB2_ADMIN_SOURCE", "/opt/tb2-admin-source")).resolve()
 QUEUE = Path(os.environ.get("TB2_ADMIN_QUEUE", "/var/lib/tb2-admin/requests")).resolve()
 SNAPSHOTS = Path(os.environ.get("TB2_ADMIN_SNAPSHOTS", "/var/lib/recover-mcp-snapshots")).resolve()
@@ -206,7 +206,29 @@ def audit_history():
     return {"requests":sorted(out,key=lambda x:x.get("created") or 0,reverse=True)[:50],
             "note":"local request journal, not proof of completed operations"}
 
-TOOLS=(server_health,disk_usage,disk_cleanup,list_files,read_file,apply_patch,
+
+def admin_capabilities():
+    """Report registered tools and actual approval model without exposing secrets."""
+    return {"version": VERSION, "tools": [t.__name__ for t in TOOLS],
+            "tool_count": len(TOOLS), "approval_mode": "pending_local_approval",
+            "remote_execution": False, "execution_effect": "none"}
+
+def service_diagnostics(name: str, minutes: int=60):
+    """Distinguish unavailable journal access from an empty or readable journal."""
+    service(name)
+    if not 1 <= minutes <= 1440:
+        raise ValueError("minutes must be 1..1440")
+    r = command(["/usr/bin/journalctl", "--no-pager", "-u", name,
+                 "--since", f"{minutes} minutes ago", "-n", "1000", "-o", "cat"])
+    denied = any(x in r["stderr"].lower() for x in ("permission", "access denied", "not seeing messages"))
+    lines = r["stdout"].splitlines()
+    state = "permission_limited" if denied else ("unavailable" if r["exit_code"] else ("readable" if lines else "empty_or_not_visible"))
+    return {"service": name, "minutes": minutes, "journal_status": state,
+            "exit_code": r["exit_code"], "observed_lines": len(lines),
+            "counts": {k: sum(k in line.lower() for line in lines) for k in ("error","exception","timeout","failed")} if state == "readable" else None,
+            "execution_effect": "none"}
+
+TOOLS=(admin_capabilities,service_diagnostics,server_health,disk_usage,disk_cleanup,list_files,read_file,apply_patch,
        service_status,service_logs,restart_service,git_status,git_diff,git_commit,
        run_tests,deploy_version,install_dependency,database_inspect,database_backup,
        create_snapshot,rollback_version,audit_history)
