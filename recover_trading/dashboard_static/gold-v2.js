@@ -38,12 +38,38 @@
       (p.sampled_comparisons||[]).map(r=>[label(r.family),label(r.direction),num(r.samples),num(r.positive_samples),num(r.mean_sampled_net_bps)]));
     content.append(element("p","Hypothetical sampled quote outcomes, not fills or account returns. Gaps may hide SL/TP crossings.","empty"));
   }
+  function mark(p,l){
+    if(["observed","stale"].includes(p?.status)){
+      const w=p.window_counts||{},q=p.reference_quality||{},m=p.macro||{};
+      table("Mark-price hybrid research — no execution",["Metric","Observation"],[
+        ["Worker",label(p.status)+" · "+num(p.age_seconds)+" s old"],
+        ["5m quality",label(q["300"])],["15m quality",label(q["900"])],["1h quality",label(q["3600"])],
+        ["Reference state",label(p.reference_status)],["Hybrid state",label(p.hybrid_status)],
+        ["Macro context",label(m.status)],["Macro bias",label(m.bias)],
+        ["Quotes",num(p.quote_count)],["Enrolled",num(w.enrolled)],["Resolved samples",num(w.sampled_outcomes)],
+        ["Insufficient coverage",num(w.insufficient_quote_coverage)]]);
+      table("Mark entry hypotheses",["Family","Side","Macro","Support"],(m.candidates||[]).map(r=>[label(r.family),label(r.direction),label(r.macro_group),num(r.support_index)]));
+      table("Mark macro comparisons",["Model","Family","Side","Macro","Samples","Positive","Mean net (bp)"],
+        (p.macro_strata||[]).map(r=>[label(r.model_version),label(r.family),label(r.direction),label(r.macro_group),num(r.samples),num(r.positive_samples),num(r.mean_sampled_net_bps)]));
+      table("Mark management comparisons",["Model","Family","Side","Policy","Cost (bp)","Pairs","Fixed (bp)","Variant (bp)","Difference (bp)"],
+        (p.management_pairs||[]).map(r=>[label(r.model_version),label(r.family),label(r.direction),label(r.policy),num(r.cost_bps),num(r.paired_samples),num(r.mean_fixed_net_bps),num(r.mean_variant_net_bps),num(r.mean_paired_difference_bps)]));
+    }else{
+      content.append(element("h3","Mark-price hybrid research"));
+      content.append(element("p","No mark research observation available.","empty"));
+    }
+    if(["observed","stale"].includes(l?.status)){
+      table("Mark learning — training / holdout",["Model","Family","Side","Macro","Selected policy","Training","Holdout","Status","Holdout 30 bp net"],
+        (l.proposals||[]).map(r=>[label(r.model_version),label(r.family),label(r.direction),label(r.macro_group),label(r.selected_on_training),num(r.train_samples),num(r.holdout_samples),label(r.status),num(r.holdout_net_bps_30)]));
+      content.append(element("p","Research report · "+label(l.status)+" · Cutoff "+new Date(l.cutoff*1000).toISOString()+" · No automatic promotion.","empty"));
+    }else content.append(element("p","No fixed-cutoff mark learning report published.","empty"));
+  }
   function render(p){
     content.replaceChildren();
     if(p?.symbol!=="XAUTUSD"||!["observed","stale"].includes(p.status)){
       state.textContent="No Gold V2 worker observation";
       content.append(element("p","The legacy service is independent. Start the separate shadow worker to collect evidence.","empty"));
       hybrid(p?.hybrid);
+      mark(p?.mark_hybrid,p?.mark_learning);
       return;
     }
     state.textContent=(p.status==="stale"?"Stale · ":"Observed · ")+num(p.age_seconds)+" s old";
@@ -64,6 +90,7 @@
     const comparisons=v.combined_comparisons||[];
     table("Paired management research",["Family","Side","Policy","Cost (bp)","Pairs","Fixed net (bp)","Variant net (bp)","Difference (bp)"],comparisons.map(r=>[label(r.family),label(r.direction),label(r.policy),num(r.cost_bps),num(r.paired_samples),num(r.mean_fixed_net_bps_initial_notional),num(r.mean_variant_net_bps_initial_notional),num(r.mean_paired_difference_bps)]));
     hybrid(p.hybrid);
+    mark(p.mark_hybrid,p.mark_learning);
     content.append(element("p","Showing "+comparisons.length+" of "+num(v.combined_comparisons_total)+" comparison groups. Normalized initial notional, hypothetical costs, not account returns.","empty"));
   }
   async function refresh(){
