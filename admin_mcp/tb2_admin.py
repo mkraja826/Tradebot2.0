@@ -228,7 +228,49 @@ def service_diagnostics(name: str, minutes: int=60):
             "counts": {k: sum(k in line.lower() for line in lines) for k in ("error","exception","timeout","failed")} if state == "readable" else None,
             "execution_effect": "none"}
 
-TOOLS=(admin_capabilities,service_diagnostics,server_health,disk_usage,disk_cleanup,list_files,read_file,apply_patch,
+
+def gold_v2_qa_report(limit: int=40):
+    """Read a dedicated sanitized Gold V2 QA export, never raw trading databases."""
+    if not 1 <= limit <= 240:
+        raise ValueError("limit must be 1..240")
+    path = Path("/var/lib/tb2-admin/gold-v2-qa.json")
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(fd, "rb") as f:
+            import stat
+            if not stat.S_ISREG(os.fstat(f.fileno()).st_mode):
+                return {"status":"invalid_export"}
+            raw = f.read(1048577)
+        if len(raw) > 1048576:
+            return {"status":"export_too_large"}
+        data = json.loads(raw)
+        if not isinstance(data, dict) or data.get("schema_version") != 1 or not isinstance(data.get("scans"), list):
+            return {"status":"invalid_export"}
+        scans = []
+        for row in data["scans"]:
+            if not isinstance(row, dict):
+                continue
+            ts = row.get("timestamp")
+            if type(ts) not in (int,float) or not 0 < ts <= time.time()+5:
+                continue
+            conditions = row.get("conditions", {})
+            if not isinstance(conditions, dict):
+                continue
+            clean = {k:v for k,v in conditions.items() if re.fullmatch(r"[a-zA-Z0-9_]{1,64}",k) and type(v) is bool}
+            scans.append({"timestamp":ts,"conditions":clean})
+        scans.sort(key=lambda x:x["timestamp"])
+        age = round(time.time()-scans[-1]["timestamp"],1) if scans else None
+        gaps = [b["timestamp"]-a["timestamp"] for a,b in zip(scans,scans[1:])]
+        return {"status":"fresh" if age is not None and age <= 45 else ("stale" if scans else "no_valid_scans"),
+                "expected_interval_seconds":15,"latest_scan_age_seconds":age,
+                "observed_scan_count":len(scans),"largest_observed_gap_seconds":max(gaps) if gaps else None,
+                "scans":scans[-limit:],"execution_effect":"none"}
+    except FileNotFoundError:
+        return {"status":"export_not_configured","execution_effect":"none"}
+    except (OSError,ValueError):
+        return {"status":"export_unavailable_or_invalid","execution_effect":"none"}
+
+TOOLS=(gold_v2_qa_report,admin_capabilities,service_diagnostics,server_health,disk_usage,disk_cleanup,list_files,read_file,apply_patch,
        service_status,service_logs,restart_service,git_status,git_diff,git_commit,
        run_tests,deploy_version,install_dependency,database_inspect,database_backup,
        create_snapshot,rollback_version,audit_history)
