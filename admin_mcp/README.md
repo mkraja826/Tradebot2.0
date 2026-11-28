@@ -27,3 +27,11 @@ python3 -m unittest discover -s admin_mcp -p 'test_*.py' -v
 6. Implement and verify the remaining nine executors with explicit operator policy, exact service/checkout paths, demo-account isolation, backups, dry runs, bounded inputs, and rollback testing. Run tests/dependencies in a sandbox with no broker credentials. Deploy/rollback must use verified immutable revisions; GCP snapshot needs the correct project/disk and a narrowly scoped identity. No production account access. Never use a generic root command dispatcher or grant MCP blanket sudo.
 
 The existing plugin uses an externally registered app ID; updating a plugin manifest cannot add tools to the VM. A new connector needs an actual deployed server and authenticated registration. No deployment or server modification is performed by this commit.
+
+## V2 observability integration (development)
+
+Gold mark execution source on recover/gold-v2-entry-qa declares /var/lib/recover-trading/gold-v2-mark-execution as DATA_ROOT. The worker defaults to 15-second cycles; entry boundaries are 300 seconds. QA recording requires --entry-qa. The status JSON is overwritten each cycle and is not historical cadence evidence.
+
+Provision an operator-owned read-only SQLite backup of DATA_ROOT/entry_qa.sqlite at /var/lib/recover-mcp-snapshots/gold-v2/entry_qa.sqlite using SQLite's online backup API, not a raw copy of an active WAL database. Refresh atomically; grant only read access to the admin identity. Do not expose broker credentials. Verify live service arguments and paths before provisioning. The separate 15-second history export requires a verified cycle-history producer; do not synthesize records from the latest status or entry boundaries.
+
+No deployment or remote approval is implied by this branch.
