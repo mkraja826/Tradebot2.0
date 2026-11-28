@@ -11,16 +11,22 @@ class ContextCollector:
     def __init__(self,*,external=collect_external,feeds=None,clock=time.time):
         self.external=external;self.feeds=PublicFeeds() if feeds is None else feeds
         self.clock=clock
-    def collect(self,report):
-        if report.get("signal_source")!=MARK_SOURCE:raise ValueError("wrong_mark_source")
+    def refresh(self):
         refs,spot=self.external()
         items=self.feeds.collect()
+        return {"observed_at":self.clock(),"refs":refs,"spot":spot,"items":items}
+    def collect(self,report):
+        return self.project(report,self.refresh())
+    def project(self,report,snapshot):
+        if report.get("signal_source")!=MARK_SOURCE:raise ValueError("wrong_mark_source")
         now=self.clock()
+        if not isinstance(snapshot,dict) or not 0<=now-snapshot["observed_at"]<=300:return None
+        refs,spot,items=(snapshot[k] for k in ("refs","spot","items"))
         fundamental=context(refs,spot,as_of=now)
         public=feature_packet(items,now)
         scored=score(dict(report,decision_as_of=now,fundamentals=fundamental,public_feeds=public))
         return {"version":VERSION,"as_of":now,"fundamentals":fundamental,"public_feeds":public,
-                "intelligence":scored,"execution_effect":"none"}
+                "intelligence":scored,"snapshot_observed_at":snapshot["observed_at"],"execution_effect":"none"}
 
 def annotate(packet,evidence,*,now):
     """Freeze evidence available before enrollment; never modify price hypotheses."""
