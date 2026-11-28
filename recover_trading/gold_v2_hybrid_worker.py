@@ -13,6 +13,7 @@ from .gold_v2_reference import observe_reference
 from .gold_v2_hybrid import preview,preview_mark,MARK_SOURCE
 from .gold_v2_reference import SOURCE
 from .gold_v2_mark_hybrid import observe_mark
+from .gold_v2_mark_context import ContextCollector,annotate
 from .gold_v2_hybrid_validation import HybridJournal
 from tradebot.market_data_v3 import public_client
 
@@ -21,8 +22,11 @@ VERSION="gold-v2-hybrid-worker.1"
 def reference_read(ref,stamp):
     return stamp,observe_reference(stamp,client=ref)
 
-def mark_read(demo,ref,stamp):
-    return stamp,observe_mark(demo,ref,stamp)
+def mark_read(demo,ref,stamp,collector):
+    packet=observe_mark(demo,ref,stamp)
+    try:packet['macro_context']=collector.collect(packet['mark_report'])
+    except Exception:packet['macro_context']=None
+    return stamp,packet
 
 def product_info(demo,ref):
     p=demo._request("GET","/v2/products/XAUTUSD")["result"]
@@ -36,6 +40,7 @@ class Study:
     def __init__(self,journal,demo,ref,product,reference_product,*,clock=time.time,source=SOURCE):
         if source not in (SOURCE,MARK_SOURCE):raise ValueError("unknown_study_source")
         self.source=source
+        self.context_collector=ContextCollector(clock=clock) if source==MARK_SOURCE else None
         self.journal=journal;self.demo=demo;self.ref=ref
         self.product=product;self.reference_product=reference_product
         self.clock=clock;self.last_boundary=None;self.future=None;self.reference=None;self.last_signal={}
@@ -49,7 +54,7 @@ class Study:
             self.future=None
         if self.future is None and self.last_boundary!=boundary:
             self.last_boundary=boundary
-            self.future=(pool.submit(mark_read,self.demo,self.ref,int(now)) if self.source==MARK_SOURCE else pool.submit(reference_read,self.ref,int(now)))
+            self.future=(pool.submit(mark_read,self.demo,self.ref,int(now),self.context_collector) if self.source==MARK_SOURCE else pool.submit(reference_read,self.ref,int(now)))
         # Demo quote collection is independent of reference history and ticker availability.
         dt=None
         try:
@@ -66,12 +71,18 @@ class Study:
                     rt=self.ref.ticker("XAUTUSD")
                     result=(preview_mark if self.source==MARK_SOURCE else preview)(packet,rt,dt,reference_pid=self.reference_product["id"],
                         demo_pid=self.product["id"],tick_size=self.product["tick_size"],now=self.clock())
+                    if self.source==MARK_SOURCE:
+                        result=annotate(result,packet.get("macro_context"),now=self.clock())
+                        ann=result["macro_annotation"]
+                        out["macro_context"]={"status":ann["status"],"candidate_groups":ann["candidate_groups"],
+                            "bias":ann.get("evidence",{}).get("fundamentals",{}).get("macro_bias_hypothesis"),
+                            "positioning":ann.get("evidence",{}).get("intelligence",{}).get("positioning")}
                     out["hybrid_status"]=result["status"]
                     out["quote_comparison"]=result.get("quotes")
                     out["enrollment"]=self.journal.enroll(result,as_of=stamp)
                 except Exception as exc:out["errors"]["hybrid_enrollment"]=type(exc).__name__
             else:out["errors"]["hybrid_enrollment"]="demo_quote_missing"
-        for k in ("reference_status","reference_quality","hybrid_status","quote_comparison","enrollment"):
+        for k in ("reference_status","reference_quality","hybrid_status","quote_comparison","enrollment","macro_context"):
             if k in out:self.last_signal[k]=out[k]
         if "reference_status" in out:self.last_signal["signal_observed_at"]=int(self.clock())
         out["latest_signal"]=dict(self.last_signal)
