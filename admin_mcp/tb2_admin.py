@@ -270,7 +270,45 @@ def gold_v2_qa_report(limit: int=40):
     except (OSError,ValueError):
         return {"status":"export_unavailable_or_invalid","execution_effect":"none"}
 
-TOOLS=(gold_v2_qa_report,admin_capabilities,service_diagnostics,server_health,disk_usage,disk_cleanup,list_files,read_file,apply_patch,
+
+def gold_v2_entry_journal(limit: int=10):
+    """Read a provisioned QA snapshot; never create or mutate a database."""
+    if not 1 <= limit <= 40:
+        raise ValueError("limit must be 1..40")
+    path = SNAPSHOTS / "gold-v2" / "entry_qa.sqlite"
+    if path.resolve() != path or not path.is_file():
+        return {"status":"snapshot_unavailable"}
+    from contextlib import closing
+    try:
+        with closing(sqlite3.connect(path.as_uri()+"?mode=ro",uri=True,timeout=2)) as db:
+            db.execute("PRAGMA query_only=ON")
+            rows = db.execute("SELECT boundary,started,finished,CASE WHEN length(detail)<=262144 THEN detail END FROM scans ORDER BY boundary DESC,started DESC LIMIT ?",(limit,)).fetchall()
+        out = []
+        for boundary,started,finished,detail in rows:
+            event = json.loads(detail) if detail else {}
+            scan = event.get("scan") or {}
+            setups = {}
+            for direction in ("LONG","SHORT"):
+                setups[direction] = {}
+                for family, conditions in scan.get("setups",{}).get(direction,{}).items():
+                    if not re.fullmatch(r"mark_[a-z_]{1,50}",family):
+                        continue
+                    setups[direction][family] = {}
+                    for name,c in conditions.items():
+                        if not re.fullmatch(r"[a-z_0-9]{1,64}",name):
+                            continue
+                        setups[direction][family][name] = {k:c.get(k) for k in ("value","operator","threshold","passed") if c.get(k) is None or type(c.get(k)) in (int,float,bool) or c.get(k) in ("==",">",">=","<","<=","higher_highs_lows","lower_highs_lows")}
+            out.append({"boundary":boundary,"started":started,"finished":finished,
+                        "observed":scan.get("data_status")=="observed",
+                        "matches_engine":scan.get("matches_engine") if type(scan.get("matches_engine")) is bool else None,
+                        "setups":setups})
+        return {"status":"observed" if out else "empty","records":out,
+                "latest_record_age_seconds":round(time.time()-out[0]["finished"],1) if out else None,
+                "note":"entry boundary records, not proof of 15-second scan cadence"}
+    except (sqlite3.Error,ValueError,TypeError,AttributeError):
+        return {"status":"snapshot_invalid_or_unreadable"}
+
+TOOLS=(gold_v2_entry_journal,gold_v2_qa_report,admin_capabilities,service_diagnostics,server_health,disk_usage,disk_cleanup,list_files,read_file,apply_patch,
        service_status,service_logs,restart_service,git_status,git_diff,git_commit,
        run_tests,deploy_version,install_dependency,database_inspect,database_backup,
        create_snapshot,rollback_version,audit_history)
