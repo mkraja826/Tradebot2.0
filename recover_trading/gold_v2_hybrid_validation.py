@@ -34,6 +34,9 @@ class HybridJournal:
         try:
             with self.db:
                 self.db.execute("BEGIN IMMEDIATE")
+                columns={r[1] for r in self.db.execute("PRAGMA table_info(hybrid_windows)")}
+                if "enrolled_us" not in columns:self.db.execute("ALTER TABLE hybrid_windows ADD COLUMN enrolled_us INTEGER")
+                self.db.execute("CREATE TABLE IF NOT EXISTS hybrid_market (id INTEGER PRIMARY KEY CHECK(id=1),product_id INTEGER NOT NULL)")
                 self.db.execute("CREATE TABLE IF NOT EXISTS hybrid_study (id INTEGER PRIMARY KEY CHECK(id=1),source TEXT NOT NULL)")
                 existing=self.db.execute("SELECT source FROM hybrid_study WHERE id=1").fetchone()
                 if existing is None:
@@ -67,17 +70,27 @@ class HybridJournal:
             self.db.execute("BEGIN IMMEDIATE")
             if self.db.execute("SELECT 1 FROM hybrid_windows WHERE boundary=?",(boundary,)).fetchone():
                 return "duplicate"
-            if status=="enrolled" and self.db.execute("SELECT 1 FROM hybrid_windows WHERE status='enrolled' AND enrolled+?>?",(HORIZON,now)).fetchone():
+            if packet.get("version")=="gold-v2-hybrid.3" and packet.get("status")=="hypotheses_observed":
+                pid=packet["quotes"]["demo_product_id"]
+                if type(pid) is not int or pid<=0:raise ValueError("invalid_product")
+                market=self.db.execute("SELECT product_id FROM hybrid_market WHERE id=1").fetchone()
+                if market is None or market[0]!=pid:raise ValueError("unbound_entry_quote")
+                recorded=self.db.execute("SELECT observed,evidence FROM hybrid_quotes WHERE stamp=?",(q["demo_quote_timestamp_us"],)).fetchone()
+                if recorded is None or recorded[0]>clock_us:raise ValueError("unrecorded_entry_quote")
+                saved=json.loads(recorded[1])
+                if any(saved[k]!=q["demo_"+k] for k in ("best_bid","best_ask","mark_price")):raise ValueError("entry_quote_mismatch")
+            if status=="enrolled" and self.db.execute("SELECT 1 FROM hybrid_windows WHERE status='enrolled' AND COALESCE(enrolled_us,enrolled*1000000)+?>?",(HORIZON*1000000,clock_us)).fetchone():
                 status="overlap_excluded"
-            self.db.execute("INSERT INTO hybrid_windows VALUES(?,?,?,?)",(boundary,now,encode(packet),status))
+            self.db.execute("INSERT INTO hybrid_windows(boundary,enrolled,evidence,status,enrolled_us) VALUES(?,?,?,?,?)",(boundary,now,encode(packet),status,clock_us))
         return status
     def record_quote(self,ticker,pid):
         now=int(self.clock()*1000000)
+        if type(pid) is not int or pid<=0:raise ValueError("invalid_product")
         q=quote_evidence(ticker,"XAUTUSD",pid,now)
         if q["status"]!="fresh_book" or not q.get("mark_price"):return "unavailable"
         raw=encode(q)
         with self.db:
-            self.db.execute("CREATE TABLE IF NOT EXISTS hybrid_market (id INTEGER PRIMARY KEY CHECK(id=1),product_id INTEGER NOT NULL)")
+            self.db.execute("BEGIN IMMEDIATE")
             self.db.execute("INSERT OR IGNORE INTO hybrid_market VALUES(1,?)",(pid,))
             if self.db.execute("SELECT product_id FROM hybrid_market WHERE id=1").fetchone()[0]!=pid:
                 raise ValueError("product_changed")
@@ -91,13 +104,13 @@ class HybridJournal:
             self.db.execute("INSERT INTO hybrid_quotes VALUES(?,?,?)",(q["timestamp_us"],now,raw))
         return "recorded"
     def resolve(self):
-        now=int(self.clock());count=0
+        now_us=int(self.clock()*1000000);now=now_us//1000000;count=0
         with self.db:
             self.db.execute("BEGIN IMMEDIATE")
-            for boundary,enrolled,raw in self.db.execute("SELECT boundary,enrolled,evidence FROM hybrid_windows WHERE status='enrolled' AND enrolled+?<=?",(HORIZON,now)).fetchall():
+            for boundary,enrolled,raw,enrolled_us in self.db.execute("SELECT boundary,enrolled,evidence,enrolled_us FROM hybrid_windows WHERE status='enrolled' AND COALESCE(enrolled_us,enrolled*1000000)+?<=?",(HORIZON*1000000,now_us)).fetchall():
                 packet=json.loads(raw)
-                start=max(enrolled*1000000,packet["quotes"]["demo_quote_timestamp_us"]);end=start+HORIZON*1000000
-                if now*1000000<end:continue
+                start=max(enrolled_us if enrolled_us is not None else enrolled*1000000,packet["quotes"]["demo_quote_timestamp_us"]);end=start+HORIZON*1000000
+                if now_us<end:continue
                 rows=self.db.execute("SELECT stamp,observed,evidence FROM hybrid_quotes WHERE stamp>? AND stamp<=? AND observed<=? ORDER BY stamp",(start,end,end)).fetchall()
                 # No interpolation: sparse sampling cannot establish a stop/target path.
                 times=[start]+[r[0] for r in rows]+[end]
