@@ -19,14 +19,14 @@ def complete(db, policy, token, operator, challenge, response_json):
         row = db.execute("SELECT principal FROM provisioning_sessions WHERE digest=? AND expires>?", (key, now)).fetchone()
         if not row or row[0] not in policy.get("provisioning_admins", ()):
             raise PermissionError("invalid session")
-        row = db.execute("SELECT 1 FROM enrollment_challenges WHERE challenge=? AND operator=? AND expires>?", (challenge, operator, now)).fetchone()
+        row = db.execute("SELECT 1 FROM bound_enrollment WHERE session_digest=? AND challenge=? AND operator=? AND expires>?", (key, challenge, operator, now)).fetchone()
         if not row:
             raise ValueError("invalid challenge")
         record = verify_enrollment(response_json, challenge, operator, policy)
         now = int(time.time())
         if db.execute("DELETE FROM provisioning_sessions WHERE digest=? AND expires>?", (key, now)).rowcount != 1:
             raise PermissionError("expired session")
-        if db.execute("DELETE FROM enrollment_challenges WHERE challenge=? AND operator=? AND expires>?", (challenge, operator, now)).rowcount != 1:
+        if db.execute("DELETE FROM bound_enrollment WHERE session_digest=? AND challenge=? AND operator=? AND expires>?", (key, challenge, operator, now)).rowcount != 1:
             raise ValueError("expired challenge")
         db.execute("INSERT INTO credentials(id,operator,public_key,sign_count) VALUES (?,?,?,?)", (record["id"],operator,record["public_key"],record["sign_count"]))
         db.commit()
