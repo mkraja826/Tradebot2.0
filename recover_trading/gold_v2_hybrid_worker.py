@@ -50,7 +50,9 @@ class Study:
              "execution_effect":"none","signal_source":self.source,"errors":{}}
         if self.future is not None and self.future.done():
             try:self.reference=self.future.result()
-            except Exception as exc:out["errors"]["reference"]=type(exc).__name__
+            except Exception as exc:
+                out["errors"]["reference"]=type(exc).__name__
+                self.last_signal={"reference_status":"unavailable","signal_observed_at":int(self.clock())}
             self.future=None
         if self.future is None and self.last_boundary!=boundary:
             self.last_boundary=boundary
@@ -63,6 +65,7 @@ class Study:
         except Exception as exc:out["errors"]["demo_quote"]=type(exc).__name__
         if self.reference is not None:
             stamp,packet=self.reference;self.reference=None
+            self.last_signal={}
             report=packet["mark_report" if self.source==MARK_SOURCE else "strict_reference_report"]
             out["reference_status"]=report["status"]
             out["reference_quality"]=report["data_quality"]
@@ -82,9 +85,10 @@ class Study:
                     out["enrollment"]=self.journal.enroll(result,as_of=stamp)
                 except Exception as exc:out["errors"]["hybrid_enrollment"]=type(exc).__name__
             else:out["errors"]["hybrid_enrollment"]="demo_quote_missing"
+            if "hybrid_enrollment" in out["errors"]:out["enrollment"]="unavailable"
         for k in ("reference_status","reference_quality","hybrid_status","quote_comparison","enrollment","macro_context"):
             if k in out:self.last_signal[k]=out[k]
-        if "reference_status" in out:self.last_signal["signal_observed_at"]=int(self.clock())
+        if "reference_status" in out:self.last_signal["signal_observed_at"]=stamp
         out["latest_signal"]=dict(self.last_signal)
         try:out["resolved"]=self.journal.resolve()
         except Exception as exc:out["errors"]["resolution"]=type(exc).__name__
