@@ -4,6 +4,7 @@ Policy and database paths must be supplied by the deployment administrator.
 import argparse
 import json
 import os
+import pwd
 import sqlite3
 import stat
 import sys
@@ -31,7 +32,16 @@ def main():
     policy = json.loads(policy_path.read_text())
     if policy.get("origin") != "https://tradingbot.micirql.com" or policy.get("rp_id") != "tradingbot.micirql.com":
         raise SystemExit("Invalid host policy")
+    account = pwd.getpwnam("recover-approval")
+    if account.pw_uid == 0 or db_path.stat().st_uid != account.pw_uid:
+        raise SystemExit("Database must belong to the approval service account")
+    db_path = db_path.resolve(strict=True)
     os.umask(0o077)
+    os.setgroups([])
+    os.setgid(account.pw_gid)
+    os.setuid(account.pw_uid)
+    if os.geteuid() == 0:
+        raise SystemExit("Privilege drop failed")
     with closing(sqlite3.connect(db_path.resolve().as_uri()+"?mode=rw", uri=True)) as db:
         initialize(db)
         initialize_binding(db)
