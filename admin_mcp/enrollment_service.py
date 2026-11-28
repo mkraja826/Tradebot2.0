@@ -16,6 +16,7 @@ sys.path.insert(0, str(ROOT))
 
 from enrollment_web import application
 from enrollment_ingress import protect
+from enrollment_key_cache import load_keys
 from waitress import serve
 
 CONFIG = Path("/etc/recover-approval/enrollment.json")
@@ -35,7 +36,7 @@ def main():
         return sqlite3.connect(DATABASE.as_uri()+"?mode=rw",uri=True,timeout=5)
     policy = config["policy"]
     access = config["access"]
-    app = protect(application(connect,policy),access["issuer"],access["audience"],access["jwks"],access["allowed_subjects"])
+    app = protect(application(connect,policy),access["issuer"],access["audience"],load_keys,access["allowed_subjects"])
     logging.basicConfig(level=logging.INFO,format="%(asctime)s %(name)s %(message)s")
     serve(app,host="127.0.0.1",port=18767,threads=4,max_request_body_size=131072,max_request_header_size=32768,channel_timeout=15,clear_untrusted_proxy_headers=True)
 
