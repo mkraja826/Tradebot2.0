@@ -4,7 +4,7 @@ from .gold_v2_entry_adapter import positive,dec
 from .gold_v2_reference import SOURCE
 from .entry_quotes import quote_evidence
 
-VERSION="gold-v2-hybrid.2"
+VERSION="gold-v2-hybrid.3"
 MARK_SOURCE="corroborated_production_mark"
 
 def preview(reference,reference_ticker,demo_ticker,*,reference_pid,demo_pid,tick_size,now):
@@ -46,6 +46,8 @@ def _preview(reference,reference_ticker,demo_ticker,*,reference_pid,demo_pid,tic
                      "quote_skew_ms":abs(ref["timestamp_us"]-demo["timestamp_us"])//1000,
                      "reference_spread_bps":ref["spread_bps"],"demo_spread_bps":demo["spread_bps"],
                      "reference_mark":str(rp),"demo_mark":str(dp),
+                     "reference_product_id":reference_pid,"demo_product_id":demo_pid,
+                     "demo_best_bid":demo["best_bid"],"demo_best_ask":demo["best_ask"],"demo_mark_price":demo["mark_price"],
                      "reference_quote_timestamp_us":ref["timestamp_us"],"demo_quote_timestamp_us":demo["timestamp_us"]}
         candidates=r.get("candidates",[])
         if not candidates:return out("no_candidate",quotes=diagnostics)
