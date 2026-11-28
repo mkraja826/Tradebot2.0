@@ -7,7 +7,10 @@ import secrets
 import time
 
 def initialize(db):
-    db.execute("CREATE TABLE IF NOT EXISTS provisioning_sessions (digest BLOB PRIMARY KEY, principal TEXT NOT NULL, expires INTEGER NOT NULL)")
+    db.execute("CREATE TABLE IF NOT EXISTS provisioning_sessions (digest BLOB PRIMARY KEY, principal TEXT NOT NULL, expires INTEGER NOT NULL, operator TEXT NOT NULL)")
+    if "operator" not in {row[1] for row in db.execute("PRAGMA table_info(provisioning_sessions)")}:
+        db.execute("ALTER TABLE provisioning_sessions ADD COLUMN operator TEXT")
+        db.execute("DELETE FROM provisioning_sessions")
     db.commit()
 
 def digest(token):
@@ -15,13 +18,15 @@ def digest(token):
         raise ValueError("invalid provisioning token")
     return hashlib.sha256(token.encode("ascii")).digest()
 
-def issue(db, principal, policy):
+def issue(db, principal, policy, operator):
+    if operator not in policy.get("operators", ()):
+        raise PermissionError("unauthorized operator")
     if not isinstance(principal, str) or not principal or principal not in policy.get("provisioning_admins", ()):
         raise PermissionError("unauthorized provisioning administrator")
     token = secrets.token_hex(32)
     with db:
         db.execute("DELETE FROM provisioning_sessions WHERE expires<=?", (int(time.time()),))
-        db.execute("INSERT INTO provisioning_sessions VALUES (?,?,?)", (digest(token), principal, int(time.time())+300))
+        db.execute("INSERT INTO provisioning_sessions(digest,principal,expires,operator) VALUES (?,?,?,?)", (digest(token), principal, int(time.time())+300, operator))
     return token
 
 def authenticate(db, token):
