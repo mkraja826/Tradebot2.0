@@ -18,7 +18,7 @@ class EnrollmentWebTests(unittest.TestCase):
         db.execute("CREATE TABLE credentials(id BLOB PRIMARY KEY, operator TEXT, public_key BLOB, sign_count INTEGER)")
         sessions.initialize(db)
         binding.initialize(db)
-        self.token = sessions.issue(db,"admin",self.policy)
+        self.token = sessions.issue(db,"admin",self.policy,"alice")
         db.close()
         self.app = application(self.connect,self.policy)
     def tearDown(self):
