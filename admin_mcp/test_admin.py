@@ -12,7 +12,7 @@ admin=importlib.util.module_from_spec(spec)
 spec.loader.exec_module(admin)
 
 class AdminTests(unittest.TestCase):
-    def test_registered_twenty_three(self):
+    def test_registered_twenty_four(self):
         class Fake:
             names=[]
             def tool(self):
@@ -22,7 +22,7 @@ class AdminTests(unittest.TestCase):
                 return register
         s=Fake()
         admin.register(s)
-        self.assertEqual(len(s.names),23)
+        self.assertEqual(len(s.names),24)
         self.assertEqual(len(set(s.names)),20)
 
     def test_paths(self):
