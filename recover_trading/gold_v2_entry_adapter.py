@@ -47,6 +47,10 @@ def select(report):
 def plan(report,product,wallet,quote,*,allocation_fraction,now):
     candidate,status=select(report)
     if candidate is None:return {"status":status,"execution_effect":"none"}
+    return _plan_selected(report,candidate,product,wallet,quote,allocation_fraction=allocation_fraction,now=now)
+
+def _plan_selected(report,candidate,product,wallet,quote,*,allocation_fraction,now):
+    """Shared sizing and bracket geometry after a source-specific selection."""
     fraction=positive(allocation_fraction)
     if fraction>1:raise ValueError("invalid_allocation")
     stamp=report.get("decision_as_of",report.get("as_of"))
@@ -89,7 +93,7 @@ def plan(report,product,wallet,quote,*,allocation_fraction,now):
     margin=entry*cv*size/LEVERAGE
     return {"status":"proposed","symbol":SYMBOL,"decision_id":ident,
             "execution_effect":"none","version":VERSION,
-            "proposal":{"symbol":SYMBOL,"action":"trade","reason":"Gold V2 research candidates: "+",".join(sorted({c["family"] for c in report["candidates"]})),
+            "proposal":{"symbol":SYMBOL,"action":"trade","reason":"Gold V2 "+str(report.get("signal_source") or "demo traded-price")+" candidates: "+",".join(sorted({c["family"] for c in report["candidates"]})),
                         "side":"buy" if sign==1 else "sell","size":size,"leverage":LEVERAGE,
                         "capital_allocation":float(margin),"entry_reference":float(entry),
                         "stop_loss":float(sl),"take_profit":float(tp)},
