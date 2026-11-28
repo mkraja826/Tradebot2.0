@@ -4,15 +4,22 @@ from .gold_v2_public_feeds import PublicFeeds,feature_packet
 from .gold_v2_score import score
 from .gold_v2_hybrid import MARK_SOURCE
 import time
+from concurrent.futures import ThreadPoolExecutor
+from .gold_v2_fed_fallback import collect as collect_fed
 
 VERSION="gold-v2-mark-context.1"
 
 class ContextCollector:
-    def __init__(self,*,external=collect_external,feeds=None,clock=time.time):
+    def __init__(self,*,external=collect_external,feeds=None,clock=time.time,official=collect_fed):
         self.external=external;self.feeds=PublicFeeds() if feeds is None else feeds
-        self.clock=clock
+        self.clock=clock;self.official=official
     def refresh(self):
-        refs,spot=self.external()
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            official=pool.submit(self.official)
+            refs,spot=self.external()
+            try:refs=dict(refs,fed_official=official.result())
+            except Exception:refs=dict(refs,fed_official={})
+        # Collect short-lived quotes last so slow daily providers do not age them prematurely.
         items=self.feeds.collect()
         return {"observed_at":self.clock(),"refs":refs,"spot":spot,"items":items}
     def collect(self,report):
