@@ -3,7 +3,7 @@
 No live installation or automatic enablement. The local owner lock is
 cooperative; operator must establish exclusive ownership before execution.
 """
-import argparse,json,math,os,signal,threading,time
+import argparse,json,math,os,signal,threading,time,traceback
 from pathlib import Path
 from contextlib import ExitStack
 from .broker import DeltaDemo
@@ -31,6 +31,7 @@ class Loop:
         now=int(self.clock());boundary=now//300*300
         snapshots=[]
         entry_scan=False
+        stage="outstanding_check"
         event={"version":VERSION,"symbol":"XAUTUSD","mode":"demo_mark_execution",
                "execution_enabled":self.controller.enabled,"signal_source":MARK_SOURCE,
                "execution_effect":"demo_dispatch_possible_not_fill_confirmation" if self.controller.enabled else "none",
@@ -51,16 +52,20 @@ class Loop:
             else:
                 entry_scan=True
                 capture = {"capture": lambda bars, report: snapshots.append((bars, report))} if self.entry_qa else {}
+                stage="observe_mark"
                 reference=observe_mark(self.demo,self.reference,now,**capture)
                 report=reference["mark_report"]
                 if report["status"]!="observed" or not report.get("candidates"):
                     result={"status":report["status"] if report["status"]!="observed" else "no_candidate"}
                     if report["status"]=="observed":self.last_entry_boundary=boundary
                 else:
+                    stage="reference_product"
                     p=self.reference.get("/v2/products/XAUTUSD")
                     if p.get("symbol")!="XAUTUSD" or type(p.get("id")) is not int or p["id"]<=0:
                         raise ValueError("wrong_reference_product")
+                    stage="reference_ticker"
                     ticker=self.reference.ticker("XAUTUSD")
+                    stage="entry_controller"
                     result=self.controller.cycle(reference,ref_ticker=ticker,reference_pid=p["id"])
                     # Transient quote/network failures may retry inside the
                     # original freshness window; durable seeds prevent replay.
@@ -70,6 +75,8 @@ class Loop:
             event["controller"]={k:result.get(k) for k in ("status","execution_status","management_status","attempted","post_entry_observation")}
         except Exception as exc:
             event["errors"]["cycle"]=type(exc).__name__
+            frame=traceback.extract_tb(exc.__traceback__)[-1]
+            event["errors"]["cycle_location"]=f"{stage}:{Path(frame.filename).name}:{frame.name}:{frame.lineno}"
             if self.controller.enabled:event["execution_effect"]="unknown_requires_reconciliation"
         event["timestamp"]=int(self.clock())
         if self.entry_qa and entry_scan:
