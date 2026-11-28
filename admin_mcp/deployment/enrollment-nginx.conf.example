@@ -1,0 +1,28 @@
+# REVIEW ONLY. Do not install until existing ingress and backend are verified.
+# Place limit_req_zone in nginx http context:
+# limit_req_zone $binary_remote_addr zone=recover_enrollment:1m rate=10r/m;
+# Place the following location inside the existing trusted HTTPS server.
+# Backend must listen exclusively on the dedicated Unix socket.
+location ~ ^/admin/enroll(?:/(?:page\.js|enrollment_browser\.js|options|complete))?$ {
+    client_max_body_size 128k;
+    client_body_timeout 10s;
+    limit_req zone=recover_enrollment burst=10 nodelay;
+    limit_req_status 429;
+    access_log off;
+    proxy_pass http://unix:/run/recover-approval/enrollment.sock;
+    proxy_set_header Host tradingbot.micirql.com;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_set_header X-Forwarded-Host tradingbot.micirql.com;
+    proxy_set_header X-Forwarded-For "";
+    proxy_set_header Forwarded "";
+    proxy_set_header X-Real-IP "";
+    proxy_set_header Authorization $http_authorization;
+    proxy_set_header Origin $http_origin;
+    proxy_connect_timeout 3s;
+    proxy_read_timeout 15s;
+    proxy_send_timeout 15s;
+    proxy_cache off;
+}
+# Verify actual TLS termination, socket ownership and WSGI scheme handling.
+# Never enable debug logging or request-header/body logging for this route.
+# Do not mount legacy enrollment handlers.
