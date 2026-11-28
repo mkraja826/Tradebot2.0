@@ -1,0 +1,13 @@
+# Staging only; install alongside reviewed service.
+[Unit]
+Description=Periodic refresh of Recover enrollment public signing keys
+
+[Timer]
+OnBootSec=1min
+OnCalendar=*:0/15
+Persistent=true
+AccuracySec=30s
+Unit=recover-enrollment-keys.service
+
+[Install]
+WantedBy=timers.target
