@@ -127,18 +127,20 @@ class HybridJournal:
         by_family={};by_macro={}
         for raw,window in self.db.execute("SELECT o.evidence,w.evidence FROM hybrid_outcomes o JOIN hybrid_windows w ON o.boundary=w.boundary"):
             result=json.loads(raw)
-            annotation=json.loads(window).get("macro_annotation",{})
+            evidence=json.loads(window)
+            model_version=evidence.get("model_version") or "unversioned"
+            annotation=evidence.get("macro_annotation",{})
             groups={(x["family"],x["direction"]):x["macro_group"] for x in annotation.get("candidate_groups",[]) if x.get("macro_group") in ("aligned","opposed","neutral","unknown")}
             for p in result.get("results",[]):
-                key=(p["family"],p["direction"])
+                key=(p["family"],p["direction"],model_version)
                 acc=by_family.setdefault(key,[0,0,0.0])
                 acc[0]+=1;acc[1]+=p["sampled_net_bps"]>0;acc[2]+=p["sampled_net_bps"]
-                macro=by_macro.setdefault((*key,groups.get(key,"unknown")),[0,0,0.0])
+                macro=by_macro.setdefault((*key,groups.get(key[:2],"unknown")),[0,0,0.0])
                 macro[0]+=1;macro[1]+=p["sampled_net_bps"]>0;macro[2]+=p["sampled_net_bps"]
         comparisons=[{"family":k[0],"direction":k[1],"samples":v[0],
-                      "positive_samples":v[1],"mean_sampled_net_bps":v[2]/v[0]}
+                      "positive_samples":v[1],"mean_sampled_net_bps":v[2]/v[0],"model_version":k[2]}
                      for k,v in sorted(by_family.items())]
-        strata=[{"family":k[0],"direction":k[1],"macro_group":k[2],"samples":v[0],
+        strata=[{"family":k[0],"direction":k[1],"macro_group":k[3],"model_version":k[2],"samples":v[0],
                  "positive_samples":v[1],"mean_sampled_net_bps":v[2]/v[0]} for k,v in sorted(by_macro.items())]
         return {"version":VERSION,"execution_effect":"none","macro_strata":strata,"sampled_comparisons":comparisons,"signal_source":self.source,
                 "window_counts":dict(self.db.execute("SELECT status,count(*) FROM hybrid_windows GROUP BY status")),
