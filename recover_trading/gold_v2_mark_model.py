@@ -3,7 +3,9 @@ from .gold_v2_engine import quality,features,ema,FRAMES
 from .gold_v2_mark_aggregation import aggregate
 from .gold_v2_feed_diagnostics import anomalies
 
-VERSION="gold-v2-mark-model.1"
+from .gold_v2_mark_patterns import patterns
+
+VERSION="gold-v2-mark-model.2"
 def corroborate(primary,other,fine,*,seconds,as_of):
     strict=quality(primary,seconds,as_of)
     out={"strict_quality":strict,"status":strict,"corroborated":[],"unverified":[]}
@@ -61,9 +63,10 @@ def evaluate_mark(primary,peer,fine,as_of):
         level=hi if side==1 else lo
         if side*(last.c-level)>.15*a and f[300]["adx"] is not None and f[300]["adx"]>=25:
             signals.append(("mark_structure_breakout",side))
+    signals.extend(patterns(b,f[300],higher=side,mid=f[900]['direction'],atr=a))
     for family,s in signals:
         out["candidates"].append({"family":family,"direction":"LONG" if s==1 else "SHORT",
             "atr":a,"reference_close":last.c,"stop_distance_atr_hypothesis":1.5,
             "target_distance_atr_hypothesis":3.0})
-    return dict(out,status="observed",features=f,conflicting_directions=False,
+    return dict(out,status="observed",features=f,conflicting_directions=len({s for _,s in signals})>1,
                 corroboration="same_exchange_environments_not_independent")
